@@ -174,7 +174,25 @@ app.post("/webhook", async (req, res) => {
       req.body.senderName ||
       "Cliente";
 
-    if (!mensagem || !numero) {
+    // ==================================
+    // DETECTAR MÍDIA
+    // ==================================
+
+    const temImagem =
+      req.body.image;
+
+    const temDocumento =
+      req.body.document;
+
+    const temMidia =
+      temImagem || temDocumento;
+
+    console.log(
+      "TEM MIDIA:",
+      temMidia
+    );
+
+    if (!numero) {
 
       return res.sendStatus(200);
     }
@@ -227,6 +245,129 @@ app.post("/webhook", async (req, res) => {
       "IDIOMA:",
       idioma
     );
+
+    // ==================================
+    // COMPROVANTE AUTOMÁTICO
+    // ==================================
+
+    if (temMidia) {
+
+      let respostaMidia = "";
+
+      if (idioma === "pt") {
+
+        respostaMidia =
+          "Comprovante recebido ✅\nEstou verificando o pagamento.";
+      }
+
+      else {
+
+        respostaMidia =
+          "Comprobante recibido ✅\nEstoy verificando el pago.";
+      }
+
+      // DELAY HUMANO
+
+      await new Promise(resolve =>
+        setTimeout(resolve, 3000)
+      );
+
+      // CANCELAR SE YORDANYS RESPONDEU
+
+      if (pausados[numero]) {
+
+        const tempoPassado =
+          Date.now() -
+          pausados[numero];
+
+        if (
+          tempoPassado <
+          TEMPO_PAUSA
+        ) {
+
+          console.log(
+            "CONFIRMAÇÃO CANCELADA"
+          );
+
+          return res.sendStatus(200);
+        }
+      }
+
+      await axios.post(
+
+        process.env.ZAPI_URL,
+
+        {
+          phone: numero,
+          message: respostaMidia
+        },
+
+        {
+          headers: {
+
+            "Client-Token":
+              process.env.ZAPI_CLIENT_TOKEN,
+
+            "Content-Type":
+              "application/json"
+          }
+        }
+      );
+
+      console.log(
+        "CONFIRMAÇÃO DE COMPROVANTE ENVIADA"
+      );
+
+      return res.sendStatus(200);
+    }
+
+    // ==================================
+    // YORDANYS RESPONDE
+    // ==================================
+
+    if (req.body.fromMe) {
+
+      pausados[numero] =
+        Date.now();
+
+      console.log(
+        "BOT PAUSADO:",
+        numero
+      );
+
+      return res.sendStatus(200);
+    }
+
+    // ==================================
+    // VERIFICAR PAUSA
+    // ==================================
+
+    if (pausados[numero]) {
+
+      const tempoPassado =
+        Date.now() -
+        pausados[numero];
+
+      if (
+        tempoPassado <
+        TEMPO_PAUSA
+      ) {
+
+        console.log(
+          "CONVERSA PAUSADA:",
+          numero
+        );
+
+        return res.sendStatus(200);
+      }
+
+      delete pausados[numero];
+
+      console.log(
+        "BOT REATIVADO:",
+        numero
+      );
+    }
 
     // ==================================
     // DETECTAR OPERAÇÃO
@@ -359,54 +500,6 @@ app.post("/webhook", async (req, res) => {
       "MOEDA:",
       moedaDetectada
     );
-
-    // ==================================
-    // YORDANYS RESPONDE
-    // ==================================
-
-    if (req.body.fromMe) {
-
-      pausados[numero] =
-        Date.now();
-
-      console.log(
-        "BOT PAUSADO:",
-        numero
-      );
-
-      return res.sendStatus(200);
-    }
-
-    // ==================================
-    // VERIFICAR PAUSA
-    // ==================================
-
-    if (pausados[numero]) {
-
-      const tempoPassado =
-        Date.now() -
-        pausados[numero];
-
-      if (
-        tempoPassado <
-        TEMPO_PAUSA
-      ) {
-
-        console.log(
-          "CONVERSA PAUSADA:",
-          numero
-        );
-
-        return res.sendStatus(200);
-      }
-
-      delete pausados[numero];
-
-      console.log(
-        "BOT REATIVADO:",
-        numero
-      );
-    }
 
     // ==================================
     // MEMÓRIA CLIENTE
