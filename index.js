@@ -1,4 +1,3 @@
-```javascript
 const express = require("express");
 const axios = require("axios");
 
@@ -6,11 +5,24 @@ const app = express();
 
 app.use(express.json());
 
+// ======================================
+// CONFIG
+// ======================================
+
 const pausados = {};
 
+// ======================================
+// HOME
+// ======================================
+
 app.get("/", (req, res) => {
-  res.send("BOT ONLINE");
+
+  res.send("BOT ONLINE 🚀");
 });
+
+// ======================================
+// WEBHOOK
+// ======================================
 
 app.post("/webhook", async (req, res) => {
 
@@ -18,21 +30,53 @@ app.post("/webhook", async (req, res) => {
 
     console.log(req.body);
 
+    // ==================================
+    // IGNORAR GRUPOS
+    // ==================================
+
     if (req.body.isGroup) {
+
+      console.log(
+        "GRUPO IGNORADO"
+      );
+
       return res.sendStatus(200);
     }
 
+    // ==================================
+    // IGNORAR NEWSLETTER
+    // ==================================
+
     if (req.body.isNewsletter) {
+
+      console.log(
+        "NEWSLETTER IGNORADA"
+      );
+
       return res.sendStatus(200);
     }
+
+    // ==================================
+    // NÚMERO
+    // ==================================
 
     const numero =
       req.body.phone;
 
+    // ==================================
+    // MENSAGEM
+    // ==================================
+
     const mensagem =
       req.body.text?.message || "";
 
+    console.log(
+      "MENSAGEM:",
+      mensagem
+    );
+
     if (!numero) {
+
       return res.sendStatus(200);
     }
 
@@ -49,7 +93,7 @@ app.post("/webhook", async (req, res) => {
         Date.now();
 
       console.log(
-        "PAUSADO:",
+        "BOT PAUSADO:",
         numero
       );
 
@@ -62,12 +106,14 @@ app.post("/webhook", async (req, res) => {
 
     if (pausados[numero]) {
 
-      const tempo =
+      const tempoPassado =
         Date.now() -
         pausados[numero];
 
+      // 30 minutos
+
       if (
-        tempo <
+        tempoPassado <
         30 * 60 * 1000
       ) {
 
@@ -79,12 +125,11 @@ app.post("/webhook", async (req, res) => {
       }
 
       delete pausados[numero];
-    }
 
-    console.log(
-      "MENSAGEM:",
-      mensagem
-    );
+      console.log(
+        "BOT REATIVADO"
+      );
+    }
 
     // ==================================
     // OPENAI
@@ -114,6 +159,10 @@ app.post("/webhook", async (req, res) => {
           }
         }
       );
+
+    // ==================================
+    // RESPOSTA
+    // ==================================
 
     const resposta =
       respostaOpenAI.data
@@ -158,7 +207,7 @@ app.post("/webhook", async (req, res) => {
     );
 
     console.log(
-      "ENVIADO"
+      "RESPOSTA ENVIADA"
     );
 
     return res.sendStatus(200);
@@ -175,13 +224,16 @@ app.post("/webhook", async (req, res) => {
   }
 });
 
+// ======================================
+// START
+// ======================================
+
 const PORT =
   process.env.PORT || 8080;
 
 app.listen(PORT, () => {
 
   console.log(
-    "Servidor online"
+    `Servidor online na porta ${PORT}`
   );
 });
-```
