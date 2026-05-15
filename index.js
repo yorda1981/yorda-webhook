@@ -1,3 +1,4 @@
+
 const express = require("express");
 const axios = require("axios");
 
@@ -62,13 +63,24 @@ REGRAS:
     const texto =
       respostaOpenAI.data.choices[0].message.content;
 
-    await axios.post(process.env.ZAPI_URL, {
-      phone: numero,
-      message: texto,
-    });
+    await axios.post(
+      process.env.ZAPI_URL,
+      {
+        phone: numero,
+        message: texto,
+      },
+      {
+        headers: {
+          "Client-Token": process.env.ZAPI_CLIENT_TOKEN,
+          "Content-Type": "application/json",
+        },
+      }
+    );
 
     res.status(200).send("OK");
+
   } catch (error) {
+
     console.log(
       error.response?.data || error.message
     );
