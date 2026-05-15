@@ -20,21 +20,27 @@ const TEMPO_PAUSA =
 // ======================================
 
 const gatilhos = [
+
   "real",
   "reales",
+  "taxa",
+  "tasa",
+  "cambio",
+  "cmb",
   "cup",
   "usd",
   "dolar",
   "dólar",
+  "mlc",
   "pix",
   "transferencia",
   "transferência",
   "remesa",
+  "envio",
+  "enviar",
+  "mandar",
   "recarga",
   "saldo",
-  "cmb",
-  "cambio",
-  "mlc",
   "etecsa",
   "internet",
   "sms",
@@ -42,7 +48,31 @@ const gatilhos = [
   "dinero",
   "tarjeta",
   "deposito",
-  "depósito"
+  "depósito",
+  "real hoy",
+  "taxa hoje",
+  "dolar hoy",
+  "dólar hoy",
+  "valor",
+  "cotizacion",
+  "cotização"
+];
+
+// ======================================
+// ANTI SPAM
+// ======================================
+
+const bloqueados = [
+
+  "jogo",
+  "cassino",
+  "aposta",
+  "bet",
+  "ganhe dinheiro",
+  "fortune tiger",
+  "tigrinho",
+  "renda extra",
+  "grupo de sinais"
 ];
 
 // ======================================
@@ -50,9 +80,11 @@ const gatilhos = [
 // ======================================
 
 app.get("/", (req, res) => {
+
   res.send(
-    "YordaBot Workflow Online 🚀"
+    "YordaBot Online 🚀"
   );
+
 });
 
 // ======================================
@@ -70,6 +102,11 @@ app.post("/webhook", async (req, res) => {
     // ==================================
 
     if (req.body.isGroup) {
+
+      console.log(
+        "GRUPO IGNORADO"
+      );
+
       return res.sendStatus(200);
     }
 
@@ -78,6 +115,11 @@ app.post("/webhook", async (req, res) => {
     // ==================================
 
     if (req.body.isNewsletter) {
+
+      console.log(
+        "NEWSLETTER IGNORADA"
+      );
+
       return res.sendStatus(200);
     }
 
@@ -89,6 +131,7 @@ app.post("/webhook", async (req, res) => {
       req.body.type ===
       "MessageStatusCallback"
     ) {
+
       return res.sendStatus(200);
     }
 
@@ -107,8 +150,21 @@ app.post("/webhook", async (req, res) => {
     // ==================================
 
     if (!mensagem || !numero) {
+
       return res.sendStatus(200);
     }
+
+    // ==================================
+    // TEXTO
+    // ==================================
+
+    const textoLower =
+      mensagem.toLowerCase();
+
+    console.log(
+      "MENSAGEM:",
+      textoLower
+    );
 
     // ==================================
     // YORDANYS RESPONDE
@@ -137,22 +193,18 @@ app.post("/webhook", async (req, res) => {
         Date.now() -
         pausados[numero];
 
-      // AINDA PAUSADO
-
       if (
         tempoPassado <
         TEMPO_PAUSA
       ) {
 
         console.log(
-          "CONVERSA EM PAUSA:",
+          "CONVERSA PAUSADA:",
           numero
         );
 
         return res.sendStatus(200);
       }
-
-      // REATIVAR BOT
 
       delete pausados[numero];
 
@@ -163,11 +215,26 @@ app.post("/webhook", async (req, res) => {
     }
 
     // ==================================
-    // GATILHOS
+    // FILTRO ANTI SPAM
     // ==================================
 
-    const textoLower =
-      mensagem.toLowerCase();
+    const ehSpam =
+      bloqueados.some(p =>
+        textoLower.includes(p)
+      );
+
+    if (ehSpam) {
+
+      console.log(
+        "SPAM IGNORADO"
+      );
+
+      return res.sendStatus(200);
+    }
+
+    // ==================================
+    // GATILHOS
+    // ==================================
 
     const ativarBot =
       gatilhos.some(g =>
@@ -181,20 +248,18 @@ app.post("/webhook", async (req, res) => {
     if (!ativarBot) {
 
       console.log(
-        "SEM GATILHO:",
-        mensagem
+        "SEM GATILHO"
       );
 
       return res.sendStatus(200);
     }
 
     console.log(
-      "BOT ATIVADO:",
-      mensagem
+      "BOT ATIVADO"
     );
 
     // ==================================
-    // CHAMAR WORKFLOW OPENAI
+    // OPENAI WORKFLOW
     // ==================================
 
     const respostaWorkflow =
@@ -214,6 +279,7 @@ app.post("/webhook", async (req, res) => {
 
         {
           headers: {
+
             Authorization:
               `Bearer ${process.env.OPENAI_API_KEY}`,
 
@@ -272,11 +338,16 @@ app.post("/webhook", async (req, res) => {
       }
     );
 
+    console.log(
+      "MENSAGEM ENVIADA"
+    );
+
     return res.sendStatus(200);
 
   } catch (error) {
 
     console.log(
+      "ERRO:",
       error.response?.data ||
       error.message
     );
@@ -295,7 +366,7 @@ const PORT =
 app.listen(PORT, () => {
 
   console.log(
-    `Servidor online porta ${PORT}`
+    `Servidor online na porta ${PORT}`
   );
 
 });
