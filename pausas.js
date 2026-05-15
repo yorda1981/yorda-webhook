@@ -1,0 +1,2 @@
+// pausas humanas
+module.exports = {};
