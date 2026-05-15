@@ -1,17 +1,62 @@
 const express = require("express");
 const axios = require("axios");
+const fs = require("fs");
 
 const app = express();
 
 app.use(express.json());
 
 // ======================================
-// PAUSA HUMANA PROFESIONAL
+// MEMÓRIA CLIENTES
+// ======================================
+
+const ARQUIVO_CLIENTES =
+  "./clientes.json";
+
+// CRIAR JSON SE NÃO EXISTIR
+
+if (
+  !fs.existsSync(ARQUIVO_CLIENTES)
+) {
+
+  fs.writeFileSync(
+    ARQUIVO_CLIENTES,
+    "[]"
+  );
+}
+
+// LER CLIENTES
+
+function lerClientes() {
+
+  return JSON.parse(
+    fs.readFileSync(
+      ARQUIVO_CLIENTES,
+      "utf8"
+    )
+  );
+}
+
+// SALVAR CLIENTES
+
+function salvarClientes(clientes) {
+
+  fs.writeFileSync(
+    ARQUIVO_CLIENTES,
+    JSON.stringify(
+      clientes,
+      null,
+      2
+    )
+  );
+}
+
+// ======================================
+// PAUSA HUMANA
 // ======================================
 
 const pausados = {};
 
-// 30 minutos
 const TEMPO_PAUSA =
   30 * 60 * 1000;
 
@@ -49,30 +94,9 @@ const gatilhos = [
   "tarjeta",
   "deposito",
   "depósito",
-  "real hoy",
-  "taxa hoje",
-  "dolar hoy",
-  "dólar hoy",
   "valor",
   "cotizacion",
   "cotização"
-];
-
-// ======================================
-// ANTI SPAM
-// ======================================
-
-const bloqueados = [
-
-  "jogo",
-  "cassino",
-  "aposta",
-  "bet",
-  "ganhe dinheiro",
-  "fortune tiger",
-  "tigrinho",
-  "renda extra",
-  "grupo de sinais"
 ];
 
 // ======================================
@@ -103,10 +127,6 @@ app.post("/webhook", async (req, res) => {
 
     if (req.body.isGroup) {
 
-      console.log(
-        "GRUPO IGNORADO"
-      );
-
       return res.sendStatus(200);
     }
 
@@ -115,10 +135,6 @@ app.post("/webhook", async (req, res) => {
     // ==================================
 
     if (req.body.isNewsletter) {
-
-      console.log(
-        "NEWSLETTER IGNORADA"
-      );
 
       return res.sendStatus(200);
     }
@@ -145,18 +161,14 @@ app.post("/webhook", async (req, res) => {
     const numero =
       req.body.phone || "";
 
-    // ==================================
-    // IGNORAR VAZIO
-    // ==================================
+    const nomeWhatsapp =
+      req.body.senderName ||
+      "Cliente";
 
     if (!mensagem || !numero) {
 
       return res.sendStatus(200);
     }
-
-    // ==================================
-    // TEXTO
-    // ==================================
 
     const textoLower =
       mensagem.toLowerCase();
@@ -215,24 +227,6 @@ app.post("/webhook", async (req, res) => {
     }
 
     // ==================================
-    // FILTRO ANTI SPAM
-    // ==================================
-
-    const ehSpam =
-      bloqueados.some(p =>
-        textoLower.includes(p)
-      );
-
-    if (ehSpam) {
-
-      console.log(
-        "SPAM IGNORADO"
-      );
-
-      return res.sendStatus(200);
-    }
-
-    // ==================================
     // GATILHOS
     // ==================================
 
@@ -240,10 +234,6 @@ app.post("/webhook", async (req, res) => {
       gatilhos.some(g =>
         textoLower.includes(g)
       );
-
-    // ==================================
-    // SEM GATILHO
-    // ==================================
 
     if (!ativarBot) {
 
@@ -257,6 +247,78 @@ app.post("/webhook", async (req, res) => {
     console.log(
       "BOT ATIVADO"
     );
+
+    // ==================================
+    // MEMÓRIA CLIENTE
+    // ==================================
+
+    let clientes =
+      lerClientes();
+
+    let cliente =
+      clientes.find(
+        c => c.numero === numero
+      );
+
+    // NOVO CLIENTE
+
+    if (!cliente) {
+
+      cliente = {
+
+        numero,
+        nome: nomeWhatsapp,
+        ultimaMensagem:
+          mensagem,
+        ultimoContato:
+          new Date()
+            .toISOString()
+      };
+
+      clientes.push(cliente);
+
+      console.log(
+        "NOVO CLIENTE:",
+        nomeWhatsapp
+      );
+    }
+
+    // ATUALIZAR
+
+    else {
+
+      cliente.nome =
+        nomeWhatsapp;
+
+      cliente.ultimaMensagem =
+        mensagem;
+
+      cliente.ultimoContato =
+        new Date()
+          .toISOString();
+
+      console.log(
+        "CLIENTE EXISTENTE:",
+        nomeWhatsapp
+      );
+    }
+
+    salvarClientes(clientes);
+
+    // ==================================
+    // CONTEXTO MEMÓRIA
+    // ==================================
+
+    const memoriaCliente = `
+Cliente:
+${cliente.nome}
+
+Última mensagem:
+${cliente.ultimaMensagem}
+
+Último contato:
+${cliente.ultimoContato}
+`;
 
     // ==================================
     // OPENAI WORKFLOW
@@ -274,7 +336,12 @@ app.post("/webhook", async (req, res) => {
             id: process.env.WORKFLOW_ID
           },
 
-          input: mensagem
+          input: `
+${memoriaCliente}
+
+Mensagem atual:
+${mensagem}
+`
         },
 
         {
@@ -294,16 +361,13 @@ app.post("/webhook", async (req, res) => {
     // ==================================
 
     const resposta =
-      respostaWorkflow.data.output_text;
+      respostaWorkflow.data
+      .output_text;
 
     console.log(
       "RESPOSTA:",
       resposta
     );
-
-    // ==================================
-    // NÃO RESPONDER VAZIO
-    // ==================================
 
     if (
       !resposta ||
