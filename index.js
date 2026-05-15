@@ -5,11 +5,24 @@ const app = express();
 
 app.use(express.json());
 
+// ======================================
+// CONFIG
+// ======================================
+
 const pausados = {};
 
+// ======================================
+// HOME
+// ======================================
+
 app.get("/", (req, res) => {
-  res.send("BOT ONLINE");
+
+  res.send("BOT ONLINE 🚀");
 });
+
+// ======================================
+// WEBHOOK
+// ======================================
 
 app.post("/webhook", async (req, res) => {
 
@@ -18,16 +31,55 @@ app.post("/webhook", async (req, res) => {
     console.log("BODY:");
     console.log(req.body);
 
+    // ==================================
+    // IGNORAR GRUPOS
+    // ==================================
+
     if (req.body.isGroup) {
+
+      console.log(
+        "GRUPO IGNORADO"
+      );
+
       return res.sendStatus(200);
     }
 
+    // ==================================
+    // IGNORAR NEWSLETTER
+    // ==================================
+
     if (req.body.isNewsletter) {
+
+      console.log(
+        "NEWSLETTER IGNORADA"
+      );
+
       return res.sendStatus(200);
     }
+
+    // ==================================
+    // IGNORAR MENSAGENS DO PRÓPRIO BOT
+    // ==================================
+
+    if (req.body.fromMe) {
+
+      console.log(
+        "MENSAGEM DO PRÓPRIO BOT IGNORADA"
+      );
+
+      return res.sendStatus(200);
+    }
+
+    // ==================================
+    // NÚMERO
+    // ==================================
 
     const numero =
       req.body.phone;
+
+    // ==================================
+    // MENSAGEM
+    // ==================================
 
     const mensagem =
       req.body.text?.message || "";
@@ -38,40 +90,24 @@ app.post("/webhook", async (req, res) => {
     );
 
     if (!numero) {
-      return res.sendStatus(200);
-    }
-
-    // =========================
-    // PAUSA MANUAL
-    // =========================
-
-    if (
-      req.body.fromMe &&
-      !req.body.fromApi
-    ) {
-
-      pausados[numero] =
-        Date.now();
-
-      console.log(
-        "BOT PAUSADO"
-      );
 
       return res.sendStatus(200);
     }
 
-    // =========================
+    // ==================================
     // VERIFICAR PAUSA
-    // =========================
+    // ==================================
 
     if (pausados[numero]) {
 
-      const tempo =
+      const tempoPassado =
         Date.now() -
         pausados[numero];
 
+      // 30 minutos
+
       if (
-        tempo <
+        tempoPassado <
         30 * 60 * 1000
       ) {
 
@@ -83,11 +119,15 @@ app.post("/webhook", async (req, res) => {
       }
 
       delete pausados[numero];
+
+      console.log(
+        "BOT REATIVADO"
+      );
     }
 
-    // =========================
+    // ==================================
     // OPENAI
-    // =========================
+    // ==================================
 
     const respostaOpenAI =
       await axios.post(
@@ -98,13 +138,17 @@ app.post("/webhook", async (req, res) => {
           model: "gpt-4o-mini",
 
           messages: [
+
             {
               role: "system",
+
               content:
-                "Você é um atendente útil."
+                "Você é um atendente útil, amigável e objetivo."
             },
+
             {
               role: "user",
+
               content: mensagem
             }
           ]
@@ -122,17 +166,9 @@ app.post("/webhook", async (req, res) => {
         }
       );
 
-    console.log(
-      "OPENAI COMPLETA:"
-    );
-
-    console.log(
-      JSON.stringify(
-        respostaOpenAI.data,
-        null,
-        2
-      )
-    );
+    // ==================================
+    // PEGAR RESPOSTA
+    // ==================================
 
     const resposta =
       respostaOpenAI.data
@@ -140,7 +176,7 @@ app.post("/webhook", async (req, res) => {
       ?.message?.content || "";
 
     console.log(
-      "RESPOSTA FINAL:",
+      "RESPOSTA:",
       resposta
     );
 
@@ -153,9 +189,9 @@ app.post("/webhook", async (req, res) => {
       return res.sendStatus(200);
     }
 
-    // =========================
+    // ==================================
     // ENVIAR WHATSAPP
-    // =========================
+    // ==================================
 
     await axios.post(
 
@@ -163,6 +199,7 @@ app.post("/webhook", async (req, res) => {
 
       {
         phone: numero,
+
         message: resposta
       },
 
@@ -179,14 +216,16 @@ app.post("/webhook", async (req, res) => {
     );
 
     console.log(
-      "ENVIADO COM SUCESSO"
+      "RESPOSTA ENVIADA"
     );
 
     return res.sendStatus(200);
 
   } catch (error) {
 
-    console.log("ERRO:");
+    console.log(
+      "ERRO:"
+    );
 
     console.log(
       error.response?.data ||
@@ -197,12 +236,16 @@ app.post("/webhook", async (req, res) => {
   }
 });
 
+// ======================================
+// START
+// ======================================
+
 const PORT =
   process.env.PORT || 8080;
 
 app.listen(PORT, () => {
 
   console.log(
-    `Servidor online ${PORT}`
+    `Servidor online na porta ${PORT}`
   );
 });
