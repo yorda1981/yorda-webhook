@@ -1,0 +1,2 @@
+// OCR comprovantes
+module.exports = {};
