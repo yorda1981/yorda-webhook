@@ -22,7 +22,8 @@ const ZAPI_CLIENT_TOKEN =
 // CONTROLE
 // =====================================
 
-const mensagensProcessadas = new Set();
+const mensagensProcessadas =
+  new Set();
 
 // =====================================
 // HOME
@@ -30,7 +31,9 @@ const mensagensProcessadas = new Set();
 
 app.get("/", (req, res) => {
 
-  res.send("YordaBot ONLINE 🚀");
+  res.send(
+    "YordaBot ONLINE 🚀"
+  );
 });
 
 // =====================================
@@ -50,6 +53,9 @@ async function gerarResposta(
         "https://api.openai.com/v1/responses",
 
         {
+          model:
+            "gpt-4.1-mini",
+
           workflow: {
             id:
               "wf_68f65c9bd8648190a572e1272e6ae1880cf508aff8bcf40e"
@@ -87,8 +93,17 @@ async function gerarResposta(
     let texto = "";
 
     if (
+      resposta.data.output_text
+    ) {
+
+      texto =
+        resposta.data.output_text;
+
+    } else if (
+
       resposta.data.output &&
       resposta.data.output.length > 0
+
     ) {
 
       for (
@@ -266,7 +281,7 @@ app.post(
       }
 
       // ================================
-      // IGNORAR MENSAGENS DO BOT
+      // IGNORAR BOT
       // ================================
 
       if (
@@ -313,18 +328,14 @@ app.post(
       }, 600000);
 
       // ================================
-      // PEGAR NÚMERO
-      // ================================
-
-      const numero =
-        req.body.phone;
-
-      // ================================
-      // PEGAR TEXTO
+      // TEXTO
       // ================================
 
       const mensagem =
         req.body.text?.message || "";
+
+      const numero =
+        req.body.phone;
 
       console.log(
         "MENSAGEM:",
