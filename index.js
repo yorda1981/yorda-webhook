@@ -1,4 +1,3 @@
-
 const express = require("express");
 const axios = require("axios");
 
@@ -7,17 +6,8 @@ const app = express();
 app.use(express.json());
 
 // ======================================
-// MEMÓRIA TEMPORÁRIA
+// GATILHOS
 // ======================================
-
-const ultimaResposta = {};
-const clientesAtivos = {};
-
-// ======================================
-// CONFIGURAÇÕES
-// ======================================
-
-const TEMPO_COOLDOWN = 60000;
 
 const gatilhos = [
   "real",
@@ -28,29 +18,19 @@ const gatilhos = [
   "dólar",
   "taxa",
   "tasa",
-  "remesa",
+  "cambio",
+  "cmb",
+  "mlc",
   "transferencia",
   "transferência",
-  "dinero",
-  "enviar",
-  "mlc",
-  "pix",
+  "remesa",
   "recarga",
+  "pix",
   "saldo",
-  "cuba",
-  "deposito",
-  "depósito",
-  "cartão",
-  "cartao",
-  "tarjeta",
-  "banco",
-  "usdt",
-  "crypto",
-  "criptomoneda",
+  "etecsa",
   "internet",
   "sms",
-  "llamadas",
-  "etecsa"
+  "llamadas"
 ];
 
 // ======================================
@@ -71,36 +51,21 @@ app.post("/webhook", async (req, res) => {
 
     console.log("Mensagem recebida:", req.body);
 
-    // ==================================
-    // IGNORAR STATUS
-    // ==================================
+    // IGNORAR GRUPOS
+    if (req.body.isGroup) {
+      return res.sendStatus(200);
+    }
 
+    // IGNORAR MENSAGENS PRÓPRIAS
+    if (req.body.fromMe) {
+      return res.sendStatus(200);
+    }
+
+    // IGNORAR STATUS
     if (
       req.body.type === "MessageStatusCallback"
     ) {
-      return res
-        .status(200)
-        .send("Status ignorado");
-    }
-
-    // ==================================
-    // IGNORAR GRUPOS
-    // ==================================
-
-    if (req.body.isGroup) {
-      return res
-        .status(200)
-        .send("Grupo ignorado");
-    }
-
-    // ==================================
-    // IGNORAR MENSAGENS PRÓPRIAS
-    // ==================================
-
-    if (req.body.fromMe) {
-      return res
-        .status(200)
-        .send("Mensagem própria ignorada");
+      return res.sendStatus(200);
     }
 
     // ==================================
@@ -108,117 +73,49 @@ app.post("/webhook", async (req, res) => {
     // ==================================
 
     const mensagem =
-      req.body.text?.message ||
-      req.body.message ||
-      "";
+      req.body.text?.message || "";
 
     const numero =
-      req.body.phone ||
-      "";
-
-    const nome =
-      req.body.senderName ||
-      "Cliente";
+      req.body.phone || "";
 
     if (!mensagem || !numero) {
-      return res
-        .status(200)
-        .send("Mensagem inválida");
+      return res.sendStatus(200);
     }
-
-    // ==================================
-    // ANTI FLOOD
-    // ==================================
-
-    const agora = Date.now();
-
-    if (
-      ultimaResposta[numero] &&
-      agora - ultimaResposta[numero]
-      < TEMPO_COOLDOWN
-    ) {
-
-      return res
-        .status(200)
-        .send("Cooldown ativo");
-    }
-
-    // ==================================
-    // TEXTO LOWER
-    // ==================================
-
-    const textoLower =
-      mensagem.toLowerCase();
 
     // ==================================
     // GATILHOS
     // ==================================
 
-    const ativouRemessa =
+    const textoLower =
+      mensagem.toLowerCase();
+
+    const ativarBot =
       gatilhos.some(g =>
         textoLower.includes(g)
       );
 
-    // ==================================
-    // RESPOSTA NEUTRA
-    // ==================================
-
-    if (
-      !ativouRemessa &&
-      !clientesAtivos[numero]
-    ) {
-
-      await enviarMensagem(
-        numero,
-        "Hola 👋 ¿Cómo puedo ayudarte?"
-      );
-
-      ultimaResposta[numero] = agora;
-
-      return res
-        .status(200)
-        .send("Mensagem neutra enviada");
+    // NÃO RESPONDER SEM GATILHO
+    if (!ativarBot) {
+      return res.sendStatus(200);
     }
 
     // ==================================
-    // CLIENTE ATIVO
+    // OPENAI RESPONSES API
     // ==================================
 
-    clientesAtivos[numero] = true;
+    const respostaOpenAI = await axios.post(
 
-    // ==================================
-    // TAXAS DINÂMICAS
-    // ==================================
+      "https://api.openai.com/v1/responses",
 
-    const taxaMenor100 =
-      process.env.TASA_MENOR_100 || "100";
+      {
+        model: "gpt-4o-mini",
 
-    const taxa100_499 =
-      process.env.TASA_100_499 || "115";
+        input: [
 
-    const taxa500 =
-      process.env.TASA_500 || "118";
+          {
+            role: "system",
 
-    const usdBrl =
-      process.env.USD_BRL || "5.60";
-
-    // ==================================
-    // OPENAI
-    // ==================================
-
-    const respostaOpenAI =
-      await axios.post(
-        "https://api.openai.com/v1/chat/completions",
-        {
-
-          model: "gpt-4.1-mini",
-
-          messages: [
-
-            {
-              role: "system",
-
-              content: `
+            content: `
 Você é Yorda-Bot.
 
 Especialista em:
@@ -227,44 +124,76 @@ Especialista em:
 - CUP
 - USD
 - PIX
-- Transferências
 
 =================================
-TAXAS REMESSAS
-=================================
+
+TAXAS:
 
 Menor de 100 reais:
-${taxaMenor100} CUP
+100 CUP
 
-100 até 499 reais:
-${taxa100_499} CUP
+100 até 499:
+115 CUP
 
-500+ reais:
-${taxa500} CUP
+500+:
+118 CUP
 
 USD:
-1 USD = ${usdBrl} BRL
+5.60 BRL
 
 =================================
-RECARGA ETECSA
-=================================
 
-Promoção atual:
+RECARGAS:
 
-Cada 100 reais =
-2000 CUP de saldo.
+Cada 100 reais:
+2000 CUP saldo.
 
-Esse saldo:
-- dura 365 dias
-- permite comprar:
-internet,
-planos,
-SMS,
-ligações.
+O saldo dura 365 dias.
+
+O familiar pode comprar:
+- internet
+- SMS
+- chamadas
 
 =================================
-REGRAS
+
+PIX:
+
+Só enviar se o cliente pedir.
+
+PIX:
+8becaaf5-f296-4cbc-a115-46e3d23b042a
+
 =================================
+
+COMPROVANTES:
+
+Se for comprovante enviado pelo cliente:
+
+"Comprovante recebido ✅
+Tudo certo.
+Sua transferência será processada."
+
+Se for comprovante da empresa:
+
+"Devido aos problemas de energia em Cuba,
+algumas transferências podem demorar um pouco mais.
+
+Assim que a transferência for concluída,
+o comprovante será enviado 😊"
+
+=================================
+
+YORDANYS:
+
+Se pedirem Yordanys:
+
+"Claro 😊
+Enseguida Yordanys continuará con tu atención."
+
+=================================
+
+REGRAS:
 
 - Responder curto.
 - Falar igual humano.
@@ -273,115 +202,65 @@ REGRAS
 - Nunca confirmar pagamento automaticamente.
 - Nunca prometer horário exato.
 - Nunca responder grupos.
-- Não usar textos muito longos.
-- Ser amigável.
-- Não repetir mensagens.
-- Responder profissionalmente.
-
-=================================
-COMPORTAMENTO
-=================================
-
-SE perguntarem taxas:
-usar SEMPRE as taxas acima.
-
-SE perguntarem recarga:
-explicar SEMPRE:
-
-"Cada 100 reales recibe
-2000 CUP de saldo válido
-por 365 días.
-Puede comprar internet,
-planes, SMS y llamadas."
-
-SE perguntarem promoção:
-usar informações acima.
-
-SE perguntarem comprovante do cliente:
-dizer:
-
-"Comprovante recebido ✅
-Tudo certo.
-Sua transferência será processada."
-
-SE perguntarem comprovante da transferência enviada:
-dizer:
-
-"Devido aos problemas de energia em Cuba,
-algumas transferências podem demorar um pouco mais.
-
-Assim que a transferência for concluída,
-o comprovante será enviado 😊"
-
-SE pedirem chave PIX:
-informar:
-
-"Pode realizar o pagamento pela chave PIX abaixo 👇
-
-8becaaf5-f296-4cbc-a115-46e3d23b042a"
-
-Nunca enviar a chave PIX automaticamente.
-Enviar SOMENTE se o cliente pedir.
-
-SE pedirem Yordanys:
-dizer:
-
-"Claro 😊
-Enseguida Yordanys continuará con tu atención."
-
-SE falarem algo fora remessa:
-responder educadamente.
-
-Nunca usar mensagens gigantes.
+- Não escrever textos gigantes.
 `
-            },
+          },
 
-            {
-              role: "user",
-              content: mensagem
-            }
-
-          ]
-        },
-
-        {
-          headers: {
-
-            Authorization:
-              \`Bearer \${process.env.OPENAI_API_KEY}\`,
-
-            "Content-Type":
-              "application/json"
-
+          {
+            role: "user",
+            content: mensagem
           }
+
+        ]
+      },
+
+      {
+        headers: {
+          Authorization:
+            `Bearer ${process.env.OPENAI_API_KEY}`,
+
+          "Content-Type":
+            "application/json"
         }
-      );
+      }
+    );
 
     // ==================================
-    // PEGAR RESPOSTA
+    // PEGAR TEXTO
     // ==================================
 
     const texto =
       respostaOpenAI.data
-      .choices[0]
-      .message.content;
+      .output[0]
+      .content[0]
+      .text;
 
     // ==================================
-    // ENVIAR MENSAGEM
+    // ENVIAR WHATSAPP
     // ==================================
 
-    await enviarMensagem(
-      numero,
-      texto
+    await axios.post(
+
+      process.env.ZAPI_URL,
+
+      {
+        phone: numero,
+        message: texto
+      },
+
+      {
+        headers: {
+
+          "Client-Token":
+            process.env.ZAPI_CLIENT_TOKEN,
+
+          "Content-Type":
+            "application/json"
+        }
+      }
     );
 
-    ultimaResposta[numero] = agora;
-
-    // ==================================
-    // FINAL
-    // ==================================
-
-    res.status(200).send("OK");
+    return res.sendStatus(200);
 
   } catch (error) {
 
@@ -390,56 +269,21 @@ Nunca usar mensagens gigantes.
       error.message
     );
 
-    res.status(500).send("Erro");
+    return res.sendStatus(500);
   }
 });
-
-// ======================================
-// FUNÇÃO ENVIAR WHATSAPP
-// ======================================
-
-async function enviarMensagem(
-  numero,
-  texto
-) {
-
-  await axios.post(
-
-    process.env.ZAPI_URL,
-
-    {
-      phone: numero,
-      message: texto
-    },
-
-    {
-      headers: {
-
-        "Client-Token":
-          process.env.ZAPI_CLIENT_TOKEN,
-
-        "Content-Type":
-          "application/json"
-      }
-    }
-  );
-}
-
-// ======================================
-// PORTA
-// ======================================
-
-const PORT =
-  process.env.PORT || 3000;
 
 // ======================================
 // START
 // ======================================
 
+const PORT =
+  process.env.PORT || 8080;
+
 app.listen(PORT, () => {
 
   console.log(
-    \`Servidor online na porta \${PORT}\`
+    `Servidor online na porta ${PORT}`
   );
 
 });
