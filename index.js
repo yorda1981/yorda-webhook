@@ -1,3 +1,4 @@
+
 const express = require("express");
 const axios = require("axios");
 
@@ -5,24 +6,106 @@ const app = express();
 
 app.use(express.json());
 
+// ======================================
+// MEMÓRIA TEMPORÁRIA
+// ======================================
+
+const ultimaResposta = {};
+const clientesAtivos = {};
+
+// ======================================
+// CONFIGURAÇÕES
+// ======================================
+
+const TEMPO_COOLDOWN = 60000;
+
+const gatilhos = [
+  "real",
+  "reales",
+  "cup",
+  "usd",
+  "dolar",
+  "dólar",
+  "taxa",
+  "tasa",
+  "remesa",
+  "transferencia",
+  "transferência",
+  "dinero",
+  "enviar",
+  "mlc",
+  "pix",
+  "recarga",
+  "saldo",
+  "cuba",
+  "deposito",
+  "depósito",
+  "cartão",
+  "cartao",
+  "tarjeta",
+  "banco",
+  "usdt",
+  "crypto",
+  "criptomoneda",
+  "internet",
+  "sms",
+  "llamadas",
+  "etecsa"
+];
+
+// ======================================
+// HOME
+// ======================================
+
 app.get("/", (req, res) => {
-  res.send("Yorda-Bot online");
+  res.send("Yorda-Bot online 🚀");
 });
 
+// ======================================
+// WEBHOOK
+// ======================================
+
 app.post("/webhook", async (req, res) => {
+
   try {
 
     console.log("Mensagem recebida:", req.body);
 
-    // Ignorar grupos
-    if (req.body.isGroup) {
-      return res.status(200).send("Grupo ignorado");
+    // ==================================
+    // IGNORAR STATUS
+    // ==================================
+
+    if (
+      req.body.type === "MessageStatusCallback"
+    ) {
+      return res
+        .status(200)
+        .send("Status ignorado");
     }
 
-    // Ignorar mensagens próprias
-    if (req.body.fromMe) {
-      return res.status(200).send("Mensagem própria ignorada");
+    // ==================================
+    // IGNORAR GRUPOS
+    // ==================================
+
+    if (req.body.isGroup) {
+      return res
+        .status(200)
+        .send("Grupo ignorado");
     }
+
+    // ==================================
+    // IGNORAR MENSAGENS PRÓPRIAS
+    // ==================================
+
+    if (req.body.fromMe) {
+      return res
+        .status(200)
+        .send("Mensagem própria ignorada");
+    }
+
+    // ==================================
+    // DADOS
+    // ==================================
 
     const mensagem =
       req.body.text?.message ||
@@ -31,146 +114,272 @@ app.post("/webhook", async (req, res) => {
 
     const numero =
       req.body.phone ||
-      req.body.chatId ||
       "";
 
-    // Ignorar vazio
+    const nome =
+      req.body.senderName ||
+      "Cliente";
+
     if (!mensagem || !numero) {
-      return res.status(200).send("Mensagem inválida");
+      return res
+        .status(200)
+        .send("Mensagem inválida");
     }
 
-    // Gatilhos remessas
-    const gatilhos = [
-      "real",
-      "reales",
-      "cup",
-      "usd",
-      "dolar",
-      "dólar",
-      "taxa",
-      "tasa",
-      "remesa",
-      "transferencia",
-      "transferência",
-      "dinero",
-      "enviar",
-      "mlc",
-      "pix",
-      "recarga",
-      "saldo",
-      "cuba",
-      "deposito",
-      "depósito",
-      "cartão",
-      "cartao"
-    ];
+    // ==================================
+    // ANTI FLOOD
+    // ==================================
 
-    const textoLower = mensagem.toLowerCase();
+    const agora = Date.now();
 
-    const ativouRemessa = gatilhos.some(g =>
-      textoLower.includes(g)
-    );
+    if (
+      ultimaResposta[numero] &&
+      agora - ultimaResposta[numero]
+      < TEMPO_COOLDOWN
+    ) {
 
-    // Resposta neutra se não ativar gatilho
-    if (!ativouRemessa) {
+      return res
+        .status(200)
+        .send("Cooldown ativo");
+    }
 
-      await axios.post(
-        process.env.ZAPI_URL,
-        {
-          phone: numero,
-          message:
-            "Hola 👋 ¿Cómo puedo ayudarte?",
-        },
-        {
-          headers: {
-            "Client-Token":
-              process.env.ZAPI_CLIENT_TOKEN,
-            "Content-Type": "application/json",
-          },
-        }
+    // ==================================
+    // TEXTO LOWER
+    // ==================================
+
+    const textoLower =
+      mensagem.toLowerCase();
+
+    // ==================================
+    // GATILHOS
+    // ==================================
+
+    const ativouRemessa =
+      gatilhos.some(g =>
+        textoLower.includes(g)
       );
+
+    // ==================================
+    // RESPOSTA NEUTRA
+    // ==================================
+
+    if (
+      !ativouRemessa &&
+      !clientesAtivos[numero]
+    ) {
+
+      await enviarMensagem(
+        numero,
+        "Hola 👋 ¿Cómo puedo ayudarte?"
+      );
+
+      ultimaResposta[numero] = agora;
 
       return res
         .status(200)
         .send("Mensagem neutra enviada");
     }
 
-    // OpenAI
-    const respostaOpenAI = await axios.post(
-      "https://api.openai.com/v1/chat/completions",
-      {
-        model: "gpt-4.1-mini",
-        messages: [
-          {
-            role: "system",
-            content: `
+    // ==================================
+    // CLIENTE ATIVO
+    // ==================================
+
+    clientesAtivos[numero] = true;
+
+    // ==================================
+    // TAXAS DINÂMICAS
+    // ==================================
+
+    const taxaMenor100 =
+      process.env.TASA_MENOR_100 || "100";
+
+    const taxa100_499 =
+      process.env.TASA_100_499 || "115";
+
+    const taxa500 =
+      process.env.TASA_500 || "118";
+
+    const usdBrl =
+      process.env.USD_BRL || "5.60";
+
+    // ==================================
+    // OPENAI
+    // ==================================
+
+    const respostaOpenAI =
+      await axios.post(
+        "https://api.openai.com/v1/chat/completions",
+        {
+
+          model: "gpt-4.1-mini",
+
+          messages: [
+
+            {
+              role: "system",
+
+              content: `
 Você é Yorda-Bot.
 
 Especialista em:
 - Remessas Brasil → Cuba
-- Recargas
+- Recargas ETECSA
 - CUP
 - USD
-- Reais
+- PIX
 - Transferências
 
-REGRAS:
+=================================
+TAXAS REMESSAS
+=================================
+
+Menor de 100 reais:
+${taxaMenor100} CUP
+
+100 até 499 reais:
+${taxa100_499} CUP
+
+500+ reais:
+${taxa500} CUP
+
+USD:
+1 USD = ${usdBrl} BRL
+
+=================================
+RECARGA ETECSA
+=================================
+
+Promoção atual:
+
+Cada 100 reais =
+2000 CUP de saldo.
+
+Esse saldo:
+- dura 365 dias
+- permite comprar:
+internet,
+planos,
+SMS,
+ligações.
+
+=================================
+REGRAS
+=================================
+
 - Responder curto.
-- Responder natural.
 - Falar igual humano.
 - Responder no idioma do cliente.
 - Nunca inventar taxas.
 - Nunca confirmar pagamento automaticamente.
 - Nunca prometer horário exato.
-- Explicar que Yordanys pode responder depois.
-- Ser educado e profissional.
-- Não responder grupos.
-- Não repetir mensagens.
+- Nunca responder grupos.
 - Não usar textos muito longos.
+- Ser amigável.
+- Não repetir mensagens.
+- Responder profissionalmente.
 
-Se perguntarem taxas:
-informar que variam conforme valor enviado.
+=================================
+COMPORTAMENTO
+=================================
 
-Se pedirem falar com Yordanys:
-informar que ele pode responder depois.
+SE perguntarem taxas:
+usar SEMPRE as taxas acima.
 
-Sempre tentar manter conversa natural.
-`,
-          },
-          {
-            role: "user",
-            content: mensagem,
-          },
-        ],
-      },
-      {
-        headers: {
-          Authorization:
-            `Bearer ${process.env.OPENAI_API_KEY}`,
-          "Content-Type": "application/json",
+SE perguntarem recarga:
+explicar SEMPRE:
+
+"Cada 100 reales recibe
+2000 CUP de saldo válido
+por 365 días.
+Puede comprar internet,
+planes, SMS y llamadas."
+
+SE perguntarem promoção:
+usar informações acima.
+
+SE perguntarem comprovante do cliente:
+dizer:
+
+"Comprovante recebido ✅
+Tudo certo.
+Sua transferência será processada."
+
+SE perguntarem comprovante da transferência enviada:
+dizer:
+
+"Devido aos problemas de energia em Cuba,
+algumas transferências podem demorar um pouco mais.
+
+Assim que a transferência for concluída,
+o comprovante será enviado 😊"
+
+SE pedirem chave PIX:
+informar:
+
+"Pode realizar o pagamento pela chave PIX abaixo 👇
+
+8becaaf5-f296-4cbc-a115-46e3d23b042a"
+
+Nunca enviar a chave PIX automaticamente.
+Enviar SOMENTE se o cliente pedir.
+
+SE pedirem Yordanys:
+dizer:
+
+"Claro 😊
+Enseguida Yordanys continuará con tu atención."
+
+SE falarem algo fora remessa:
+responder educadamente.
+
+Nunca usar mensagens gigantes.
+`
+            },
+
+            {
+              role: "user",
+              content: mensagem
+            }
+
+          ]
         },
-      }
-    );
+
+        {
+          headers: {
+
+            Authorization:
+              \`Bearer \${process.env.OPENAI_API_KEY}\`,
+
+            "Content-Type":
+              "application/json"
+
+          }
+        }
+      );
+
+    // ==================================
+    // PEGAR RESPOSTA
+    // ==================================
 
     const texto =
-      respostaOpenAI.data.choices[0]
+      respostaOpenAI.data
+      .choices[0]
       .message.content;
 
-    // Responder WhatsApp
-    await axios.post(
-      process.env.ZAPI_URL,
-      {
-        phone: numero,
-        message: texto,
-      },
-      {
-        headers: {
-          "Client-Token":
-            process.env.ZAPI_CLIENT_TOKEN,
-          "Content-Type": "application/json",
-        },
-      }
+    // ==================================
+    // ENVIAR MENSAGEM
+    // ==================================
+
+    await enviarMensagem(
+      numero,
+      texto
     );
+
+    ultimaResposta[numero] = agora;
+
+    // ==================================
+    // FINAL
+    // ==================================
 
     res.status(200).send("OK");
 
@@ -185,10 +394,52 @@ Sempre tentar manter conversa natural.
   }
 });
 
-const PORT = process.env.PORT || 3000;
+// ======================================
+// FUNÇÃO ENVIAR WHATSAPP
+// ======================================
+
+async function enviarMensagem(
+  numero,
+  texto
+) {
+
+  await axios.post(
+
+    process.env.ZAPI_URL,
+
+    {
+      phone: numero,
+      message: texto
+    },
+
+    {
+      headers: {
+
+        "Client-Token":
+          process.env.ZAPI_CLIENT_TOKEN,
+
+        "Content-Type":
+          "application/json"
+      }
+    }
+  );
+}
+
+// ======================================
+// PORTA
+// ======================================
+
+const PORT =
+  process.env.PORT || 3000;
+
+// ======================================
+// START
+// ======================================
 
 app.listen(PORT, () => {
+
   console.log(
-    `Servidor online na porta ${PORT}`
+    \`Servidor online na porta \${PORT}\`
   );
+
 });
