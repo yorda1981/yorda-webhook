@@ -29,12 +29,19 @@ if (
 
 function lerClientes() {
 
-  return JSON.parse(
-    fs.readFileSync(
-      ARQUIVO_CLIENTES,
-      "utf8"
-    )
-  );
+  try {
+
+    return JSON.parse(
+      fs.readFileSync(
+        ARQUIVO_CLIENTES,
+        "utf8"
+      )
+    );
+
+  } catch {
+
+    return [];
+  }
 }
 
 // SALVAR CLIENTES
@@ -183,7 +190,7 @@ app.post("/webhook", async (req, res) => {
     // ==================================
 
     const textoLower =
-      mensagem.toLowerCase();
+      mensagem.toLowerCase().trim();
 
     console.log(
       "MENSAGEM:",
@@ -248,6 +255,60 @@ app.post("/webhook", async (req, res) => {
         textoLower.includes(c)
       );
 
+    // ==================================
+    // DETECTAR MONTOS
+    // ==================================
+
+    const numeros =
+      textoLower.match(/\d+/g);
+
+    let montoDetectado =
+      null;
+
+    if (
+      numeros &&
+      numeros.length > 0
+    ) {
+
+      montoDetectado =
+        parseInt(numeros[0]);
+    }
+
+    let moedaDetectada =
+      null;
+
+    if (
+
+      textoLower.includes("real") ||
+      textoLower.includes("reales") ||
+      textoLower.includes("brl")
+
+    ) {
+
+      moedaDetectada =
+        "BRL";
+    }
+
+    else if (
+
+      textoLower.includes("usd") ||
+      textoLower.includes("dolar") ||
+      textoLower.includes("dólar")
+
+    ) {
+
+      moedaDetectada =
+        "USD";
+    }
+
+    else if (
+      textoLower.includes("mlc")
+    ) {
+
+      moedaDetectada =
+        "MLC";
+    }
+
     console.log(
       "TIPO:",
       tipoOperacao
@@ -256,6 +317,16 @@ app.post("/webhook", async (req, res) => {
     console.log(
       "CIDADE:",
       cidadeDetectada
+    );
+
+    console.log(
+      "MONTO:",
+      montoDetectado
+    );
+
+    console.log(
+      "MOEDA:",
+      moedaDetectada
     );
 
     // ==================================
@@ -275,7 +346,7 @@ app.post("/webhook", async (req, res) => {
 
       const pausar =
         !mensagensIgnorar.includes(
-          textoLower.trim()
+          textoLower
         );
 
       if (pausar) {
@@ -396,6 +467,18 @@ app.post("/webhook", async (req, res) => {
         cidadeDetectada;
     }
 
+    if (montoDetectado) {
+
+      cliente.ultimoMonto =
+        montoDetectado;
+    }
+
+    if (moedaDetectada) {
+
+      cliente.ultimaMoeda =
+        moedaDetectada;
+    }
+
     salvarClientes(clientes);
 
     // ==================================
@@ -412,8 +495,6 @@ app.post("/webhook", async (req, res) => {
     // ==================================
 
     if (!ativarBot) {
-
-      // ENVIAR SALUDO SOLO 1 VEZ
 
       if (!cliente.saludoEnviado) {
 
@@ -470,6 +551,12 @@ ${cliente.tipoOperacao || "não informado"}
 
 Última cidade:
 ${cliente.ultimaCidade || "não informada"}
+
+Último monto:
+${cliente.ultimoMonto || "não informado"}
+
+Última moeda:
+${cliente.ultimaMoeda || "não informada"}
 
 Última mensagem:
 ${cliente.ultimaMensagem}
