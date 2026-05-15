@@ -1,2 +1,0 @@
-// detectar idiomas
-module.exports = {};
