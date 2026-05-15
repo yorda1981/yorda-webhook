@@ -5,24 +5,18 @@ const app = express();
 
 app.use(express.json());
 
-// ======================================
-// CONFIG
-// ======================================
-
-const pausados = {};
-
-// ======================================
+// =====================================
 // HOME
-// ======================================
+// =====================================
 
 app.get("/", (req, res) => {
 
-  res.send("BOT ONLINE 🚀");
+  res.send("Yorda-bot ONLINE 🚀");
 });
 
-// ======================================
+// =====================================
 // WEBHOOK
-// ======================================
+// =====================================
 
 app.post("/webhook", async (req, res) => {
 
@@ -31,9 +25,9 @@ app.post("/webhook", async (req, res) => {
     console.log("BODY:");
     console.log(req.body);
 
-    // ==================================
+    // =================================
     // IGNORAR GRUPOS
-    // ==================================
+    // =================================
 
     if (req.body.isGroup) {
 
@@ -44,9 +38,9 @@ app.post("/webhook", async (req, res) => {
       return res.sendStatus(200);
     }
 
-    // ==================================
+    // =================================
     // IGNORAR NEWSLETTER
-    // ==================================
+    // =================================
 
     if (req.body.isNewsletter) {
 
@@ -57,29 +51,29 @@ app.post("/webhook", async (req, res) => {
       return res.sendStatus(200);
     }
 
-    // ==================================
-    // IGNORAR MENSAGENS DO PRÓPRIO BOT
-    // ==================================
+    // =================================
+    // IGNORAR MENSAGENS DO BOT
+    // =================================
 
-    if (req.body.fromMe) {
+    if (req.body.fromMe === true) {
 
       console.log(
-        "MENSAGEM DO PRÓPRIO BOT IGNORADA"
+        "MENSAGEM DO BOT IGNORADA"
       );
 
       return res.sendStatus(200);
     }
 
-    // ==================================
-    // NÚMERO
-    // ==================================
+    // =================================
+    // PEGAR NÚMERO
+    // =================================
 
     const numero =
       req.body.phone;
 
-    // ==================================
-    // MENSAGEM
-    // ==================================
+    // =================================
+    // PEGAR TEXTO
+    // =================================
 
     const mensagem =
       req.body.text?.message || "";
@@ -89,69 +83,27 @@ app.post("/webhook", async (req, res) => {
       mensagem
     );
 
-    if (!numero) {
+    if (!mensagem) {
 
       return res.sendStatus(200);
     }
 
-    // ==================================
-    // VERIFICAR PAUSA
-    // ==================================
-
-    if (pausados[numero]) {
-
-      const tempoPassado =
-        Date.now() -
-        pausados[numero];
-
-      // 30 minutos
-
-      if (
-        tempoPassado <
-        30 * 60 * 1000
-      ) {
-
-        console.log(
-          "CONVERSA PAUSADA"
-        );
-
-        return res.sendStatus(200);
-      }
-
-      delete pausados[numero];
-
-      console.log(
-        "BOT REATIVADO"
-      );
-    }
-
-    // ==================================
-    // OPENAI
-    // ==================================
+    // =================================
+    // OPENAI AGENT
+    // =================================
 
     const respostaOpenAI =
       await axios.post(
 
-        "https://api.openai.com/v1/chat/completions",
+        "https://api.openai.com/v1/responses",
 
         {
-          model: "gpt-4o-mini",
+          model: "gpt-4.1-mini",
 
-          messages: [
+          assistant_id:
+            process.env.OPENAI_AGENT_ID,
 
-            {
-              role: "system",
-
-              content:
-                "Você é um atendente útil, amigável e objetivo."
-            },
-
-            {
-              role: "user",
-
-              content: mensagem
-            }
-          ]
+          input: mensagem
         },
 
         {
@@ -166,32 +118,58 @@ app.post("/webhook", async (req, res) => {
         }
       );
 
-    // ==================================
-    // PEGAR RESPOSTA
-    // ==================================
-
-    const resposta =
-      respostaOpenAI.data
-      ?.choices?.[0]
-      ?.message?.content || "";
+    console.log(
+      "OPENAI COMPLETA:"
+    );
 
     console.log(
-      "RESPOSTA:",
+      JSON.stringify(
+        respostaOpenAI.data,
+        null,
+        2
+      )
+    );
+
+    // =================================
+    // PEGAR RESPOSTA
+    // =================================
+
+    let resposta = "";
+
+    if (
+      respostaOpenAI.data.output_text
+    ) {
+
+      resposta =
+        respostaOpenAI.data
+        .output_text;
+
+    } else {
+
+      resposta =
+        respostaOpenAI.data
+        ?.output?.[0]
+        ?.content?.[0]
+        ?.text || "";
+    }
+
+    console.log(
+      "RESPOSTA FINAL:",
       resposta
     );
 
     if (!resposta) {
 
       console.log(
-        "GPT SEM TEXTO"
+        "SEM RESPOSTA"
       );
 
       return res.sendStatus(200);
     }
 
-    // ==================================
+    // =================================
     // ENVIAR WHATSAPP
-    // ==================================
+    // =================================
 
     await axios.post(
 
@@ -216,16 +194,14 @@ app.post("/webhook", async (req, res) => {
     );
 
     console.log(
-      "RESPOSTA ENVIADA"
+      "ENVIADO COM SUCESSO"
     );
 
     return res.sendStatus(200);
 
   } catch (error) {
 
-    console.log(
-      "ERRO:"
-    );
+    console.log("ERRO:");
 
     console.log(
       error.response?.data ||
@@ -236,9 +212,9 @@ app.post("/webhook", async (req, res) => {
   }
 });
 
-// ======================================
+// =====================================
 // START
-// ======================================
+// =====================================
 
 const PORT =
   process.env.PORT || 8080;
