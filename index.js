@@ -1,3 +1,4 @@
+```javascript
 const express = require("express");
 const axios = require("axios");
 const fs = require("fs");
@@ -25,23 +26,13 @@ const pausados = {};
 const ARQUIVO_CLIENTES =
   "./clientes.json";
 
-// ======================================
-// CRIAR JSON
-// ======================================
-
-if (
-  !fs.existsSync(ARQUIVO_CLIENTES)
-) {
+if (!fs.existsSync(ARQUIVO_CLIENTES)) {
 
   fs.writeFileSync(
     ARQUIVO_CLIENTES,
     "[]"
   );
 }
-
-// ======================================
-// LER CLIENTES
-// ======================================
 
 function lerClientes() {
 
@@ -60,16 +51,10 @@ function lerClientes() {
   }
 }
 
-// ======================================
-// SALVAR CLIENTES
-// ======================================
-
 function salvarClientes(clientes) {
 
   fs.writeFileSync(
-
     ARQUIVO_CLIENTES,
-
     JSON.stringify(
       clientes,
       null,
@@ -118,21 +103,6 @@ const gatilhos = [
 ];
 
 // ======================================
-// CIDADES
-// ======================================
-
-const cidades = [
-
-  "habana",
-  "santiago",
-  "camagüey",
-  "holguin",
-  "bayamo",
-  "matanzas",
-  "villa clara"
-];
-
-// ======================================
 // HOME
 // ======================================
 
@@ -141,7 +111,6 @@ app.get("/", (req, res) => {
   res.send(
     "YordaBot Online 🚀"
   );
-
 });
 
 // ======================================
@@ -154,10 +123,6 @@ app.post("/webhook", async (req, res) => {
 
     console.log(req.body);
 
-    // ==================================
-    // IGNORAR GRUPOS
-    // ==================================
-
     if (req.body.isGroup) {
 
       console.log(
@@ -166,10 +131,6 @@ app.post("/webhook", async (req, res) => {
 
       return res.sendStatus(200);
     }
-
-    // ==================================
-    // IGNORAR NEWSLETTER
-    // ==================================
 
     if (req.body.isNewsletter) {
 
@@ -180,10 +141,6 @@ app.post("/webhook", async (req, res) => {
       return res.sendStatus(200);
     }
 
-    // ==================================
-    // IGNORAR STATUS
-    // ==================================
-
     if (
       req.body.type ===
       "MessageStatusCallback"
@@ -191,10 +148,6 @@ app.post("/webhook", async (req, res) => {
 
       return res.sendStatus(200);
     }
-
-    // ==================================
-    // DADOS
-    // ==================================
 
     const numero =
       req.body.phone || "";
@@ -211,10 +164,6 @@ app.post("/webhook", async (req, res) => {
       return res.sendStatus(200);
     }
 
-    // ==================================
-    // TEXTO
-    // ==================================
-
     const textoLower =
       mensagem
         .toLowerCase()
@@ -225,14 +174,9 @@ app.post("/webhook", async (req, res) => {
       textoLower
     );
 
-    // ==================================
-    // DETECTAR IDIOMA
-    // ==================================
-
     let idioma = "es";
 
     const palavrasPT = [
-
       "oi",
       "olá",
       "você",
@@ -274,8 +218,13 @@ app.post("/webhook", async (req, res) => {
     const temDocumento =
       req.body.document;
 
+    const temAudio =
+      req.body.audio;
+
     const temMidia =
-      temImagem || temDocumento;
+      temImagem ||
+      temDocumento ||
+      temAudio;
 
     console.log(
       "TEM MIDIA:",
@@ -283,16 +232,19 @@ app.post("/webhook", async (req, res) => {
     );
 
     // ==================================
-    // YORDANYS RESPONDE
+    // YORDANYS RESPONDE MANUALMENTE
     // ==================================
 
-    if (req.body.fromMe) {
+    if (
+      req.body.fromMe &&
+      !req.body.fromApi
+    ) {
 
       pausados[numero] =
         Date.now();
 
       console.log(
-        "BOT PAUSADO:",
+        "CONVERSA PAUSADA PELO HUMANO:",
         numero
       );
 
@@ -330,10 +282,6 @@ app.post("/webhook", async (req, res) => {
       );
     }
 
-    // ==================================
-    // CLIENTES
-    // ==================================
-
     let clientes =
       lerClientes();
 
@@ -342,401 +290,65 @@ app.post("/webhook", async (req, res) => {
         c => c.numero === numero
       );
 
-    // ==================================
-    // NOVO CLIENTE
-    // ==================================
-
     if (!cliente) {
 
       cliente = {
-
         numero,
-
-        nome:
-          nomeWhatsapp,
-
+        nome: nomeWhatsapp,
         idioma,
-
-        ultimaMensagem:
-          mensagem,
-
+        ultimaMensagem: mensagem,
         ultimoContato:
           new Date()
             .toISOString(),
-
-        ultimoSaludo: 0,
-
-        tipoOperacao:
-          null,
-
-        ultimaCidade:
-          null,
-
-        ultimoMonto:
-          null,
-
-        ultimaMoeda:
-          null,
-
-        ultimoComprovante:
-          null
+        ultimoSaludo: 0
       };
 
       clientes.push(cliente);
-
-      console.log(
-        "NOVO CLIENTE"
-      );
     }
+
+    cliente.nome =
+      nomeWhatsapp;
+
+    cliente.idioma =
+      idioma;
+
+    cliente.ultimaMensagem =
+      mensagem;
+
+    cliente.ultimoContato =
+      new Date()
+        .toISOString();
+
+    salvarClientes(clientes);
 
     // ==================================
-    // CLIENTE EXISTENTE
-    // ==================================
-
-    else {
-
-      cliente.nome =
-        nomeWhatsapp;
-
-      cliente.idioma =
-        idioma;
-
-      cliente.ultimaMensagem =
-        mensagem;
-
-      cliente.ultimoContato =
-        new Date()
-          .toISOString();
-
-      console.log(
-        "CLIENTE EXISTENTE"
-      );
-    }
-
-    // ==================================
-    // DETECTAR OPERAÇÃO
-    // ==================================
-
-    let tipoOperacao =
-      null;
-
-    if (
-      textoLower.includes(
-        "recarga"
-      )
-    ) {
-
-      tipoOperacao =
-        "recarga";
-    }
-
-    else if (
-
-      textoLower.includes(
-        "usd"
-      ) ||
-
-      textoLower.includes(
-        "dolar"
-      ) ||
-
-      textoLower.includes(
-        "dólar"
-      )
-
-    ) {
-
-      tipoOperacao =
-        "usd";
-    }
-
-    else if (
-
-      textoLower.includes(
-        "real"
-      ) ||
-
-      textoLower.includes(
-        "reales"
-      ) ||
-
-      textoLower.includes(
-        "cup"
-      )
-
-    ) {
-
-      tipoOperacao =
-        "remesa";
-    }
-
-    if (tipoOperacao) {
-
-      cliente.tipoOperacao =
-        tipoOperacao;
-    }
-
-    // ==================================
-    // DETECTAR CIDADE
-    // ==================================
-
-    const cidadeDetectada =
-      cidades.find(c =>
-        textoLower.includes(c)
-      );
-
-    if (cidadeDetectada) {
-
-      cliente.ultimaCidade =
-        cidadeDetectada;
-    }
-
-    // ==================================
-    // DETECTAR MONTOS
-    // ==================================
-
-    const numeros =
-      textoLower.match(/\d+/g);
-
-    let montoDetectado =
-      null;
-
-    if (
-      numeros &&
-      numeros.length > 0
-    ) {
-
-      montoDetectado =
-        parseInt(numeros[0]);
-    }
-
-    if (montoDetectado) {
-
-      cliente.ultimoMonto =
-        montoDetectado;
-    }
-
-    // ==================================
-    // DETECTAR MOEDA
-    // ==================================
-
-    let moedaDetectada =
-      null;
-
-    if (
-
-      textoLower.includes(
-        "real"
-      ) ||
-
-      textoLower.includes(
-        "reales"
-      ) ||
-
-      textoLower.includes(
-        "brl"
-      )
-
-    ) {
-
-      moedaDetectada =
-        "BRL";
-    }
-
-    else if (
-
-      textoLower.includes(
-        "usd"
-      ) ||
-
-      textoLower.includes(
-        "dolar"
-      ) ||
-
-      textoLower.includes(
-        "dólar"
-      )
-
-    ) {
-
-      moedaDetectada =
-        "USD";
-    }
-
-    else if (
-
-      textoLower.includes(
-        "mlc"
-      )
-
-    ) {
-
-      moedaDetectada =
-        "MLC";
-    }
-
-    if (moedaDetectada) {
-
-      cliente.ultimaMoeda =
-        moedaDetectada;
-    }
-
-    // ==================================
-    // OCR COMPROVANTE
+    // MIDIA / OCR
     // ==================================
 
     if (temMidia) {
 
-      let respostaMidia =
+      const respostaMidia =
         idioma === "pt"
 
           ? "Comprovante recebido ✅\nEstou verificando o pagamento."
 
           : "Comprobante recibido ✅\nEstoy verificando el pago.";
 
-      let dadosComprovante =
-        null;
-
-      try {
-
-        if (imagemUrl) {
-
-          const analiseImagem =
-            await axios.post(
-
-              "https://api.openai.com/v1/chat/completions",
-
-              {
-                model:
-                  "gpt-4o-mini",
-
-                messages: [
-
-                  {
-                    role:
-                      "system",
-
-                    content:
-                      "Extraia apenas banco, valor, nome e tipo pix do comprovante. Responda em JSON válido."
-                  },
-
-                  {
-                    role:
-                      "user",
-
-                    content: [
-
-                      {
-                        type:
-                          "text",
-
-                        text:
-                          "Leia este comprovante PIX"
-                      },
-
-                      {
-                        type:
-                          "image_url",
-
-                        image_url: {
-                          url:
-                            imagemUrl
-                        }
-                      }
-                    ]
-                  }
-                ],
-
-                temperature: 0
-              },
-
-              {
-                headers: {
-
-                  Authorization:
-                    `Bearer ${process.env.OPENAI_API_KEY}`,
-
-                  "Content-Type":
-                    "application/json"
-                }
-              }
-            );
-
-          dadosComprovante =
-            analiseImagem.data
-            .choices[0]
-            .message.content;
-
-          console.log(
-            "OCR:",
-            dadosComprovante
-          );
-        }
-
-      } catch (erroOCR) {
-
-        console.log(
-          "ERRO OCR:",
-          erroOCR.message
-        );
-      }
-
-      if (dadosComprovante) {
-
-        cliente.ultimoComprovante =
-          dadosComprovante;
-      }
-
-      salvarClientes(
-        clientes
-      );
-
-      // ================================
-      // DELAY HUMANO
-      // ================================
-
       await new Promise(resolve =>
         setTimeout(resolve, 3000)
       );
-
-      // ================================
-      // CANCELAR
-      // ================================
-
-      if (pausados[numero]) {
-
-        const tempoPassado =
-          Date.now() -
-          pausados[numero];
-
-        if (
-          tempoPassado <
-          TEMPO_PAUSA
-        ) {
-
-          console.log(
-            "OCR CANCELADO"
-          );
-
-          return res.sendStatus(200);
-        }
-      }
 
       await axios.post(
 
         process.env.ZAPI_URL,
 
         {
-          phone:
-            numero,
-
-          message:
-            respostaMidia
+          phone: numero,
+          message: respostaMidia
         },
 
         {
           headers: {
-
             "Client-Token":
               process.env.ZAPI_CLIENT_TOKEN,
 
@@ -744,10 +356,6 @@ app.post("/webhook", async (req, res) => {
               "application/json"
           }
         }
-      );
-
-      console.log(
-        "COMPROVANTE RESPONDIDO"
       );
 
       return res.sendStatus(200);
@@ -783,25 +391,6 @@ app.post("/webhook", async (req, res) => {
         await new Promise(resolve =>
           setTimeout(resolve, 3000)
         );
-
-        if (pausados[numero]) {
-
-          const tempoPassado =
-            Date.now() -
-            pausados[numero];
-
-          if (
-            tempoPassado <
-            TEMPO_PAUSA
-          ) {
-
-            console.log(
-              "SALUDO CANCELADO"
-            );
-
-            return res.sendStatus(200);
-          }
-        }
 
         const saudacao =
           idioma === "pt"
@@ -849,36 +438,6 @@ app.post("/webhook", async (req, res) => {
       return res.sendStatus(200);
     }
 
-    // ==================================
-    // MEMÓRIA GPT
-    // ==================================
-
-    const memoriaCliente = `
-Cliente:
-${cliente.nome}
-
-Idioma:
-${cliente.idioma}
-
-Tipo Operação:
-${cliente.tipoOperacao || "não informado"}
-
-Última Cidade:
-${cliente.ultimaCidade || "não informada"}
-
-Último Valor:
-${cliente.ultimoMonto || "não informado"}
-
-Última Moeda:
-${cliente.ultimaMoeda || "não informada"}
-
-Último Comprovante:
-${cliente.ultimoComprovante || "não enviado"}
-
-Última Mensagem:
-${cliente.ultimaMensagem}
-`;
-
     console.log(
       "BOT ATIVADO"
     );
@@ -893,18 +452,16 @@ ${cliente.ultimaMensagem}
         "https://api.openai.com/v1/responses",
 
         {
-          model:
-            "gpt-4o-mini",
-
-          workflow: {
-            id:
-              process.env.WORKFLOW_ID
-          },
+          model: "gpt-4o-mini",
 
           input: `
-${memoriaCliente}
+Cliente:
+${cliente.nome}
 
-Mensagem atual:
+Idioma:
+${cliente.idioma}
+
+Mensagem:
 ${mensagem}
 `
         },
@@ -935,51 +492,17 @@ ${mensagem}
       return res.sendStatus(200);
     }
 
-    // ==================================
-    // DELAY HUMANO
-    // ==================================
-
     await new Promise(resolve =>
       setTimeout(resolve, 5000)
     );
-
-    // ==================================
-    // CANCELAR ENVIO
-    // ==================================
-
-    if (pausados[numero]) {
-
-      const tempoPassado =
-        Date.now() -
-        pausados[numero];
-
-      if (
-        tempoPassado <
-        TEMPO_PAUSA
-      ) {
-
-        console.log(
-          "ENVIO CANCELADO"
-        );
-
-        return res.sendStatus(200);
-      }
-    }
-
-    // ==================================
-    // ENVIAR RESPOSTA
-    // ==================================
 
     await axios.post(
 
       process.env.ZAPI_URL,
 
       {
-        phone:
-          numero,
-
-        message:
-          resposta
+        phone: numero,
+        message: resposta
       },
 
       {
@@ -996,10 +519,6 @@ ${mensagem}
 
     console.log(
       "RESPOSTA ENVIADA"
-    );
-
-    salvarClientes(
-      clientes
     );
 
     return res.sendStatus(200);
@@ -1028,5 +547,5 @@ app.listen(PORT, () => {
   console.log(
     `Servidor online na porta ${PORT}`
   );
-
 });
+```
