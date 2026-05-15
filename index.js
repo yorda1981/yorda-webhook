@@ -13,8 +13,6 @@ app.use(express.json());
 const ARQUIVO_CLIENTES =
   "./clientes.json";
 
-// CRIAR JSON SE NÃO EXISTIR
-
 if (
   !fs.existsSync(ARQUIVO_CLIENTES)
 ) {
@@ -24,8 +22,6 @@ if (
     "[]"
   );
 }
-
-// LER CLIENTES
 
 function lerClientes() {
 
@@ -43,8 +39,6 @@ function lerClientes() {
     return [];
   }
 }
-
-// SALVAR CLIENTES
 
 function salvarClientes(clientes) {
 
@@ -341,7 +335,8 @@ app.post("/webhook", async (req, res) => {
         "ok",
         "👍",
         "ya",
-        "listo"
+        "listo",
+        "calma"
       ];
 
       const pausar =
@@ -349,16 +344,15 @@ app.post("/webhook", async (req, res) => {
           textoLower
         );
 
-      if (pausar) {
+      // PAUSAR SEMPRE SE ESCREVEU
 
-        pausados[numero] =
-          Date.now();
+      pausados[numero] =
+        Date.now();
 
-        console.log(
-          "BOT PAUSADO:",
-          numero
-        );
-      }
+      console.log(
+        "BOT PAUSADO:",
+        numero
+      );
 
       return res.sendStatus(200);
     }
@@ -498,6 +492,33 @@ app.post("/webhook", async (req, res) => {
 
       if (!cliente.saludoEnviado) {
 
+        // DELAY HUMANO
+
+        await new Promise(resolve =>
+          setTimeout(resolve, 5000)
+        );
+
+        // CANCELAR SE YORDANYS ESCREVEU
+
+        if (pausados[numero]) {
+
+          const tempoPassado =
+            Date.now() -
+            pausados[numero];
+
+          if (
+            tempoPassado <
+            TEMPO_PAUSA
+          ) {
+
+            console.log(
+              "SALUDO CANCELADO"
+            );
+
+            return res.sendStatus(200);
+          }
+        }
+
         await axios.post(
 
           process.env.ZAPI_URL,
@@ -620,6 +641,37 @@ ${mensagem}
     ) {
 
       return res.sendStatus(200);
+    }
+
+    // ==================================
+    // DELAY HUMANO
+    // ==================================
+
+    await new Promise(resolve =>
+      setTimeout(resolve, 5000)
+    );
+
+    // ==================================
+    // CANCELAR SE YORDANYS RESPONDEU
+    // ==================================
+
+    if (pausados[numero]) {
+
+      const tempoPassado =
+        Date.now() -
+        pausados[numero];
+
+      if (
+        tempoPassado <
+        TEMPO_PAUSA
+      ) {
+
+        console.log(
+          "ENVIO CANCELADO POR INTERVENÇÃO HUMANA"
+        );
+
+        return res.sendStatus(200);
+      }
     }
 
     // ==================================
