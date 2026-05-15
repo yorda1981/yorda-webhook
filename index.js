@@ -192,6 +192,43 @@ app.post("/webhook", async (req, res) => {
     );
 
     // ==================================
+    // DETECTAR IDIOMA
+    // ==================================
+
+    let idioma = "es";
+
+    const palavrasPT = [
+
+      "você",
+      "voce",
+      "oi",
+      "obrigado",
+      "pix",
+      "quanto",
+      "cadastro",
+      "fica",
+      "seu",
+      "boa",
+      "tarde",
+      "dia"
+    ];
+
+    const detectarPT =
+      palavrasPT.some(p =>
+        textoLower.includes(p)
+      );
+
+    if (detectarPT) {
+
+      idioma = "pt";
+    }
+
+    console.log(
+      "IDIOMA:",
+      idioma
+    );
+
+    // ==================================
     // DETECTAR OPERAÇÃO
     // ==================================
 
@@ -329,23 +366,6 @@ app.post("/webhook", async (req, res) => {
 
     if (req.body.fromMe) {
 
-      const mensagensIgnorar = [
-        "si",
-        "sí",
-        "ok",
-        "👍",
-        "ya",
-        "listo",
-        "calma"
-      ];
-
-      const pausar =
-        !mensagensIgnorar.includes(
-          textoLower
-        );
-
-      // PAUSAR SEMPRE SE ESCREVEU
-
       pausados[numero] =
         Date.now();
 
@@ -414,7 +434,7 @@ app.post("/webhook", async (req, res) => {
           new Date()
             .toISOString(),
 
-        saludoEnviado: false
+        ultimoSaludo: 0
       };
 
       clientes.push(cliente);
@@ -485,20 +505,37 @@ app.post("/webhook", async (req, res) => {
       );
 
     // ==================================
-    // CLIENTE SEM GATILHO
+    // SEM GATILHO
     // ==================================
 
     if (!ativarBot) {
 
-      if (!cliente.saludoEnviado) {
+      // ==================================
+      // VERIFICAR ÚLTIMO SALUDO
+      // ==================================
 
-        // DELAY HUMANO
+      const agora = Date.now();
+
+      const ultimoSaludo =
+        cliente.ultimoSaludo || 0;
+
+      // 6 HORAS
+
+      const podeEnviarSaludo =
+        agora - ultimoSaludo >
+        6 * 60 * 60 * 1000;
+
+      // ==================================
+      // ENVIAR SALUDO
+      // ==================================
+
+      if (podeEnviarSaludo) {
 
         await new Promise(resolve =>
-          setTimeout(resolve, 5000)
+          setTimeout(resolve, 3000)
         );
 
-        // CANCELAR SE YORDANYS ESCREVEU
+        // CANCELAR SE YORDANYS RESPONDEU
 
         if (pausados[numero]) {
 
@@ -519,15 +556,27 @@ app.post("/webhook", async (req, res) => {
           }
         }
 
+        let saudacao = "";
+
+        if (idioma === "pt") {
+
+          saudacao =
+            "Olá 😊\nEm que posso ajudar?";
+        }
+
+        else {
+
+          saudacao =
+            "Hola 😊\n¿En qué puedo ayudarte?";
+        }
+
         await axios.post(
 
           process.env.ZAPI_URL,
 
           {
             phone: numero,
-
-            message:
-              "Hola 😊\n¿En qué puedo ayudarte?"
+            message: saudacao
           },
 
           {
@@ -542,8 +591,8 @@ app.post("/webhook", async (req, res) => {
           }
         );
 
-        cliente.saludoEnviado =
-          true;
+        cliente.ultimoSaludo =
+          agora;
 
         salvarClientes(clientes);
 
@@ -566,6 +615,9 @@ app.post("/webhook", async (req, res) => {
     const memoriaCliente = `
 Cliente:
 ${cliente.nome}
+
+Idioma:
+${idioma}
 
 Tipo de operação:
 ${cliente.tipoOperacao || "não informado"}
