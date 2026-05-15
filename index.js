@@ -57,14 +57,14 @@ app.post("/webhook", async (req, res) => {
     }
 
     // ==================================
-    // NÚMERO
+    // PEGAR NÚMERO
     // ==================================
 
     const numero =
       req.body.phone;
 
     // ==================================
-    // MENSAGEM
+    // PEGAR MENSAGEM
     // ==================================
 
     const mensagem =
@@ -161,12 +161,27 @@ app.post("/webhook", async (req, res) => {
       );
 
     // ==================================
-    // RESPOSTA
+    // LER RESPOSTA
     // ==================================
 
-    const resposta =
-      respostaOpenAI.data
-      .output_text;
+    let resposta = "";
+
+    if (
+      respostaOpenAI.data.output_text
+    ) {
+
+      resposta =
+        respostaOpenAI.data
+        .output_text;
+
+    } else {
+
+      resposta =
+        respostaOpenAI.data
+        ?.output?.[0]
+        ?.content?.[0]
+        ?.text || "";
+    }
 
     console.log(
       "RESPOSTA:",
@@ -174,6 +189,10 @@ app.post("/webhook", async (req, res) => {
     );
 
     if (!resposta) {
+
+      console.log(
+        "SEM RESPOSTA GPT"
+      );
 
       return res.sendStatus(200);
     }
