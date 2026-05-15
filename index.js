@@ -178,12 +178,84 @@ app.post("/webhook", async (req, res) => {
       return res.sendStatus(200);
     }
 
+    // ==================================
+    // TEXTO
+    // ==================================
+
     const textoLower =
       mensagem.toLowerCase();
 
     console.log(
       "MENSAGEM:",
       textoLower
+    );
+
+    // ==================================
+    // DETECTAR OPERAÇÃO
+    // ==================================
+
+    let tipoOperacao = null;
+
+    if (
+      textoLower.includes("recarga")
+    ) {
+
+      tipoOperacao =
+        "recarga";
+    }
+
+    else if (
+
+      textoLower.includes("usd") ||
+      textoLower.includes("dolar") ||
+      textoLower.includes("dólar")
+
+    ) {
+
+      tipoOperacao =
+        "usd";
+    }
+
+    else if (
+
+      textoLower.includes("real") ||
+      textoLower.includes("reales") ||
+      textoLower.includes("cup")
+
+    ) {
+
+      tipoOperacao =
+        "remesa";
+    }
+
+    // ==================================
+    // DETECTAR CIDADES
+    // ==================================
+
+    const cidades = [
+
+      "habana",
+      "santiago",
+      "camagüey",
+      "holguin",
+      "bayamo",
+      "matanzas",
+      "villa clara"
+    ];
+
+    const cidadeDetectada =
+      cidades.find(c =>
+        textoLower.includes(c)
+      );
+
+    console.log(
+      "TIPO:",
+      tipoOperacao
+    );
+
+    console.log(
+      "CIDADE:",
+      cidadeDetectada
     );
 
     // ==================================
@@ -308,6 +380,22 @@ app.post("/webhook", async (req, res) => {
       );
     }
 
+    // ==================================
+    // GUARDAR DADOS EXTRAS
+    // ==================================
+
+    if (tipoOperacao) {
+
+      cliente.tipoOperacao =
+        tipoOperacao;
+    }
+
+    if (cidadeDetectada) {
+
+      cliente.ultimaCidade =
+        cidadeDetectada;
+    }
+
     salvarClientes(clientes);
 
     // ==================================
@@ -376,6 +464,12 @@ app.post("/webhook", async (req, res) => {
     const memoriaCliente = `
 Cliente:
 ${cliente.nome}
+
+Tipo de operação:
+${cliente.tipoOperacao || "não informado"}
+
+Última cidade:
+${cliente.ultimaCidade || "não informada"}
 
 Última mensagem:
 ${cliente.ultimaMensagem}
