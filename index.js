@@ -127,6 +127,10 @@ app.post("/webhook", async (req, res) => {
 
     if (req.body.isGroup) {
 
+      console.log(
+        "GRUPO IGNORADO"
+      );
+
       return res.sendStatus(200);
     }
 
@@ -135,6 +139,10 @@ app.post("/webhook", async (req, res) => {
     // ==================================
 
     if (req.body.isNewsletter) {
+
+      console.log(
+        "NEWSLETTER IGNORADA"
+      );
 
       return res.sendStatus(200);
     }
@@ -184,13 +192,30 @@ app.post("/webhook", async (req, res) => {
 
     if (req.body.fromMe) {
 
-      pausados[numero] =
-        Date.now();
+      const mensagensIgnorar = [
+        "si",
+        "sí",
+        "ok",
+        "👍",
+        "ya",
+        "listo"
+      ];
 
-      console.log(
-        "BOT PAUSADO:",
-        numero
-      );
+      const pausar =
+        !mensagensIgnorar.includes(
+          textoLower.trim()
+        );
+
+      if (pausar) {
+
+        pausados[numero] =
+          Date.now();
+
+        console.log(
+          "BOT PAUSADO:",
+          numero
+        );
+      }
 
       return res.sendStatus(200);
     }
@@ -227,28 +252,6 @@ app.post("/webhook", async (req, res) => {
     }
 
     // ==================================
-    // GATILHOS
-    // ==================================
-
-    const ativarBot =
-      gatilhos.some(g =>
-        textoLower.includes(g)
-      );
-
-    if (!ativarBot) {
-
-      console.log(
-        "SEM GATILHO"
-      );
-
-      return res.sendStatus(200);
-    }
-
-    console.log(
-      "BOT ATIVADO"
-    );
-
-    // ==================================
     // MEMÓRIA CLIENTE
     // ==================================
 
@@ -272,7 +275,9 @@ app.post("/webhook", async (req, res) => {
           mensagem,
         ultimoContato:
           new Date()
-            .toISOString()
+            .toISOString(),
+
+        saludoEnviado: false
       };
 
       clientes.push(cliente);
@@ -283,7 +288,7 @@ app.post("/webhook", async (req, res) => {
       );
     }
 
-    // ATUALIZAR
+    // CLIENTE EXISTENTE
 
     else {
 
@@ -304,6 +309,65 @@ app.post("/webhook", async (req, res) => {
     }
 
     salvarClientes(clientes);
+
+    // ==================================
+    // GATILHOS
+    // ==================================
+
+    const ativarBot =
+      gatilhos.some(g =>
+        textoLower.includes(g)
+      );
+
+    // ==================================
+    // CLIENTE SEM GATILHO
+    // ==================================
+
+    if (!ativarBot) {
+
+      // ENVIAR SALUDO SOLO 1 VEZ
+
+      if (!cliente.saludoEnviado) {
+
+        await axios.post(
+
+          process.env.ZAPI_URL,
+
+          {
+            phone: numero,
+
+            message:
+              "Hola 😊\n¿En qué puedo ayudarte?"
+          },
+
+          {
+            headers: {
+
+              "Client-Token":
+                process.env.ZAPI_CLIENT_TOKEN,
+
+              "Content-Type":
+                "application/json"
+            }
+          }
+        );
+
+        cliente.saludoEnviado =
+          true;
+
+        salvarClientes(clientes);
+
+        console.log(
+          "SALUDO ENVIADO"
+        );
+      }
+
+      return res.sendStatus(200);
+    }
+
+    console.log(
+      "BOT ATIVADO"
+    );
 
     // ==================================
     // CONTEXTO MEMÓRIA
