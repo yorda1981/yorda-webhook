@@ -1,4 +1,4 @@
-```js id="u9v4za"
+```javascript
 const express = require("express");
 const axios = require("axios");
 
@@ -12,31 +12,25 @@ const PORT = process.env.PORT || 8080;
    VARIABLES
 ========================= */
 
-const OPENAI_API_KEY =
-  process.env.OPENAI_API_KEY?.trim();
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY?.trim();
 
-const ZAPI_INSTANCE =
-  process.env.ZAPI_INSTANCE?.trim();
+const ZAPI_INSTANCE = process.env.ZAPI_INSTANCE?.trim();
 
-const ZAPI_TOKEN =
-  process.env.ZAPI_TOKEN?.trim();
+const ZAPI_TOKEN = process.env.ZAPI_TOKEN?.trim();
 
-const ZAPI_CLIENT_TOKEN =
-  process.env.ZAPI_CLIENT_TOKEN?.trim();
+const ZAPI_CLIENT_TOKEN = process.env.ZAPI_CLIENT_TOKEN?.trim();
 
 /* =========================
    PIX
 ========================= */
 
-const PIX =
-"8becaaf5-f296-4cbc-a115-46e3d23b042a";
+const PIX = "8becaaf5-f296-4cbc-a115-46e3d23b042a";
 
 /* =========================
    GATILLOS
 ========================= */
 
 const gatilhos = [
-
   "remesa",
   "remesas",
   "envio",
@@ -61,7 +55,6 @@ const gatilhos = [
   "recarga",
   "saldo",
   "etecsa"
-
 ];
 
 /* =========================
@@ -74,29 +67,17 @@ const memoria = {};
    ENVIAR MENSAJE
 ========================= */
 
-async function enviarMensaje(
-  phone,
-  texto
-) {
+async function enviarMensaje(phone, texto) {
 
   try {
 
     console.log("========== ZAPI CONFIG ==========");
 
-    console.log(
-      "INSTANCE:",
-      ZAPI_INSTANCE
-    );
+    console.log("INSTANCE:", ZAPI_INSTANCE);
 
-    console.log(
-      "TOKEN:",
-      ZAPI_TOKEN
-    );
+    console.log("TOKEN:", ZAPI_TOKEN);
 
-    console.log(
-      "CLIENT TOKEN:",
-      ZAPI_CLIENT_TOKEN
-    );
+    console.log("CLIENT TOKEN:", ZAPI_CLIENT_TOKEN);
 
     console.log("================================");
 
@@ -106,9 +87,7 @@ async function enviarMensaje(
       !ZAPI_CLIENT_TOKEN
     ) {
 
-      console.log(
-        "ERRO: Variáveis ZAPI ausentes"
-      );
+      console.log("ERRO: Variáveis ZAPI ausentes");
 
       return;
 
@@ -116,38 +95,27 @@ async function enviarMensaje(
 
     const url = `https://api.z-api.io/instances/${ZAPI_INSTANCE}/token/${ZAPI_TOKEN}/send-text`;
 
-    console.log(
-      "URL:",
-      url
-    );
+    console.log("URL:", url);
 
-    const response =
-      await axios.post(
+    const response = await axios.post(
 
-        url,
+      url,
 
-        {
-          phone,
-          message: texto
-        },
+      {
+        phone: phone,
+        message: texto
+      },
 
-        {
-          headers: {
-
-            "Client-Token":
-              ZAPI_CLIENT_TOKEN,
-
-            "Content-Type":
-              "application/json"
-
-          }
+      {
+        headers: {
+          "Client-Token": ZAPI_CLIENT_TOKEN,
+          "Content-Type": "application/json"
         }
+      }
 
-      );
-
-    console.log(
-      "ENVIADO:"
     );
+
+    console.log("ENVIADO:");
 
     console.log(
       JSON.stringify(
@@ -159,9 +127,7 @@ async function enviarMensaje(
 
   } catch (error) {
 
-    console.log(
-      "ERRO ZAPI:"
-    );
+    console.log("ERRO ZAPI:");
 
     console.log(
       error.response?.data ||
@@ -176,171 +142,141 @@ async function enviarMensaje(
    WEBHOOK
 ========================= */
 
-app.post(
-  "/webhook",
-  async (req, res) => {
+app.post("/webhook", async (req, res) => {
 
-    try {
+  try {
 
-      const body =
-        req.body;
+    const body = req.body;
 
-      console.log(
-        "BODY:",
-        JSON.stringify(
-          body,
-          null,
-          2
-        )
+    console.log(
+      "BODY:",
+      JSON.stringify(
+        body,
+        null,
+        2
+      )
+    );
+
+    /* =========================
+       IGNORAR
+    ========================= */
+
+    if (
+
+      body.fromMe === true ||
+      body.isGroup === true ||
+      body.isNewsletter === true ||
+      body.image ||
+      body.video ||
+      body.audio ||
+      body.document
+
+    ) {
+
+      console.log("IGNORADO");
+
+      return res.sendStatus(200);
+
+    }
+
+    const phone = body.phone;
+
+    const texto =
+      body?.text?.message ||
+      body?.text?.body ||
+      "";
+
+    if (!texto) {
+
+      return res.sendStatus(200);
+
+    }
+
+    const msg =
+      texto
+      .toLowerCase()
+      .trim();
+
+    console.log("MENSAGEM:", msg);
+
+    /* =========================
+       DETECTAR INTERES
+    ========================= */
+
+    const comercial =
+      gatilhos.some(g =>
+        msg.includes(g)
       );
 
-      /* =========================
-         IGNORAR
-      ========================= */
+    /* =========================
+       SALUDO GENERAL
+    ========================= */
 
-      if (
+    if (!comercial) {
 
-        body.fromMe === true ||
-        body.isGroup === true ||
-        body.isNewsletter === true ||
-        body.image ||
-        body.video ||
-        body.audio ||
-        body.document
-
-      ) {
-
-        console.log(
-          "IGNORADO"
-        );
-
-        return res.sendStatus(200);
-
-      }
-
-      const phone =
-        body.phone;
-
-      const texto =
-        body?.text?.message ||
-        body?.text?.body ||
-        "";
-
-      if (!texto) {
-
-        return res.sendStatus(200);
-
-      }
-
-      const msg =
-        texto
-        .toLowerCase()
-        .trim();
-
-      console.log(
-        "MENSAGEM:",
-        msg
+      await enviarMensaje(
+        phone,
+        "Hola 👋 ¿Cómo puedo ayudarte?"
       );
 
-      /* =========================
-         DETECTAR INTERES
-      ========================= */
+      return res.sendStatus(200);
 
-      const comercial =
-        gatilhos.some(g =>
-          msg.includes(g)
-        );
+    }
 
-      /* =========================
-         SALUDO GENERAL
-      ========================= */
+    /* =========================
+       YORDANYS
+    ========================= */
 
-      if (!comercial) {
+    if (
 
-        await enviarMensaje(
-          phone,
-          "Hola 👋 ¿Cómo puedo ayudarte?"
-        );
+      msg.includes("yordanys") ||
+      msg.includes("humano") ||
+      msg.includes("atendente")
 
-        return res.sendStatus(200);
+    ) {
 
-      }
+      await enviarMensaje(
+        phone,
+        "Claro 👍 Yordanys continuará contigo enseguida."
+      );
 
-      /* =========================
-         YORDANYS
-      ========================= */
+      return res.sendStatus(200);
 
-      if (
+    }
 
-        msg.includes(
-          "yordanys"
-        ) ||
+    /* =========================
+       PIX
+    ========================= */
 
-        msg.includes(
-          "humano"
-        ) ||
+    if (msg.includes("pix")) {
 
-        msg.includes(
-          "atendente"
-        )
+      await enviarMensaje(
+        phone,
+        PIX
+      );
 
-      ) {
+      return res.sendStatus(200);
 
-        await enviarMensaje(
-          phone,
-          "Claro 👍 Yordanys continuará contigo enseguida."
-        );
+    }
 
-        return res.sendStatus(200);
+    /* =========================
+       TASAS
+    ========================= */
 
-      }
+    if (
 
-      /* =========================
-         PIX
-      ========================= */
+      msg.includes("tasa") ||
+      msg.includes("taxa") ||
+      msg.includes("cambio") ||
+      msg.includes("câmbio")
 
-      if (
-        msg.includes("pix")
-      ) {
+    ) {
 
-        await enviarMensaje(
-          phone,
-          PIX
-        );
+      await enviarMensaje(
 
-        return res.sendStatus(200);
+        phone,
 
-      }
-
-      /* =========================
-         TASAS
-      ========================= */
-
-      if (
-
-        msg.includes(
-          "tasa"
-        ) ||
-
-        msg.includes(
-          "taxa"
-        ) ||
-
-        msg.includes(
-          "cambio"
-        ) ||
-
-        msg.includes(
-          "câmbio"
-        )
-
-      ) {
-
-        await enviarMensaje(
-
-          phone,
-
-`💱 Tasas hoy:
+        `💱 Tasas hoy:
 
 Menos de 100 reales → 100 CUP
 
@@ -348,38 +284,86 @@ Menos de 100 reales → 100 CUP
 
 500+ reales → 118 CUP 🔥`
 
-        );
+      );
 
-        return res.sendStatus(200);
+      return res.sendStatus(200);
 
-      }
+    }
+
+    /* =========================
+       RECARGA
+    ========================= */
+
+    if (
+
+      msg.includes("recarga") ||
+      msg.includes("saldo") ||
+      msg.includes("etecsa")
+
+    ) {
+
+      memoria[phone] = "recarga";
+
+      await enviarMensaje(
+        phone,
+        "¿De cuánto deseas la recarga?"
+      );
+
+      return res.sendStatus(200);
+
+    }
+
+    /* =========================
+       TRANSFERENCIA
+    ========================= */
+
+    if (
+
+      msg.includes("transferencia") ||
+      msg.includes("transferência") ||
+      msg.includes("envio") ||
+      msg.includes("remesa")
+
+    ) {
+
+      memoria[phone] = "transferencia";
+
+      await enviarMensaje(
+        phone,
+        "¿Cuántos reales deseas enviar?"
+      );
+
+      return res.sendStatus(200);
+
+    }
+
+    /* =========================
+       CALCULO
+    ========================= */
+
+    const numero =
+      parseFloat(
+        msg.replace(",", ".")
+      );
+
+    if (!isNaN(numero)) {
 
       /* =========================
          RECARGA
       ========================= */
 
       if (
-
-        msg.includes(
-          "recarga"
-        ) ||
-
-        msg.includes(
-          "saldo"
-        ) ||
-
-        msg.includes(
-          "etecsa"
-        )
-
+        memoria[phone] === "recarga"
       ) {
 
-        memoria[phone] =
-          "recarga";
+        const cup = numero * 100;
 
         await enviarMensaje(
+
           phone,
-          "¿De cuánto deseas la recarga?"
+
+          `${numero} reales = ${cup.toLocaleString()} CUP de saldo 📲`
+
         );
 
         return res.sendStatus(200);
@@ -391,186 +375,116 @@ Menos de 100 reales → 100 CUP
       ========================= */
 
       if (
-
-        msg.includes(
-          "transferencia"
-        ) ||
-
-        msg.includes(
-          "transferência"
-        ) ||
-
-        msg.includes(
-          "envio"
-        ) ||
-
-        msg.includes(
-          "remesa"
-        )
-
+        memoria[phone] === "transferencia"
       ) {
 
-        memoria[phone] =
-          "transferencia";
+        let tasa = 100;
+
+        if (
+          numero >= 100 &&
+          numero < 500
+        ) {
+
+          tasa = 115;
+
+        }
+
+        if (
+          numero >= 500
+        ) {
+
+          tasa = 118;
+
+        }
+
+        const cup =
+          numero * tasa;
 
         await enviarMensaje(
+
           phone,
-          "¿Cuántos reales deseas enviar?"
+
+          `${numero} reales = ${cup.toLocaleString()} CUP 💸`
+
         );
 
         return res.sendStatus(200);
 
       }
 
-      /* =========================
-         CALCULO
-      ========================= */
+    }
 
-      const numero =
-        parseFloat(
-          msg.replace(",", ".")
-        );
+    /* =========================
+       OPENAI
+    ========================= */
 
-      if (!isNaN(numero)) {
+    const respuesta = await axios.post(
 
-        if (
-          memoria[phone] ===
-          "recarga"
-        ) {
+      "https://api.openai.com/v1/responses",
 
-          const cup =
-            numero * 100;
+      {
 
-          await enviarMensaje(
+        model: "gpt-4.1-mini",
 
-            phone,
-
-`${numero} reales = ${cup.toLocaleString()} CUP de saldo 📲`
-
-          );
-
-          return res.sendStatus(200);
-
-        }
-
-        if (
-          memoria[phone] ===
-          "transferencia"
-        ) {
-
-          let tasa = 100;
-
-          if (
-            numero >= 100 &&
-            numero < 500
-          ) {
-
-            tasa = 115;
-
-          }
-
-          if (
-            numero >= 500
-          ) {
-
-            tasa = 118;
-
-          }
-
-          const cup =
-            numero * tasa;
-
-          await enviarMensaje(
-
-            phone,
-
-`${numero} reales = ${cup.toLocaleString()} CUP 💸`
-
-          );
-
-          return res.sendStatus(200);
-
-        }
-
-      }
-
-      /* =========================
-         OPENAI
-      ========================= */
-
-      const respuesta =
-        await axios.post(
-
-          "https://api.openai.com/v1/responses",
-
-          {
-
-            model:
-              "gpt-4.1-mini",
-
-            input:
+        input:
 `Cliente escribió:
 "${texto}"
 
 Responde corto y natural.
 Solo sobre remesas, recargas o cambio.`
 
-          },
+      },
 
-          {
+      {
 
-            headers: {
+        headers: {
 
-              Authorization:
+          Authorization:
 `Bearer ${OPENAI_API_KEY}`,
 
-              "Content-Type":
-                "application/json"
+          "Content-Type":
+            "application/json"
 
-            }
+        }
 
-          }
+      }
 
-        );
+    );
 
-      console.log(
-        "OPENAI:",
-        JSON.stringify(
-          respuesta.data,
-          null,
-          2
-        )
-      );
+    console.log(
+      "OPENAI:",
+      JSON.stringify(
+        respuesta.data,
+        null,
+        2
+      )
+    );
 
-      const reply =
-        respuesta.data.output_text ||
-        "¿Cómo puedo ayudarte?";
+    const reply =
+      respuesta.data.output_text ||
+      "¿Cómo puedo ayudarte?";
 
-      await enviarMensaje(
-        phone,
-        reply
-      );
+    await enviarMensaje(
+      phone,
+      reply
+    );
 
-      return res.sendStatus(200);
+    return res.sendStatus(200);
 
-    } catch (error) {
+  } catch (error) {
 
-      console.log(
-        "ERRO GERAL"
-      );
+    console.log("ERRO GERAL");
 
-      console.log(
-        error.response?.data ||
-        error.message
-      );
+    console.log(
+      error.response?.data ||
+      error.message
+    );
 
-      return res.sendStatus(500);
-
-    }
+    return res.sendStatus(500);
 
   }
 
-);
+});
 
 /* =========================
    ONLINE
@@ -578,16 +492,14 @@ Solo sobre remesas, recargas o cambio.`
 
 app.get("/", (req, res) => {
 
-  res.send(
-    "YordaBot ONLINE"
-  );
+  res.send("YordaBot ONLINE");
 
 });
 
 app.listen(PORT, () => {
 
   console.log(
-`Servidor ONLINE na porta ${PORT}`
+    `Servidor ONLINE na porta ${PORT}`
   );
 
 });
