@@ -24,7 +24,7 @@ const ZAPI_CLIENT_TOKEN =
   process.env.ZAPI_CLIENT_TOKEN;
 
 /* =========================
-   MEMORIAS TEMPORALES
+   MEMÓRIAS
 ========================= */
 
 const pausaHumana = {};
@@ -64,7 +64,11 @@ const gatilhos = [
   "dinero",
   "dinheiro",
   "deposito",
-  "depósito"
+  "depósito",
+  "pasarte dinero",
+  "mandar dinero",
+  "hacer un envío",
+  "hacer un envio"
 
 ];
 
@@ -174,8 +178,8 @@ REGLAS:
 
 - Responder corto.
 - Máximo 2 líneas.
-- Sonar natural.
 - Sonar humano.
+- Sonar natural.
 - No sonar como ChatGPT.
 - No usar listas.
 - No explicar demasiado.
@@ -193,6 +197,10 @@ PIX,
 recargas,
 transferencias,
 envíos.
+
+Si el cliente pide hablar con Yordanys:
+Responder:
+"Claro 👌 Yordanys continuará tu atención en breve."
 `
 
       },
@@ -287,6 +295,10 @@ app.post("/webhook", async (req, res) => {
     const hora =
       new Date().getHours();
 
+    /* =========================
+       SILÊNCIO NOTURNO
+    ========================== */
+
     if (hora >= 22 || hora < 6) {
 
       console.log(
@@ -341,6 +353,43 @@ app.post("/webhook", async (req, res) => {
     );
 
     /* =========================
+       DETECTAR GATILHO
+    ========================== */
+
+    const textoLimpo =
+      texto
+        .toLowerCase()
+        .replace(/[^\w\s]/gi, " ");
+
+    const palavras =
+      textoLimpo.split(/\s+/);
+
+    const comercial =
+      gatilhos.some(g =>
+        textoLimpo.includes(g)
+      );
+
+    /* =========================
+       ATIVAR CONVERSA
+    ========================== */
+
+    if (comercial) {
+
+      conversaAtiva[phone] =
+        Date.now() + (15 * 60 * 1000);
+
+    }
+
+    /* =========================
+       CONVERSA EM ANDAMENTO
+    ========================== */
+
+    const conversaEmAndamento =
+
+      conversaAtiva[phone] &&
+      Date.now() < conversaAtiva[phone];
+
+    /* =========================
        SAUDAÇÃO
     ========================== */
 
@@ -351,7 +400,13 @@ app.post("/webhook", async (req, res) => {
           .includes(s)
       );
 
-    if (saudacao) {
+    if (
+
+      saudacao &&
+      !comercial &&
+      !conversaEmAndamento
+
+    ) {
 
       let saludo = "";
 
@@ -360,7 +415,7 @@ app.post("/webhook", async (req, res) => {
         saludo =
           "Buen día 👋 ¿Cómo puedo ayudarte hoy?";
 
-      } else if (hora >= 12 && hora < 18) {
+      } else if (hora >= 12 && hora < 20) {
 
         saludo =
           "Buenas tardes 👋 ¿Cómo puedo ayudarte hoy?";
@@ -382,44 +437,7 @@ app.post("/webhook", async (req, res) => {
     }
 
     /* =========================
-       DETECTAR GATILHO
-    ========================== */
-
-    const textoLimpo =
-      texto
-        .toLowerCase()
-        .replace(/[^\w\s]/gi, " ");
-
-    const palavras =
-      textoLimpo.split(/\s+/);
-
-    const comercial =
-      gatilhos.some(g =>
-        palavras.includes(g)
-      );
-
-    /* =========================
-       ATIVAR CONVERSA
-    ========================== */
-
-    if (comercial) {
-
-      conversaAtiva[phone] =
-        Date.now() + (15 * 60 * 1000);
-
-    }
-
-    /* =========================
-       VERIFICAR CONVERSA
-    ========================== */
-
-    const conversaEmAndamento =
-
-      conversaAtiva[phone] &&
-      Date.now() < conversaAtiva[phone];
-
-    /* =========================
-       IGNORAR SEM INTERESSE
+       IGNORAR SEM INTENÇÃO
     ========================== */
 
     if (
@@ -438,7 +456,7 @@ app.post("/webhook", async (req, res) => {
     }
 
     /* =========================
-       OPENAI RESPONSE
+       OPENAI
     ========================== */
 
     const respostaIA =
