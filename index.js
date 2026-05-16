@@ -22,7 +22,7 @@ const SYSTEM_PROMPT =
   process.env.SYSTEM_PROMPT;
 
 // =====================================
-// MEMORIA CLIENTES
+// MEMORIA
 // =====================================
 
 const clientes = {};
@@ -52,65 +52,6 @@ function taxaBRL(valor) {
 }
 
 // =====================================
-// DETECTAR PIX
-// =====================================
-
-function detectarPix(texto) {
-
-  const t =
-    texto.toLowerCase();
-
-  return (
-    t.includes("pix") ||
-    t.includes("llave pix") ||
-    t.includes("chave pix") ||
-    t.includes("manda pix") ||
-    t.includes("envia pix") ||
-    t.includes("quiero pagar") ||
-    t.includes("quero pagar")
-  );
-}
-
-// =====================================
-// PIX SOLO
-// =====================================
-
-function detectarPixSolo(texto) {
-
-  const t =
-    texto.toLowerCase();
-
-  return (
-    t.includes("pix solo") ||
-    t.includes("solo pix") ||
-    t.includes("sólo pix") ||
-    t.includes("llave sola") ||
-    t.includes("chave sola") ||
-    t.includes("apenas pix") ||
-    t.includes("solo la llave") ||
-    t.includes("pix para copiar") ||
-    t.includes("copiar pix")
-  );
-}
-
-// =====================================
-// DETECTAR RECARGA
-// =====================================
-
-function detectarRecarga(texto) {
-
-  const t =
-    texto.toLowerCase();
-
-  return (
-    t.includes("recarga") ||
-    t.includes("saldo") ||
-    t.includes("telefone") ||
-    t.includes("telefono")
-  );
-}
-
-// =====================================
 // EXTRAER NUMERO
 // =====================================
 
@@ -128,6 +69,125 @@ function extraerNumero(texto) {
 
   return parseInt(
     encontrados[0]
+  );
+}
+
+// =====================================
+// SALUDO
+// =====================================
+
+function esSaludo(texto) {
+
+  const t =
+    texto.toLowerCase().trim();
+
+  return (
+    t === "hola" ||
+    t === "oi" ||
+    t === "ola" ||
+    t === "hello" ||
+    t === "buenas" ||
+    t === "boa noite" ||
+    t === "buen dia" ||
+    t === "buen día" ||
+    t === "buenos dias" ||
+    t === "buenos días" ||
+    t === "buenas tardes" ||
+    t === "boa tarde"
+  );
+}
+
+// =====================================
+// DETECTAR INTENCION COMERCIAL
+// =====================================
+
+function detectarComercial(
+  texto
+) {
+
+  const t =
+    texto.toLowerCase();
+
+  const gatilhos = [
+
+    "real",
+    "reales",
+    "brl",
+    "usd",
+    "dolar",
+    "dólar",
+    "cup",
+    "mlc",
+
+    "pix",
+    "llave",
+    "chave",
+    "transferencia",
+    "transferência",
+    "deposito",
+    "depósito",
+    "saldo",
+
+    "remesa",
+    "envio",
+    "enviar",
+    "mandar",
+    "receber",
+    "recibir",
+
+    "cambio",
+    "cmb",
+    "taxa",
+    "tasa",
+
+    "etecsa",
+    "recarga",
+    "internet",
+    "sms",
+    "llamadas",
+
+    "dinero",
+    "money",
+    "tarjeta",
+
+    "cuba",
+    "habana",
+    "granma",
+    "santiago",
+
+    "pagar",
+    "pago",
+    "comprovante",
+    "comprobante",
+
+    "quanto",
+    "cuanto"
+  ];
+
+  return gatilhos.some(
+    palavra =>
+      t.includes(
+        palavra
+      )
+  );
+}
+
+// =====================================
+// PIX
+// =====================================
+
+function detectarPix(texto) {
+
+  const t =
+    texto.toLowerCase();
+
+  return (
+    t.includes("pix") ||
+    t.includes("llave pix") ||
+    t.includes("chave pix") ||
+    t.includes("pix para pagar") ||
+    t.includes("quiero pagar") ||
+    t.includes("quero pagar")
   );
 }
 
@@ -328,16 +388,75 @@ app.post(
       if (!clientes[numero]) {
 
         clientes[numero] = {
-          etapa: "inicio"
+          comercial: false
         };
       }
 
       // =================================
-      // PIX SOLO
+      // SALUDO NORMAL
       // =================================
 
       if (
-        detectarPixSolo(
+        esSaludo(
+          mensagem
+        )
+      ) {
+
+        await enviarMensagem(
+
+          numero,
+
+          "Hola 👋 ¿Cómo puedo ayudarte?"
+        );
+
+        return res.sendStatus(200);
+      }
+
+      // =================================
+      // DETECTAR COMERCIAL
+      // =================================
+
+      if (
+        detectarComercial(
+          mensagem
+        )
+      ) {
+
+        clientes[numero]
+        .comercial = true;
+      }
+
+      // =================================
+      // NO COMERCIAL
+      // =================================
+
+      if (
+        !clientes[numero]
+        .comercial
+      ) {
+
+        const resposta =
+          await gerarResposta(
+            mensagem
+          );
+
+        if (resposta) {
+
+          await enviarMensagem(
+            numero,
+            resposta
+          );
+        }
+
+        return res.sendStatus(200);
+      }
+
+      // =================================
+      // PIX
+      // =================================
+
+      if (
+        detectarPix(
           mensagem
         )
       ) {
@@ -353,75 +472,13 @@ app.post(
       }
 
       // =================================
-      // PIX NORMAL
-      // =================================
-
-      if (
-        detectarPix(
-          mensagem
-        )
-      ) {
-
-        clientes[numero]
-        .etapa =
-          "pagamento";
-
-        await enviarMensaje(
-
-          numero,
-
-`PIX:
-8becaaf5-f296-4cbc-a115-46e3d23b042a
-
-Titular:
-YORDANYS RAFAEL SOSA REYES
-
-Banco:
-Nubank (260)`
-        );
-
-        return res.sendStatus(200);
-      }
-
-      // =================================
-      // RECARGA
-      // =================================
-
-      if (
-        detectarRecarga(
-          mensagem
-        )
-      ) {
-
-        const valor =
-          extraerNumero(
-            mensagem
-          );
-
-        if (valor) {
-
-          const saldo =
-            valor * 20;
-
-          await enviarMensagem(
-
-            numero,
-
-`${valor} reales = ${saldo.toLocaleString()} CUP de saldo 📲`
-          );
-
-          return res.sendStatus(200);
-        }
-      }
-
-      // =================================
-      // REALES
+      // CALCULO REALES
       // =================================
 
       if (
         mensagem
         .toLowerCase()
-        .includes("reales")
+        .includes("real")
       ) {
 
         const valor =
@@ -449,7 +506,7 @@ Nubank (260)`
       }
 
       // =================================
-      // USD
+      // CALCULO USD
       // =================================
 
       if (
@@ -480,7 +537,7 @@ Nubank (260)`
       }
 
       // =================================
-      // OPENAI
+      // OPENAI COMERCIAL
       // =================================
 
       const resposta =
