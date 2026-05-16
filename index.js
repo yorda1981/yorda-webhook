@@ -164,10 +164,22 @@ app.post("/webhook", async (req, res) => {
     ========================= */
 
     if (
+
       body.fromMe === true ||
       body.isGroup === true ||
-      body.isNewsletter === true
+      body.isNewsletter === true ||
+      body.isEdit === true ||
+      body.fromApi === true ||
+      body.status !== "RECEIVED" ||
+      body.sticker ||
+      body.image ||
+      body.video ||
+      body.audio ||
+      body.document
+
     ) {
+
+      console.log("IGNORADO");
 
       return res.sendStatus(200);
 
