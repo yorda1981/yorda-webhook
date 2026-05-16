@@ -138,10 +138,14 @@ ${mensagem}
         "https://api.openai.com/v1/responses",
 
         {
+          model:
+            "gpt-4.1-mini",
+
           workflow:
             "wf_68f65c9bd8648190a572e1272e6ae1880cf508aff8bcf40e",
 
-          input: contexto
+          input:
+            contexto
         },
 
         {
