@@ -24,10 +24,12 @@ const ZAPI_CLIENT_TOKEN =
   process.env.ZAPI_CLIENT_TOKEN;
 
 /* =========================
-   PAUSA HUMANA
+   MEMORIAS TEMPORALES
 ========================= */
 
 const pausaHumana = {};
+
+const conversaAtiva = {};
 
 /* =========================
    GATILHOS NEGÓCIO
@@ -279,15 +281,11 @@ app.post("/webhook", async (req, res) => {
     }
 
     /* =========================
-       HORARIO
+       HORÁRIO
     ========================== */
 
     const hora =
       new Date().getHours();
-
-    /* =========================
-       SILENCIO NOCTURNO
-    ========================== */
 
     if (hora >= 22 || hora < 6) {
 
@@ -300,7 +298,7 @@ app.post("/webhook", async (req, res) => {
     }
 
     /* =========================
-       INTERVENÇÃO HUMANA
+       PAUSA HUMANA
     ========================== */
 
     if (body.fromMe === true) {
@@ -384,17 +382,52 @@ app.post("/webhook", async (req, res) => {
     }
 
     /* =========================
-       GATILHOS NEGÓCIO
+       DETECTAR GATILHO
     ========================== */
+
+    const textoLimpo =
+      texto
+        .toLowerCase()
+        .replace(/[^\w\s]/gi, " ");
+
+    const palavras =
+      textoLimpo.split(/\s+/);
 
     const comercial =
       gatilhos.some(g =>
-        texto
-          .toLowerCase()
-          .includes(g)
+        palavras.includes(g)
       );
 
-    if (!comercial) {
+    /* =========================
+       ATIVAR CONVERSA
+    ========================== */
+
+    if (comercial) {
+
+      conversaAtiva[phone] =
+        Date.now() + (15 * 60 * 1000);
+
+    }
+
+    /* =========================
+       VERIFICAR CONVERSA
+    ========================== */
+
+    const conversaEmAndamento =
+
+      conversaAtiva[phone] &&
+      Date.now() < conversaAtiva[phone];
+
+    /* =========================
+       IGNORAR SEM INTERESSE
+    ========================== */
+
+    if (
+
+      !comercial &&
+      !conversaEmAndamento
+
+    ) {
 
       console.log(
         "SEM INTENÇÃO COMERCIAL"
