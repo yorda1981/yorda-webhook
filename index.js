@@ -245,6 +245,27 @@ No pedir datos ya informados.
 }
 
 /* =========================
+   RESET ESTADO
+========================= */
+
+function resetEstado(phone) {
+
+  estadoCliente[phone] = {
+
+    operacion: null,
+    moeda: null,
+    monto: null,
+    municipio: null,
+    tarjeta: null,
+    numero: null,
+    aguardando: null,
+    pixEnviado: false
+
+  };
+
+}
+
+/* =========================
    WEBHOOK
 ========================= */
 
@@ -253,10 +274,6 @@ app.post("/webhook", async (req, res) => {
   try {
 
     const body = req.body;
-
-    /* =========================
-       IGNORAR EVENTOS
-    ========================== */
 
     if (
 
@@ -287,10 +304,6 @@ app.post("/webhook", async (req, res) => {
     const hora =
       new Date().getHours();
 
-    /* =========================
-       SILÊNCIO NOTURNO
-    ========================== */
-
     if (hora >= 22 || hora < 6) {
 
       console.log(
@@ -308,7 +321,7 @@ app.post("/webhook", async (req, res) => {
     if (body.fromMe === true) {
 
       pausaHumana[phone] =
-        Date.now() + (5 * 60 * 1000);
+        Date.now() + (30 * 60 * 1000);
 
       console.log(
         "PAUSA HUMANA:",
@@ -340,14 +353,37 @@ app.post("/webhook", async (req, res) => {
       texto
     );
 
-    /* =========================
-       TEXTO LIMPO
-    ========================== */
-
     const textoLimpo =
       texto
         .toLowerCase()
         .replace(/[^\w\s]/gi, " ");
+
+    /* =========================
+       PEDIR HUMANO
+    ========================== */
+
+    if (
+
+      textoLimpo.includes("yordanys") ||
+      textoLimpo.includes("humano") ||
+      textoLimpo.includes("operador")
+
+    ) {
+
+      pausaHumana[phone] =
+        Date.now() + (30 * 60 * 1000);
+
+      await enviarMensaje(
+
+        phone,
+
+        "Claro 👌 Yordanys continuará tu atención en breve."
+
+      );
+
+      return res.sendStatus(200);
+
+    }
 
     /* =========================
        GATILHOS
@@ -361,7 +397,7 @@ app.post("/webhook", async (req, res) => {
     if (comercial) {
 
       conversaAtiva[phone] =
-        Date.now() + (15 * 60 * 1000);
+        Date.now() + (5 * 60 * 1000);
 
     }
 
@@ -369,6 +405,23 @@ app.post("/webhook", async (req, res) => {
 
       conversaAtiva[phone] &&
       Date.now() < conversaAtiva[phone];
+
+    /* =========================
+       LIMPAR CONTEXTO VELHO
+    ========================== */
+
+    if (
+
+      conversaAtiva[phone] &&
+      Date.now() > conversaAtiva[phone]
+
+    ) {
+
+      delete conversaAtiva[phone];
+
+      resetEstado(phone);
+
+    }
 
     /* =========================
        SAUDAÇÃO
@@ -415,10 +468,6 @@ app.post("/webhook", async (req, res) => {
 
     }
 
-    /* =========================
-       IGNORAR
-    ========================== */
-
     if (
 
       !comercial &&
@@ -434,24 +483,9 @@ app.post("/webhook", async (req, res) => {
 
     }
 
-    /* =========================
-       ESTADO CLIENTE
-    ========================== */
-
     if (!estadoCliente[phone]) {
 
-      estadoCliente[phone] = {
-
-        operacion: null,
-        moeda: null,
-        monto: null,
-        municipio: null,
-        tarjeta: null,
-        numero: null,
-        aguardando: null,
-        pixEnviado: false
-
-      };
+      resetEstado(phone);
 
     }
 
@@ -462,6 +496,22 @@ app.post("/webhook", async (req, res) => {
        DETECTAR OPERAÇÃO
     ========================== */
 
+    let novaOperacao = null;
+
+    if (
+
+      !estado.operacion ||
+
+      textoLimpo.includes("entrega") ||
+      textoLimpo.includes("habana") ||
+      textoLimpo.includes("efectivo")
+
+    ) {
+
+      novaOperacao = "entrega";
+
+    }
+
     if (
 
       textoLimpo.includes("transferencia") ||
@@ -470,21 +520,7 @@ app.post("/webhook", async (req, res) => {
 
     ) {
 
-      estado.operacion =
-        "transferencia";
-
-    }
-
-    if (
-
-      textoLimpo.includes("entrega") ||
-      textoLimpo.includes("habana") ||
-      textoLimpo.includes("efectivo")
-
-    ) {
-
-      estado.operacion =
-        "entrega";
+      novaOperacao = "transferencia";
 
     }
 
@@ -495,8 +531,21 @@ app.post("/webhook", async (req, res) => {
 
     ) {
 
-      estado.operacion =
-        "recarga";
+      novaOperacao = "recarga";
+
+    }
+
+    if (
+
+      novaOperacao &&
+      estado.operacion !== novaOperacao
+
+    ) {
+
+      resetEstado(phone);
+
+      estadoCliente[phone].operacion =
+        novaOperacao;
 
     }
 
@@ -543,7 +592,25 @@ app.post("/webhook", async (req, res) => {
     }
 
     /* =========================
-       DETECTAR MUNICÍPIO
+       DETECTAR TARJETA
+    ========================== */
+
+    const tarjeta =
+      texto.replace(/\D/g, "");
+
+    if (
+
+      tarjeta.length >= 16
+
+    ) {
+
+      estado.tarjeta =
+        tarjeta;
+
+    }
+
+    /* =========================
+       MUNICIPIOS
     ========================== */
 
     const municipios = [
@@ -569,25 +636,7 @@ app.post("/webhook", async (req, res) => {
     });
 
     /* =========================
-       DETECTAR TARJETA
-    ========================== */
-
-    const tarjeta =
-      texto.replace(/\D/g, "");
-
-    if (
-
-      tarjeta.length >= 16
-
-    ) {
-
-      estado.tarjeta =
-        tarjeta;
-
-    }
-
-    /* =========================
-       DETECTAR NÚMERO RECARGA
+       RECARGA
     ========================== */
 
     if (
@@ -613,7 +662,7 @@ app.post("/webhook", async (req, res) => {
     }
 
     /* =========================
-       FLUJO TRANSFERENCIA
+       FLUJOS
     ========================== */
 
     if (
@@ -624,15 +673,9 @@ app.post("/webhook", async (req, res) => {
 
       if (!estado.monto) {
 
-        estado.aguardando =
-          "monto";
-
         await enviarMensaje(
-
           phone,
-
           "¿Cuántos reales deseas enviar?"
-
         );
 
         return res.sendStatus(200);
@@ -641,42 +684,9 @@ app.post("/webhook", async (req, res) => {
 
       if (!estado.tarjeta) {
 
-        estado.aguardando =
-          "tarjeta";
-
         await enviarMensaje(
-
           phone,
-
           "Envíame la tarjeta 👌"
-
-        );
-
-        return res.sendStatus(200);
-
-      }
-
-      if (!estado.pixEnviado) {
-
-        estado.pixEnviado = true;
-
-        estado.aguardando =
-          "comprovante";
-
-        await enviarMensaje(
-
-          phone,
-
-          "8becaaf5-f296-4cbc-a115-46e3d23b042a"
-
-        );
-
-        await enviarMensaje(
-
-          phone,
-
-          "YORDANYS RAFAEL SOSA REYES\nNubank"
-
         );
 
         return res.sendStatus(200);
@@ -684,10 +694,6 @@ app.post("/webhook", async (req, res) => {
       }
 
     }
-
-    /* =========================
-       FLUJO ENTREGA
-    ========================== */
 
     if (
 
@@ -697,15 +703,9 @@ app.post("/webhook", async (req, res) => {
 
       if (!estado.monto) {
 
-        estado.aguardando =
-          "monto";
-
         await enviarMensaje(
-
           phone,
-
           "¿Cuántos reales deseas enviar?"
-
         );
 
         return res.sendStatus(200);
@@ -714,42 +714,9 @@ app.post("/webhook", async (req, res) => {
 
       if (!estado.municipio) {
 
-        estado.aguardando =
-          "municipio";
-
         await enviarMensaje(
-
           phone,
-
           "¿Cuál municipio de La Habana?"
-
-        );
-
-        return res.sendStatus(200);
-
-      }
-
-      if (!estado.pixEnviado) {
-
-        estado.pixEnviado = true;
-
-        estado.aguardando =
-          "comprovante";
-
-        await enviarMensaje(
-
-          phone,
-
-          "8becaaf5-f296-4cbc-a115-46e3d23b042a"
-
-        );
-
-        await enviarMensaje(
-
-          phone,
-
-          "YORDANYS RAFAEL SOSA REYES\nNubank"
-
         );
 
         return res.sendStatus(200);
@@ -757,10 +724,6 @@ app.post("/webhook", async (req, res) => {
       }
 
     }
-
-    /* =========================
-       FLUJO RECARGA
-    ========================== */
 
     if (
 
@@ -770,15 +733,9 @@ app.post("/webhook", async (req, res) => {
 
       if (!estado.monto) {
 
-        estado.aguardando =
-          "monto";
-
         await enviarMensaje(
-
           phone,
-
           "¿De cuánto será la recarga?"
-
         );
 
         return res.sendStatus(200);
@@ -787,47 +744,39 @@ app.post("/webhook", async (req, res) => {
 
       if (!estado.numero) {
 
-        estado.aguardando =
-          "numero";
-
         await enviarMensaje(
-
           phone,
-
           "Envíame el número 👌"
-
         );
 
         return res.sendStatus(200);
 
       }
 
-      if (!estado.pixEnviado) {
+    }
 
-        estado.pixEnviado = true;
+    /* =========================
+       PIX
+    ========================== */
 
-        estado.aguardando =
-          "comprovante";
+    if (!estado.pixEnviado) {
 
-        await enviarMensaje(
+      estado.pixEnviado = true;
 
-          phone,
+      estado.aguardando =
+        "comprovante";
 
-          "8becaaf5-f296-4cbc-a115-46e3d23b042a"
+      await enviarMensaje(
+        phone,
+        "8becaaf5-f296-4cbc-a115-46e3d23b042a"
+      );
 
-        );
+      await enviarMensaje(
+        phone,
+        "YORDANYS RAFAEL SOSA REYES\nNubank"
+      );
 
-        await enviarMensaje(
-
-          phone,
-
-          "YORDANYS RAFAEL SOSA REYES\nNubank"
-
-        );
-
-        return res.sendStatus(200);
-
-      }
+      return res.sendStatus(200);
 
     }
 
@@ -851,35 +800,33 @@ app.post("/webhook", async (req, res) => {
     ) {
 
       await enviarMensaje(
-
         phone,
-
         "Comprovante recebido 👌"
-
       );
 
       await enviarMensaje(
-
         phone,
-
         "Sua operação será processada."
-
       );
 
-      estadoCliente[phone] = {
-
-        operacion: null,
-        moeda: null,
-        monto: null,
-        municipio: null,
-        tarjeta: null,
-        numero: null,
-        aguardando: null,
-        pixEnviado: false
-
-      };
+      resetEstado(phone);
 
       delete conversaAtiva[phone];
+
+      return res.sendStatus(200);
+
+    }
+
+    /* =========================
+       EVITAR OPENAI LOUCO
+    ========================== */
+
+    if (
+
+      conversaEmAndamento &&
+      !estado.operacion
+
+    ) {
 
       return res.sendStatus(200);
 
