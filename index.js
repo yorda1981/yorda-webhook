@@ -75,11 +75,12 @@ async function gerarResposta(
       )
     );
 
+    // =================================
+    // TEXTO WORKFLOW
+    // =================================
+
     const texto =
-      resposta.data
-      ?.output?.[0]
-      ?.content?.[0]
-      ?.text;
+      resposta.data?.output_text;
 
     console.log(
       "TEXTO FINAL:",
