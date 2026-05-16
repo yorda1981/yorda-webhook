@@ -26,7 +26,7 @@ const mensagensProcessadas =
   new Set();
 
 // =====================================
-// OPENAI
+// OPENAI WORKFLOW
 // =====================================
 
 async function gerarResposta(
@@ -42,15 +42,13 @@ async function gerarResposta(
 
         {
           model:
-            "gpt-4.1-mini",
+            "o4-mini",
+
+          workflow:
+            "wf_68f65c9bd8648190a572e1272e6ae1880cf508aff8bcf40e",
 
           input:
-            `Você é um atendente de remessas.
-            
-Cliente disse:
-${mensagem}
-
-Responda de forma natural.`
+            mensagem
         },
 
         {
@@ -84,7 +82,7 @@ Responda de forma natural.`
       ?.text;
 
     console.log(
-      "TEXTO:",
+      "TEXTO FINAL:",
       texto
     );
 
@@ -120,7 +118,7 @@ Responda de forma natural.`
 }
 
 // =====================================
-// WHATSAPP
+// ENVIAR WHATSAPP
 // =====================================
 
 async function enviarMensagem(
@@ -219,6 +217,15 @@ app.post(
 
       if (
         req.body.fromMe
+      ) {
+
+        return res.sendStatus(200);
+      }
+
+      // IGNORAR NEWSLETTER
+
+      if (
+        req.body.isNewsletter
       ) {
 
         return res.sendStatus(200);
