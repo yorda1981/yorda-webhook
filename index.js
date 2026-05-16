@@ -16,6 +16,13 @@ const ZAPI_INSTANCE = process.env.ZAPI_INSTANCE;
 const ZAPI_TOKEN = process.env.ZAPI_TOKEN;
 
 /* =========================
+   PIX
+========================= */
+
+const PIX =
+"8becaaf5-f296-4cbc-a115-46e3d23b042a";
+
+/* =========================
    GATILLOS
 ========================= */
 
@@ -24,43 +31,31 @@ const gatilhos = [
   "remesas",
   "envio",
   "enviar",
+  "transferencia",
+  "transferência",
   "recarga",
-  "recargar",
   "saldo",
   "cambio",
   "taxa",
-  "tasas",
+  "taxas",
   "cup",
   "usd",
   "dolar",
   "dólar",
   "pix",
-  "transferencia",
-  "transferir",
-  "reales",
   "real",
+  "reales",
   "dinero",
   "mlc",
   "etecsa",
-  "cuba",
-  "deposito",
-  "depósito",
-  "mandar",
-  "money"
+  "cuba"
 ];
 
 /* =========================
-   PIX
+   FUNÇÕES
 ========================= */
 
-const PIX =
-"8becaaf5-f296-4cbc-a115-46e3d23b042a";
-
-/* =========================
-   FUNCIONES
-========================= */
-
-function tieneGatillo(texto) {
+function temGatilho(texto) {
 
   texto = texto.toLowerCase();
 
@@ -91,6 +86,10 @@ function calcularRecarga(valor) {
   return valor * 20;
 }
 
+/* =========================
+   ENVIAR MENSAGEM
+========================= */
+
 async function enviarMensaje(numero, mensaje) {
 
   try {
@@ -98,7 +97,7 @@ async function enviarMensaje(numero, mensaje) {
     const url =
 `https://api.z-api.io/instances/${ZAPI_INSTANCE}/token/${ZAPI_TOKEN}/send-text`;
 
-    await fetch(url, {
+    const resposta = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
@@ -108,6 +107,11 @@ async function enviarMensaje(numero, mensaje) {
         message: mensaje
       })
     });
+
+    const data = await resposta.text();
+
+    console.log("ZAPI RESPOSTA:");
+    console.log(data);
 
   } catch (error) {
 
@@ -135,24 +139,33 @@ app.post("/webhook", async (req, res) => {
 
   try {
 
-    console.log("BODY:", req.body);
+    console.log("BODY:");
+    console.log(JSON.stringify(req.body, null, 2));
 
     const body = req.body;
 
-    const texto =
-      body?.text?.message ||
+    const numero =
+      body.phone ||
+      body.from ||
+      body.sender ||
       "";
 
-    const numero =
-      body?.phone;
+    const texto =
+      body?.text?.message ||
+      body?.text?.body ||
+      body?.message ||
+      "";
 
-    if (!texto || !numero) {
+    console.log("NUMERO:", numero);
+    console.log("MENSAGEM:", texto);
+
+    if (!numero || !texto) {
+
+      console.log("SEM DADOS");
 
       return res.sendStatus(200);
 
     }
-
-    console.log("MENSAGEM:", texto);
 
     const msg = texto.toLowerCase();
 
@@ -165,11 +178,13 @@ app.post("/webhook", async (req, res) => {
       body.isGroup === true ||
       body.isNewsletter === true
     ) {
+
       return res.sendStatus(200);
+
     }
 
     /* =========================
-       SAUDAÇÃO NORMAL
+       SAUDAÇÃO
     ========================= */
 
     if (
@@ -187,20 +202,21 @@ app.post("/webhook", async (req, res) => {
       );
 
       return res.sendStatus(200);
+
     }
 
     /* =========================
        SEM GATILHO
     ========================= */
 
-    if (!tieneGatillo(msg)) {
+    if (!temGatilho(msg)) {
 
       return res.sendStatus(200);
 
     }
 
     /* =========================
-       FALAR COM YORDANYS
+       YORDANYS
     ========================= */
 
     if (
@@ -215,6 +231,7 @@ app.post("/webhook", async (req, res) => {
       );
 
       return res.sendStatus(200);
+
     }
 
     /* =========================
@@ -231,6 +248,7 @@ app.post("/webhook", async (req, res) => {
       );
 
       return res.sendStatus(200);
+
     }
 
     /* =========================
@@ -239,7 +257,7 @@ app.post("/webhook", async (req, res) => {
 
     if (
       msg.includes("taxa") ||
-      msg.includes("tasas") ||
+      msg.includes("taxas") ||
       msg.includes("cambio")
     ) {
 
@@ -251,6 +269,7 @@ app.post("/webhook", async (req, res) => {
       );
 
       return res.sendStatus(200);
+
     }
 
     /* =========================
@@ -261,49 +280,44 @@ app.post("/webhook", async (req, res) => {
       msg.includes("recarga")
     ) {
 
-      await enviarMensaje(
-        numero,
-        "¿De cuánto deseas la recarga?"
-      );
+      const numeros =
+        msg.match(/\d+/);
 
-      return res.sendStatus(200);
-    }
+      if (numeros) {
 
-    /* =========================
-       MONTO + RECARGA
-    ========================= */
+        const valor =
+          Number(numeros[0]);
 
-    const recargaMatch =
-      msg.match(/(\d+)/);
+        const saldo =
+          calcularRecarga(valor);
 
-    if (
-      recargaMatch &&
-      msg.includes("recarga")
-    ) {
-
-      const valor =
-        Number(recargaMatch[1]);
-
-      const saldo =
-        calcularRecarga(valor);
-
-      await enviarMensaje(
-        numero,
+        await enviarMensaje(
+          numero,
 `${valor} reales = ${saldo.toLocaleString()} CUP de saldo 📲`
-      );
+        );
+
+      } else {
+
+        await enviarMensaje(
+          numero,
+          "¿De cuánto deseas la recarga?"
+        );
+
+      }
 
       return res.sendStatus(200);
+
     }
 
     /* =========================
        CALCULO REALES
     ========================= */
 
-    const match =
-      msg.match(/(\d+)/);
+    const numeros =
+      msg.match(/\d+/);
 
     if (
-      match &&
+      numeros &&
       (
         msg.includes("real") ||
         msg.includes("reales")
@@ -311,7 +325,7 @@ app.post("/webhook", async (req, res) => {
     ) {
 
       const valor =
-        Number(match[1]);
+        Number(numeros[0]);
 
       const cup =
         calcularCUP(valor);
@@ -322,10 +336,11 @@ app.post("/webhook", async (req, res) => {
       );
 
       return res.sendStatus(200);
+
     }
 
     /* =========================
-       OPENAI FALLBACK
+       OPENAI
     ========================= */
 
     const resposta = await fetch(
@@ -340,7 +355,9 @@ app.post("/webhook", async (req, res) => {
         },
         body: JSON.stringify({
           model: "gpt-4.1-mini",
-          input: `Responde corto y profesional sobre remesas y recargas: ${texto}`
+          input:
+`Responde corto y profesional sobre remesas y recargas:
+${texto}`
         })
       }
     );
@@ -348,11 +365,24 @@ app.post("/webhook", async (req, res) => {
     const data =
       await resposta.json();
 
-    console.log(data);
+    console.log("OPENAI:");
+    console.log(JSON.stringify(data, null, 2));
 
-    const respostaTexto =
-      data?.output?.[0]?.content?.[0]?.text ||
+    let respostaTexto =
       "No entendí. ¿Puedes explicarme mejor?";
+
+    if (
+      data.output &&
+      data.output[0] &&
+      data.output[0].content &&
+      data.output[0].content[0]
+    ) {
+
+      respostaTexto =
+        data.output[0].content[0].text ||
+        respostaTexto;
+
+    }
 
     await enviarMensaje(
       numero,
