@@ -19,7 +19,8 @@ const ZAPI_CLIENT_TOKEN =
   process.env.ZAPI_CLIENT_TOKEN;
 
 const SYSTEM_PROMPT =
-  process.env.SYSTEM_PROMPT;
+  process.env.SYSTEM_PROMPT ||
+  "Responde corto, natural y humano.";
 
 // =====================================
 // MEMORIA
@@ -88,17 +89,17 @@ function esSaludo(texto) {
     t === "hello" ||
     t === "buenas" ||
     t === "boa noite" ||
+    t === "boa tarde" ||
     t === "buen dia" ||
     t === "buen día" ||
     t === "buenos dias" ||
     t === "buenos días" ||
-    t === "buenas tardes" ||
-    t === "boa tarde"
+    t === "buenas tardes"
   );
 }
 
 // =====================================
-// DETECTAR INTENCION COMERCIAL
+// DETECTAR COMERCIAL
 // =====================================
 
 function detectarComercial(
@@ -113,21 +114,25 @@ function detectarComercial(
     "real",
     "reales",
     "brl",
+
     "usd",
     "dolar",
     "dólar",
+
     "cup",
     "mlc",
 
     "pix",
     "llave",
     "chave",
+
     "transferencia",
     "transferência",
+
     "deposito",
     "depósito",
-    "saldo",
 
+    "saldo",
     "remesa",
     "envio",
     "enviar",
@@ -157,11 +162,15 @@ function detectarComercial(
 
     "pagar",
     "pago",
+
     "comprovante",
     "comprobante",
 
     "quanto",
-    "cuanto"
+    "cuanto",
+
+    "remessas",
+    "recargas"
   ];
 
   return gatilhos.some(
@@ -215,13 +224,17 @@ async function gerarResposta(
             {
               role: "system",
               content:
-                SYSTEM_PROMPT
+                String(
+                  SYSTEM_PROMPT
+                )
             },
 
             {
               role: "user",
               content:
-                mensagem
+                String(
+                  mensagem
+                )
             }
           ]
         },
@@ -238,10 +251,13 @@ async function gerarResposta(
         }
       );
 
-    return resposta.data
+    const texto =
+      resposta.data
       ?.output?.[0]
       ?.content?.[0]
       ?.text;
+
+    return texto;
 
   } catch (erro) {
 
@@ -290,6 +306,10 @@ async function enviarMensagem(
       }
     );
 
+    console.log(
+      "MENSAGEM ENVIADA"
+    );
+
   } catch (erro) {
 
     console.log(
@@ -297,6 +317,7 @@ async function enviarMensagem(
     );
 
     console.log(
+      erro.response?.data ||
       erro.message
     );
   }
@@ -326,7 +347,11 @@ app.post(
       const body =
         req.body;
 
+      console.log(body);
+
+      // =================================
       // IGNORAR
+      // =================================
 
       if (
         body.isGroup ||
@@ -337,7 +362,9 @@ app.post(
         return res.sendStatus(200);
       }
 
+      // =================================
       // DUPLICADAS
+      // =================================
 
       const messageId =
         body.messageId;
@@ -363,7 +390,9 @@ app.post(
 
       }, 600000);
 
+      // =================================
       // TEXTO
+      // =================================
 
       const mensagem =
         body.text?.message;
@@ -427,31 +456,6 @@ app.post(
       }
 
       // =================================
-      // NO COMERCIAL
-      // =================================
-
-      if (
-        !clientes[numero]
-        .comercial
-      ) {
-
-        const resposta =
-          await gerarResposta(
-            mensagem
-          );
-
-        if (resposta) {
-
-          await enviarMensagem(
-            numero,
-            resposta
-          );
-        }
-
-        return res.sendStatus(200);
-      }
-
-      // =================================
       // PIX
       // =================================
 
@@ -465,7 +469,14 @@ app.post(
 
           numero,
 
-          "8becaaf5-f296-4cbc-a115-46e3d23b042a"
+`PIX:
+8becaaf5-f296-4cbc-a115-46e3d23b042a
+
+Titular:
+YORDANYS RAFAEL SOSA REYES
+
+Banco:
+Nubank (260)`
         );
 
         return res.sendStatus(200);
@@ -537,7 +548,7 @@ app.post(
       }
 
       // =================================
-      // OPENAI COMERCIAL
+      // OPENAI
       // =================================
 
       const resposta =
