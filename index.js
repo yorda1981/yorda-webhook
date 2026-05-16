@@ -20,6 +20,9 @@ const ZAPI_INSTANCE =
 const ZAPI_TOKEN =
   process.env.ZAPI_TOKEN;
 
+const ZAPI_CLIENT_TOKEN =
+  process.env.ZAPI_CLIENT_TOKEN;
+
 /* =========================
    PIX
 ========================= */
@@ -92,15 +95,23 @@ async function enviarMensaje(
 
         {
           headers: {
+
+            "Client-Token":
+              ZAPI_CLIENT_TOKEN,
+
             "Content-Type":
               "application/json"
+
           }
         }
 
       );
 
     console.log(
-      "ENVIADO:",
+      "ENVIADO:"
+    );
+
+    console.log(
       response.data
     );
 
