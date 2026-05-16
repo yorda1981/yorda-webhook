@@ -1,6 +1,3 @@
-# index.js corregido
-
-```js
 const express = require("express");
 const axios = require("axios");
 
@@ -602,4 +599,3 @@ app.listen(PORT, () => {
   );
 
 });
-```
