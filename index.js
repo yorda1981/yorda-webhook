@@ -1,5 +1,7 @@
 const express = require("express");
 const axios = require("axios");
+const fs = require("fs");
+const path = require("path");
 
 const app = express();
 
@@ -19,6 +21,49 @@ const ZAPI_CLIENT_TOKEN =
   process.env.ZAPI_CLIENT_TOKEN;
 
 // =====================================
+// CLIENTES JSON
+// =====================================
+
+const clientesPath = path.join(
+  __dirname,
+  "datos",
+  "clientes.json"
+);
+
+function carregarClientes() {
+
+  try {
+
+    const dados =
+      fs.readFileSync(
+        clientesPath,
+        "utf8"
+      );
+
+    return JSON.parse(dados);
+
+  } catch {
+
+    return {};
+  }
+}
+
+function salvarClientes(clientes) {
+
+  fs.writeFileSync(
+    clientesPath,
+    JSON.stringify(
+      clientes,
+      null,
+      2
+    )
+  );
+}
+
+let clientes =
+  carregarClientes();
+
+// =====================================
 // CONTROLE DUPLICADAS
 // =====================================
 
@@ -26,14 +71,66 @@ const mensagensProcessadas =
   new Set();
 
 // =====================================
+// DETECTAR IDIOMA
+// =====================================
+
+function detectarIdioma(
+  texto
+) {
+
+  const espanhol = [
+    "hola",
+    "quiero",
+    "reales",
+    "usd",
+    "cup",
+    "tasa",
+    "transferencia",
+    "tarjeta"
+  ];
+
+  const textoLower =
+    texto.toLowerCase();
+
+  for (const palavra of espanhol) {
+
+    if (
+      textoLower.includes(
+        palavra
+      )
+    ) {
+
+      return "es";
+    }
+  }
+
+  return "pt";
+}
+
+// =====================================
 // OPENAI WORKFLOW
 // =====================================
 
 async function gerarResposta(
+  numero,
   mensagem
 ) {
 
   try {
+
+    const cliente =
+      clientes[numero];
+
+    const contexto = `
+Idioma do cliente:
+${cliente.idioma}
+
+Estado atual:
+${cliente.estado}
+
+Mensagem do cliente:
+${mensagem}
+`;
 
     const resposta =
       await axios.post(
@@ -44,7 +141,7 @@ async function gerarResposta(
           workflow:
             "wf_68f65c9bd8648190a572e1272e6ae1880cf508aff8bcf40e",
 
-          input: mensagem
+          input: contexto
         },
 
         {
@@ -298,11 +395,55 @@ app.post(
       }
 
       // =================================
+      // CLIENTE
+      // =================================
+
+      if (!clientes[numero]) {
+
+        clientes[numero] = {
+
+          idioma:
+            detectarIdioma(
+              mensagem
+            ),
+
+          estado:
+            "normal",
+
+          ultimaInteracao:
+            new Date()
+            .toISOString()
+        };
+
+        salvarClientes(
+          clientes
+        );
+
+        console.log(
+          "NOVO CLIENTE SALVO"
+        );
+      }
+
+      // =================================
+      // ATUALIZAR CLIENTE
+      // =================================
+
+      clientes[numero]
+      .ultimaInteracao =
+        new Date()
+        .toISOString();
+
+      salvarClientes(
+        clientes
+      );
+
+      // =================================
       // OPENAI AGENT
       // =================================
 
       const resposta =
         await gerarResposta(
+          numero,
           mensagem
         );
 
