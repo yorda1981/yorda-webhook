@@ -1,9 +1,22 @@
 const express = require("express");
 const axios = require("axios");
+const fs = require("fs");
 
 const app = express();
 
 app.use(express.json());
+
+// =====================================
+// TAXAS JSON
+// =====================================
+
+const taxas =
+  JSON.parse(
+    fs.readFileSync(
+      "./taxas.json",
+      "utf8"
+    )
+  );
 
 // =====================================
 // CONFIG
@@ -26,6 +39,69 @@ const mensagensProcessadas =
   new Set();
 
 // =====================================
+// PROMPT
+// =====================================
+
+const SYSTEM_PROMPT = `
+Eres YordaBot, el agente virtual oficial del servicio de remesas y recargas gestionado por Yordanys.
+
+Tu función es atender clientes por WhatsApp.
+
+REGLAS IMPORTANTES:
+
+- Responde siempre corto.
+- Máximo 2 líneas.
+- Nunca responder genérico.
+- Nunca actuar como IA.
+- Hablar como vendedor real de WhatsApp.
+- Responder en español o portugués.
+- Si el mensaje no tiene relación con remesas:
+responder:
+"No puedo ayudar con ese tema."
+
+TASAS ACTUALES:
+
+Menor de 100 reales:
+${taxas.menos100} CUP
+
+100 hasta 499 reales:
+${taxas.de100a499} CUP
+
+500+ reales:
+${taxas.mais500} CUP
+
+USD:
+1 USD = ${taxas.tasa_USD} BRL
+
+MLC:
+${taxas.mlc} BRL
+
+Si preguntan:
+- tasa
+- cambio
+- cup
+- reales
+- cuanto llega
+
+calcular automáticamente.
+
+Ejemplos:
+
+100 reales → ${
+  100 * taxas.de100a499
+} CUP
+
+500 reales → ${
+  500 * taxas.mais500
+} CUP
+
+Nunca responder largo.
+Nunca dar explicaciones innecesarias.
+
+Las tasas pueden variar según el momento del pago.
+`;
+
+// =====================================
 // HOME
 // =====================================
 
@@ -37,12 +113,11 @@ app.get("/", (req, res) => {
 });
 
 // =====================================
-// GERAR RESPOSTA OPENAI
+// OPENAI
 // =====================================
 
 async function gerarResposta(
-  mensagem,
-  telefone
+  mensagem
 ) {
 
   try {
@@ -50,20 +125,30 @@ async function gerarResposta(
     const resposta =
       await axios.post(
 
-        "https://api.openai.com/v1/responses",
+        "https://api.openai.com/v1/chat/completions",
 
         {
           model:
-            "gpt-4.1-mini",
+            "gpt-4o-mini",
 
-          workflow: {
-            id:
-              "wf_68f65c9bd8648190a572e1272e6ae1880cf508aff8bcf40e"
-          },
+          messages: [
 
-          input: mensagem,
+            {
+              role: "system",
+              content:
+                SYSTEM_PROMPT
+            },
 
-          user: telefone
+            {
+              role: "user",
+              content:
+                mensagem
+            }
+          ],
+
+          temperature: 0.3,
+
+          max_tokens: 80
         },
 
         {
@@ -90,53 +175,11 @@ async function gerarResposta(
       )
     );
 
-    let texto = "";
-
-    if (
-      resposta.data.output_text
-    ) {
-
-      texto =
-        resposta.data.output_text;
-
-    } else if (
-
-      resposta.data.output &&
-      resposta.data.output.length > 0
-
-    ) {
-
-      for (
-        const item of resposta.data.output
-      ) {
-
-        if (
-          item.content &&
-          item.content.length > 0
-        ) {
-
-          for (
-            const conteudo of item.content
-          ) {
-
-            if (
-              conteudo.text
-            ) {
-
-              texto =
-                conteudo.text;
-
-              break;
-            }
-          }
-        }
-
-        if (texto) break;
-      }
-    }
-
-    texto =
-      texto.trim();
+    const texto =
+      resposta.data
+      ?.choices?.[0]
+      ?.message?.content
+      ?.trim() || "";
 
     console.log(
       "RESPOSTA FINAL:",
@@ -207,7 +250,7 @@ async function enviarMensagem(
     );
 
     console.log(
-      "MENSAGEM ENVIADA"
+      "ENVIADO COM SUCESSO"
     );
 
   } catch (erro) {
@@ -250,24 +293,9 @@ app.post(
       console.log("BODY:");
       console.log(req.body);
 
-      // ================================
-      // IGNORAR GRUPOS
-      // ================================
-
-      if (
-        req.body.isGroup
-      ) {
-
-        console.log(
-          "GRUPO IGNORADO"
-        );
-
-        return res.sendStatus(200);
-      }
-
-      // ================================
+      // =================================
       // IGNORAR NEWSLETTER
-      // ================================
+      // =================================
 
       if (
         req.body.isNewsletter
@@ -280,9 +308,24 @@ app.post(
         return res.sendStatus(200);
       }
 
-      // ================================
-      // IGNORAR BOT
-      // ================================
+      // =================================
+      // IGNORAR GRUPOS
+      // =================================
+
+      if (
+        req.body.isGroup
+      ) {
+
+        console.log(
+          "GRUPO IGNORADO"
+        );
+
+        return res.sendStatus(200);
+      }
+
+      // =================================
+      // IGNORAR MENSAGENS DO BOT
+      // =================================
 
       if (
         req.body.fromMe === true
@@ -295,9 +338,9 @@ app.post(
         return res.sendStatus(200);
       }
 
-      // ================================
-      // PEGAR ID
-      // ================================
+      // =================================
+      // EVITAR DUPLICADAS
+      // =================================
 
       const messageId =
         req.body.messageId;
@@ -309,7 +352,7 @@ app.post(
       ) {
 
         console.log(
-          "MENSAGEM DUPLICADA IGNORADA"
+          "MENSAGEM DUPLICADA"
         );
 
         return res.sendStatus(200);
@@ -327,9 +370,9 @@ app.post(
 
       }, 600000);
 
-      // ================================
+      // =================================
       // TEXTO
-      // ================================
+      // =================================
 
       const mensagem =
         req.body.text?.message || "";
@@ -347,14 +390,13 @@ app.post(
         return res.sendStatus(200);
       }
 
-      // ================================
+      // =================================
       // OPENAI
-      // ================================
+      // =================================
 
       const resposta =
         await gerarResposta(
-          mensagem,
-          numero
+          mensagem
         );
 
       if (!resposta) {
@@ -366,9 +408,9 @@ app.post(
         return res.sendStatus(200);
       }
 
-      // ================================
+      // =================================
       // ENVIAR
-      // ================================
+      // =================================
 
       await enviarMensagem(
         numero,
