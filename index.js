@@ -11,13 +11,17 @@ const PORT = process.env.PORT || 8080;
    VARIABLES
 ========================= */
 
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const OPENAI_API_KEY =
+  process.env.OPENAI_API_KEY;
 
-const ZAPI_INSTANCE = process.env.ZAPI_INSTANCE;
+const ZAPI_INSTANCE =
+  process.env.ZAPI_INSTANCE;
 
-const ZAPI_TOKEN = process.env.ZAPI_TOKEN;
+const ZAPI_TOKEN =
+  process.env.ZAPI_TOKEN;
 
-const ZAPI_CLIENT_TOKEN = process.env.ZAPI_CLIENT_TOKEN;
+const ZAPI_CLIENT_TOKEN =
+  process.env.ZAPI_CLIENT_TOKEN;
 
 /* =========================
    PAUSA HUMANA
@@ -26,7 +30,7 @@ const ZAPI_CLIENT_TOKEN = process.env.ZAPI_CLIENT_TOKEN;
 const pausaHumana = {};
 
 /* =========================
-   GATILHOS NEGOCIO
+   GATILHOS NEGÓCIO
 ========================= */
 
 const gatilhos = [
@@ -58,8 +62,28 @@ const gatilhos = [
   "dinero",
   "dinheiro",
   "deposito",
-  "depósito",
-  "cuba"
+  "depósito"
+
+];
+
+/* =========================
+   SAUDAÇÕES
+========================= */
+
+const saudacoes = [
+
+  "hola",
+  "oi",
+  "ola",
+  "olá",
+  "buenas",
+  "bom dia",
+  "boa tarde",
+  "boa noite",
+  "buen dia",
+  "buenos dias",
+  "buenas tardes",
+  "buenas noches"
 
 ];
 
@@ -122,7 +146,7 @@ async function enviarMensaje(phone, texto) {
 }
 
 /* =========================
-   OPENAI AGENT
+   OPENAI
 ========================= */
 
 async function responderIA(mensagem) {
@@ -142,36 +166,31 @@ async function responderIA(mensagem) {
         instructions: `
 Eres YordaBot.
 
-Asistente de remesas por WhatsApp.
+Asistente humano de remesas por WhatsApp.
 
 REGLAS:
 
 - Responder corto.
 - Máximo 2 líneas.
-- Sonar humano.
 - Sonar natural.
+- Sonar humano.
 - No sonar como ChatGPT.
-- No explicar demasiado.
 - No usar listas.
+- No explicar demasiado.
 - No repetir preguntas.
-- No repetir saludos.
 - Hablar en el idioma del cliente.
 
-Responder solamente temas relacionados con:
+Responder solamente sobre:
 remesas,
 cambios,
-PIX,
 USD,
 BRL,
 CUP,
 MLC,
+PIX,
 recargas,
 transferencias,
 envíos.
-
-Si el mensaje NO tiene intención comercial:
-Responder EXACTAMENTE:
-"No puedo ayudar con ese tema."
 `
 
       },
@@ -260,7 +279,28 @@ app.post("/webhook", async (req, res) => {
     }
 
     /* =========================
-       INTERVENCIÓN HUMANA
+       HORARIO
+    ========================== */
+
+    const hora =
+      new Date().getHours();
+
+    /* =========================
+       SILENCIO NOCTURNO
+    ========================== */
+
+    if (hora >= 22 || hora < 6) {
+
+      console.log(
+        "HORÁRIO DE DESCANSO"
+      );
+
+      return res.sendStatus(200);
+
+    }
+
+    /* =========================
+       INTERVENÇÃO HUMANA
     ========================== */
 
     if (body.fromMe === true) {
@@ -269,7 +309,7 @@ app.post("/webhook", async (req, res) => {
         Date.now() + (5 * 60 * 1000);
 
       console.log(
-        "PAUSA HUMANA 5 MIN:",
+        "PAUSA HUMANA:",
         phone
       );
 
@@ -303,7 +343,48 @@ app.post("/webhook", async (req, res) => {
     );
 
     /* =========================
-       DETECTAR INTENCIÓN
+       SAUDAÇÃO
+    ========================== */
+
+    const saudacao =
+      saudacoes.some(s =>
+        texto
+          .toLowerCase()
+          .includes(s)
+      );
+
+    if (saudacao) {
+
+      let saludo = "";
+
+      if (hora >= 6 && hora < 12) {
+
+        saludo =
+          "Buen día 👋 ¿Cómo puedo ayudarte hoy?";
+
+      } else if (hora >= 12 && hora < 18) {
+
+        saludo =
+          "Buenas tardes 👋 ¿Cómo puedo ayudarte hoy?";
+
+      } else {
+
+        saludo =
+          "Buenas noches 👋 ¿Cómo puedo ayudarte hoy?";
+
+      }
+
+      await enviarMensaje(
+        phone,
+        saludo
+      );
+
+      return res.sendStatus(200);
+
+    }
+
+    /* =========================
+       GATILHOS NEGÓCIO
     ========================== */
 
     const comercial =
