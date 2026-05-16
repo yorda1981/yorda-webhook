@@ -31,8 +31,10 @@ const pausaHumana = {};
 
 const conversaAtiva = {};
 
+const estadoCliente = {};
+
 /* =========================
-   GATILHOS NEGÓCIO
+   GATILHOS
 ========================= */
 
 const gatilhos = [
@@ -155,7 +157,7 @@ async function enviarMensaje(phone, texto) {
    OPENAI
 ========================= */
 
-async function responderIA(mensagem) {
+async function responderIA(mensagem, contexto = "") {
 
   try {
 
@@ -167,39 +169,52 @@ async function responderIA(mensagem) {
 
         model: "gpt-4.1-mini",
 
-        input: mensagem,
+        input: `
+CONTEXTO:
+${contexto}
+
+CLIENTE:
+${mensagem}
+`,
 
         instructions: `
 Eres YordaBot.
 
-Asistente humano de remesas por WhatsApp.
+Asistente humano de remesas.
 
 REGLAS:
 
-- Responder corto.
 - Máximo 2 líneas.
-- Sonar humano.
-- Sonar natural.
-- No sonar como ChatGPT.
+- Hablar natural.
+- No sonar como IA.
 - No usar listas.
-- No explicar demasiado.
 - No repetir preguntas.
-- Hablar en el idioma del cliente.
+- No explicar demasiado.
+- Hablar en idioma del cliente.
 
-Responder solamente sobre:
-remesas,
-cambios,
-USD,
-BRL,
-CUP,
-MLC,
-PIX,
-recargas,
-transferencias,
-envíos.
+Si el cliente habla de envío:
+guiar la conversación paso a paso.
 
-Si el cliente pide hablar con Yordanys:
-Responder:
+Si ya sabes:
+- moneda
+- monto
+- destino
+
+NO volver a preguntar eso.
+
+Si cliente menciona:
+real/reales/brl
+interpretar BRL.
+
+Si cliente menciona:
+usd/dólar
+interpretar USD.
+
+Si cliente pide PIX:
+entregar PIX directamente.
+
+Si cliente pide hablar con Yordanys:
+responder:
 "Claro 👌 Yordanys continuará tu atención en breve."
 `
 
@@ -295,10 +310,6 @@ app.post("/webhook", async (req, res) => {
     const hora =
       new Date().getHours();
 
-    /* =========================
-       SILÊNCIO NOTURNO
-    ========================== */
-
     if (hora >= 22 || hora < 6) {
 
       console.log(
@@ -327,10 +338,6 @@ app.post("/webhook", async (req, res) => {
 
     }
 
-    /* =========================
-       VERIFICAR PAUSA
-    ========================== */
-
     if (
 
       pausaHumana[phone] &&
@@ -353,7 +360,7 @@ app.post("/webhook", async (req, res) => {
     );
 
     /* =========================
-       DETECTAR GATILHO
+       TEXTO LIMPO
     ========================== */
 
     const textoLimpo =
@@ -361,8 +368,9 @@ app.post("/webhook", async (req, res) => {
         .toLowerCase()
         .replace(/[^\w\s]/gi, " ");
 
-    const palavras =
-      textoLimpo.split(/\s+/);
+    /* =========================
+       GATILHO
+    ========================== */
 
     const comercial =
       gatilhos.some(g =>
@@ -370,7 +378,7 @@ app.post("/webhook", async (req, res) => {
       );
 
     /* =========================
-       ATIVAR CONVERSA
+       CONVERSA
     ========================== */
 
     if (comercial) {
@@ -379,10 +387,6 @@ app.post("/webhook", async (req, res) => {
         Date.now() + (15 * 60 * 1000);
 
     }
-
-    /* =========================
-       CONVERSA EM ANDAMENTO
-    ========================== */
 
     const conversaEmAndamento =
 
@@ -395,9 +399,7 @@ app.post("/webhook", async (req, res) => {
 
     const saudacao =
       saudacoes.some(s =>
-        texto
-          .toLowerCase()
-          .includes(s)
+        textoLimpo.includes(s)
       );
 
     if (
@@ -437,7 +439,7 @@ app.post("/webhook", async (req, res) => {
     }
 
     /* =========================
-       IGNORAR SEM INTENÇÃO
+       IGNORAR
     ========================== */
 
     if (
@@ -456,14 +458,121 @@ app.post("/webhook", async (req, res) => {
     }
 
     /* =========================
+       ESTADO CLIENTE
+    ========================== */
+
+    if (!estadoCliente[phone]) {
+
+      estadoCliente[phone] = {
+
+        moeda: null,
+        destino: null,
+        monto: null,
+        tipo: null
+
+      };
+
+    }
+
+    /* =========================
+       DETECTAR MOEDA
+    ========================== */
+
+    if (
+
+      textoLimpo.includes("real") ||
+      textoLimpo.includes("reales") ||
+      textoLimpo.includes("brl")
+
+    ) {
+
+      estadoCliente[phone].moeda =
+        "BRL";
+
+    }
+
+    if (
+
+      textoLimpo.includes("usd") ||
+      textoLimpo.includes("dolar") ||
+      textoLimpo.includes("dólar")
+
+    ) {
+
+      estadoCliente[phone].moeda =
+        "USD";
+
+    }
+
+    /* =========================
+       DETECTAR TIPO
+    ========================== */
+
+    if (
+
+      textoLimpo.includes("envio") ||
+      textoLimpo.includes("remesa") ||
+      textoLimpo.includes("transferencia")
+
+    ) {
+
+      estadoCliente[phone].tipo =
+        "remesa";
+
+    }
+
+    if (
+
+      textoLimpo.includes("recarga")
+
+    ) {
+
+      estadoCliente[phone].tipo =
+        "recarga";
+
+    }
+
+    /* =========================
+       DETECTAR MONTO
+    ========================== */
+
+    const numero =
+      texto.match(/\d+/);
+
+    if (numero) {
+
+      estadoCliente[phone].monto =
+        numero[0];
+
+    }
+
+    /* =========================
+       CONTEXTO
+    ========================== */
+
+    const contexto = `
+TIPO:
+${estadoCliente[phone].tipo || "desconocido"}
+
+MONEDA:
+${estadoCliente[phone].moeda || "desconocida"}
+
+MONTO:
+${estadoCliente[phone].monto || "desconocido"}
+`;
+
+    /* =========================
        OPENAI
     ========================== */
 
     const respostaIA =
-      await responderIA(texto);
+      await responderIA(
+        texto,
+        contexto
+      );
 
     /* =========================
-       ENVIAR RESPOSTA
+       ENVIAR
     ========================== */
 
     await enviarMensaje(
