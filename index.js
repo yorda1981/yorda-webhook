@@ -47,7 +47,7 @@ const mensagensProcessadas =
   new Set();
 
 // =====================================
-// PROMPT
+// PROMPT GPT
 // =====================================
 
 const SYSTEM_PROMPT = `
@@ -62,53 +62,11 @@ Atiendes:
 - PIX
 
 REGLAS:
-
 - Responder corto.
 - Máximo 2 líneas.
 - Nunca responder genérico.
 - Nunca actuar como IA.
 - Hablar natural.
-- Si no tiene relación con remesas:
-"No puedo ayudar con ese tema."
-
-TASAS:
-
-Menor de 100 reales:
-${taxas.menos100} CUP
-
-100 hasta 499:
-${taxas.de100a499} CUP
-
-500+:
-${taxas.mais500} CUP
-
-USD:
-${taxas.tasa_USD} BRL
-
-MLC:
-${taxas.mlc} BRL
-
-RECARGAS:
-
-100 reales:
-${recargas["100"].saldo} CUP
-
-200 reales:
-${recargas["200"].saldo} CUP
-
-Saldo válido:
-${recargas["100"].dias} días
-
-Si preguntan:
-- recarga
-- saldo
-- cup
-- tasa
-- cambio
-
-responder directo.
-
-Nunca responder largo.
 `;
 
 // =====================================
@@ -180,7 +138,7 @@ async function gerarResposta(
       ?.trim() || "";
 
     console.log(
-      "RESPOSTA:",
+      "RESPOSTA GPT:",
       texto
     );
 
@@ -216,7 +174,7 @@ async function gerarResposta(
 }
 
 // =====================================
-// ENVIAR
+// ENVIAR WHATSAPP
 // =====================================
 
 async function enviarMensagem(
@@ -248,13 +206,13 @@ async function enviarMensagem(
     );
 
     console.log(
-      "ENVIADO"
+      "ENVIADO COM SUCESSO"
     );
 
   } catch (erro) {
 
     console.log(
-      "ERRO ZAPI"
+      "ERRO ZAPI:"
     );
 
     console.log(
@@ -273,6 +231,13 @@ app.post(
 
     try {
 
+      console.log("BODY:");
+      console.log(req.body);
+
+      // =================================
+      // IGNORAR NEWSLETTER
+      // =================================
+
       if (
         req.body.isNewsletter
       ) {
@@ -283,6 +248,10 @@ app.post(
 
         return res.sendStatus(200);
       }
+
+      // =================================
+      // IGNORAR GRUPOS
+      // =================================
 
       if (
         req.body.isGroup
@@ -295,6 +264,10 @@ app.post(
         return res.sendStatus(200);
       }
 
+      // =================================
+      // IGNORAR BOT
+      // =================================
+
       if (
         req.body.fromMe === true
       ) {
@@ -306,6 +279,10 @@ app.post(
         return res.sendStatus(200);
       }
 
+      // =================================
+      // EVITAR DUPLICADAS
+      // =================================
+
       const messageId =
         req.body.messageId;
 
@@ -316,7 +293,7 @@ app.post(
       ) {
 
         console.log(
-          "DUPLICADA"
+          "MENSAGEM DUPLICADA"
         );
 
         return res.sendStatus(200);
@@ -334,11 +311,18 @@ app.post(
 
       }, 600000);
 
+      // =================================
+      // DADOS
+      // =================================
+
       const mensagem =
         req.body.text?.message || "";
 
       const numero =
         req.body.phone;
+
+      const msg =
+        mensagem.toLowerCase();
 
       console.log(
         "MENSAGEM:",
@@ -349,6 +333,152 @@ app.post(
 
         return res.sendStatus(200);
       }
+
+      // =================================
+      // PIX
+      // =================================
+
+      if (
+        msg.includes("pix")
+      ) {
+
+        await enviarMensagem(
+          numero,
+
+`PIX OFICIAL:
+
+8becaaf5-f296-4cbc-a115-46e3d23b042a
+
+YORDANYS RAFAEL SOSA REYES
+Nubank`
+        );
+
+        return res.sendStatus(200);
+      }
+
+      // =================================
+      // TASAS
+      // =================================
+
+      if (
+        msg.includes("tasa") ||
+        msg.includes("tasas")
+      ) {
+
+        await enviarMensagem(
+          numero,
+
+`Tasas hoy:
+
+<100 BRL → ${taxas.menos100} CUP
+100-499 BRL → ${taxas.de100a499} CUP
+500+ BRL → ${taxas.mais500} CUP
+
+Las tasas pueden variar.`
+        );
+
+        return res.sendStatus(200);
+      }
+
+      // =================================
+      // RECARGA
+      // =================================
+
+      if (
+        msg.includes("recarga")
+      ) {
+
+        await enviarMensagem(
+          numero,
+
+`Recarga disponible:
+
+100 reales →
+${recargas["100"].saldo} CUP
+
+Saldo válido:
+${recargas["100"].dias} días`
+        );
+
+        return res.sendStatus(200);
+      }
+
+      // =================================
+      // CALCULAR REALES
+      // =================================
+
+      const numeroDetectado =
+        parseInt(
+          msg.match(/\d+/)?.[0]
+        );
+
+      if (
+        numeroDetectado &&
+        (
+          msg.includes("real") ||
+          msg.includes("reales")
+        )
+      ) {
+
+        let tasa = 0;
+
+        if (
+          numeroDetectado < 100
+        ) {
+
+          tasa =
+            taxas.menos100;
+
+        } else if (
+          numeroDetectado <= 499
+        ) {
+
+          tasa =
+            taxas.de100a499;
+
+        } else {
+
+          tasa =
+            taxas.mais500;
+        }
+
+        const total =
+          numeroDetectado * taxa;
+
+        await enviarMensagem(
+          numero,
+
+`${numeroDetectado} reales son ${total} CUP.`
+        );
+
+        return res.sendStatus(200);
+      }
+
+      // =================================
+      // IGNORAR SALUDOS
+      // =================================
+
+      const saludos = [
+
+        "hola",
+        "oi",
+        "ola",
+        "buenas",
+        "bom dia",
+        "boa tarde",
+        "boa noite"
+      ];
+
+      if (
+        saludos.includes(msg)
+      ) {
+
+        return res.sendStatus(200);
+      }
+
+      // =================================
+      // GPT
+      // =================================
 
       const resposta =
         await gerarResposta(
@@ -363,6 +493,10 @@ app.post(
 
         return res.sendStatus(200);
       }
+
+      // =================================
+      // ENVIAR GPT
+      // =================================
 
       await enviarMensagem(
         numero,
@@ -396,6 +530,6 @@ const PORT =
 app.listen(PORT, () => {
 
   console.log(
-    "Servidor ONLINE 🚀"
+    `Servidor ONLINE ${PORT}`
   );
 });
