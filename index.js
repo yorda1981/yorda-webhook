@@ -1,7 +1,5 @@
 const express = require("express");
 const axios = require("axios");
-const fs = require("fs");
-const path = require("path");
 
 const app = express();
 
@@ -21,127 +19,21 @@ const ZAPI_CLIENT_TOKEN =
   process.env.ZAPI_CLIENT_TOKEN;
 
 // =====================================
-// CLIENTES JSON
-// =====================================
-
-const clientesPath = path.join(
-  __dirname,
-  "datos",
-  "clientes.json"
-);
-
-function carregarClientes() {
-
-  try {
-
-    const dados =
-      fs.readFileSync(
-        clientesPath,
-        "utf8"
-      );
-
-    return JSON.parse(dados);
-
-  } catch {
-
-    return {};
-  }
-}
-
-function salvarClientes(clientes) {
-
-  fs.writeFileSync(
-    clientesPath,
-    JSON.stringify(
-      clientes,
-      null,
-      2
-    )
-  );
-}
-
-let clientes =
-  carregarClientes();
-
-// =====================================
-// CONTROLE DUPLICADAS
+// DUPLICADAS
 // =====================================
 
 const mensagensProcessadas =
   new Set();
 
 // =====================================
-// DETECTAR IDIOMA
-// =====================================
-
-function detectarIdioma(
-  texto
-) {
-
-  const espanhol = [
-    "hola",
-    "quiero",
-    "reales",
-    "usd",
-    "cup",
-    "tasa",
-    "transferencia",
-    "tarjeta",
-    "envio",
-    "remesa"
-  ];
-
-  const textoLower =
-    texto.toLowerCase();
-
-  for (const palavra of espanhol) {
-
-    if (
-      textoLower.includes(
-        palavra
-      )
-    ) {
-
-      return "es";
-    }
-  }
-
-  return "pt";
-}
-
-// =====================================
 // OPENAI
 // =====================================
 
 async function gerarResposta(
-  numero,
   mensagem
 ) {
 
   try {
-
-    const cliente =
-      clientes[numero];
-
-    const contexto = `
-Você é um atendente de remessas.
-
-Idioma do cliente:
-${cliente.idioma}
-
-Mensagem:
-${mensagem}
-
-Responda normalmente ao cliente.
-`;
-
-    console.log(
-      "CONTEXTO ENVIADO:"
-    );
-
-    console.log(
-      contexto
-    );
 
     const resposta =
       await axios.post(
@@ -153,7 +45,12 @@ Responda normalmente ao cliente.
             "gpt-4.1-mini",
 
           input:
-            contexto
+            `Você é um atendente de remessas.
+            
+Cliente disse:
+${mensagem}
+
+Responda de forma natural.`
         },
 
         {
@@ -169,7 +66,7 @@ Responda normalmente ao cliente.
       );
 
     console.log(
-      "RESPOSTA OPENAI:"
+      "OPENAI RESPONSE:"
     );
 
     console.log(
@@ -187,11 +84,11 @@ Responda normalmente ao cliente.
       ?.text;
 
     console.log(
-      "TEXTO FINAL:",
+      "TEXTO:",
       texto
     );
 
-    return texto || "Olá 👋";
+    return texto;
 
   } catch (erro) {
 
@@ -218,12 +115,12 @@ Responda normalmente ao cliente.
       );
     }
 
-    return "Erro ao responder.";
+    return null;
   }
 }
 
 // =====================================
-// ENVIAR WHATSAPP
+// WHATSAPP
 // =====================================
 
 async function enviarMensagem(
@@ -255,7 +152,7 @@ async function enviarMensagem(
     );
 
     console.log(
-      "ENVIADO COM SUCESSO"
+      "MENSAGEM ENVIADA"
     );
 
   } catch (erro) {
@@ -309,12 +206,7 @@ app.post(
       console.log("BODY:");
       console.log(req.body);
 
-      if (
-        req.body.isNewsletter
-      ) {
-
-        return res.sendStatus(200);
-      }
+      // IGNORAR GRUPOS
 
       if (
         req.body.isGroup
@@ -323,12 +215,16 @@ app.post(
         return res.sendStatus(200);
       }
 
+      // IGNORAR BOT
+
       if (
-        req.body.fromMe === true
+        req.body.fromMe
       ) {
 
         return res.sendStatus(200);
       }
+
+      // DUPLICADAS
 
       const messageId =
         req.body.messageId;
@@ -354,8 +250,10 @@ app.post(
 
       }, 600000);
 
+      // TEXTO
+
       const mensagem =
-        req.body.text?.message || "";
+        req.body.text?.message;
 
       const numero =
         req.body.phone;
@@ -370,59 +268,23 @@ app.post(
         return res.sendStatus(200);
       }
 
-      // =================================
-      // CLIENTE
-      // =================================
-
-      if (!clientes[numero]) {
-
-        clientes[numero] = {
-
-          idioma:
-            detectarIdioma(
-              mensagem
-            ),
-
-          estado:
-            "normal",
-
-          ultimaInteracao:
-            new Date()
-            .toISOString()
-        };
-
-        salvarClientes(
-          clientes
-        );
-
-        console.log(
-          "CLIENTE SALVO"
-        );
-      }
-
-      clientes[numero]
-      .ultimaInteracao =
-        new Date()
-        .toISOString();
-
-      salvarClientes(
-        clientes
-      );
-
-      // =================================
-      // GERAR RESPOSTA
-      // =================================
+      // OPENAI
 
       const resposta =
         await gerarResposta(
-          numero,
           mensagem
         );
 
-      console.log(
-        "ENVIANDO:",
-        resposta
-      );
+      if (!resposta) {
+
+        console.log(
+          "SEM RESPOSTA"
+        );
+
+        return res.sendStatus(200);
+      }
+
+      // ENVIAR
 
       await enviarMensagem(
         numero,
@@ -437,24 +299,9 @@ app.post(
         "ERRO WEBHOOK:"
       );
 
-      if (
-        erro.response?.data
-      ) {
-
-        console.log(
-          JSON.stringify(
-            erro.response.data,
-            null,
-            2
-          )
-        );
-
-      } else {
-
-        console.log(
-          erro.message
-        );
-      }
+      console.log(
+        erro.message
+      );
 
       return res.sendStatus(500);
     }
