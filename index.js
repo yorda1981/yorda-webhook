@@ -26,7 +26,36 @@ const mensagensProcessadas =
   new Set();
 
 // =====================================
-// OPENAI WORKFLOW
+// PROMPT YORDA
+// =====================================
+
+const SYSTEM_PROMPT = `
+Eres YordaBot.
+
+Atiendes remesas y recargas.
+
+Responde en el idioma del cliente.
+
+Sé corto, natural y profesional.
+
+Tasas:
+Menor de 100 reales = 100 CUP
+100-499 reales = 115 CUP
+500+ reales = 118 CUP
+
+USD = 5.60 BRL
+
+Si preguntan montos:
+calcula automáticamente.
+
+Ejemplo:
+300 reales = 34.500 CUP
+
+No uses textos largos.
+`;
+
+// =====================================
+// OPENAI
 // =====================================
 
 async function gerarResposta(
@@ -42,13 +71,20 @@ async function gerarResposta(
 
         {
           model:
-            "o4-mini",
+            "gpt-4.1-mini",
 
-          workflow:
-            "wf_68f65c9bd8648190a572e1272e6ae1880cf508aff8bcf40e",
+          input: [
 
-          input:
-            mensagem
+            {
+              role: "system",
+              content: SYSTEM_PROMPT
+            },
+
+            {
+              role: "user",
+              content: mensagem
+            }
+          ]
         },
 
         {
@@ -75,12 +111,11 @@ async function gerarResposta(
       )
     );
 
-    // =================================
-    // TEXTO WORKFLOW
-    // =================================
-
     const texto =
-      resposta.data?.output_text;
+      resposta.data
+      ?.output?.[0]
+      ?.content?.[0]
+      ?.text;
 
     console.log(
       "TEXTO FINAL:",
@@ -119,7 +154,7 @@ async function gerarResposta(
 }
 
 // =====================================
-// ENVIAR WHATSAPP
+// WHATSAPP
 // =====================================
 
 async function enviarMensagem(
