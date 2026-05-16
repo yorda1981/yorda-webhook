@@ -20,7 +20,7 @@ const ZAPI_CLIENT_TOKEN =
 
 const SYSTEM_PROMPT =
   process.env.SYSTEM_PROMPT ||
-  "Responde corto, natural y humano.";
+  "Responde corto, humano y natural.";
 
 // =====================================
 // MEMORIA
@@ -36,7 +36,7 @@ const mensagensProcessadas =
   new Set();
 
 // =====================================
-// TASAS
+// TAXAS
 // =====================================
 
 function taxaBRL(valor) {
@@ -90,10 +90,10 @@ function esSaludo(texto) {
     t === "buenas" ||
     t === "boa noite" ||
     t === "boa tarde" ||
-    t === "buen dia" ||
     t === "buen día" ||
-    t === "buenos dias" ||
+    t === "buen dia" ||
     t === "buenos días" ||
+    t === "buenos dias" ||
     t === "buenas tardes"
   );
 }
@@ -134,6 +134,8 @@ function detectarComercial(
 
     "saldo",
     "remesa",
+    "remesas",
+
     "envio",
     "enviar",
     "mandar",
@@ -143,10 +145,14 @@ function detectarComercial(
     "cambio",
     "cmb",
     "taxa",
+    "taxas",
     "tasa",
+    "tasas",
 
     "etecsa",
     "recarga",
+    "recargas",
+
     "internet",
     "sms",
     "llamadas",
@@ -167,10 +173,7 @@ function detectarComercial(
     "comprobante",
 
     "quanto",
-    "cuanto",
-
-    "remessas",
-    "recargas"
+    "cuanto"
   ];
 
   return gatilhos.some(
@@ -410,6 +413,11 @@ app.post(
         mensagem
       );
 
+      const texto =
+        mensagem
+        .toLowerCase()
+        .trim();
+
       // =================================
       // MEMORIA
       // =================================
@@ -422,7 +430,7 @@ app.post(
       }
 
       // =================================
-      // SALUDO NORMAL
+      // SALUDO
       // =================================
 
       if (
@@ -470,13 +478,109 @@ app.post(
           numero,
 
 `PIX:
-8becaaf5-f296-4cbc-a115-46e3d23b042a
+8becaaf5-f296-4cbc-a115-46e3d23b042a`
+        );
 
-Titular:
-YORDANYS RAFAEL SOSA REYES
+        return res.sendStatus(200);
+      }
 
-Banco:
-Nubank (260)`
+      // =================================
+      // REMESAS
+      // =================================
+
+      if (
+        texto === "remesa" ||
+        texto === "remesas"
+      ) {
+
+        await enviarMensagem(
+
+          numero,
+
+          "Sí 👍 Hacemos remesas Brasil → Cuba. ¿Cuánto deseas enviar?"
+        );
+
+        return res.sendStatus(200);
+      }
+
+      // =================================
+      // TAXAS
+      // =================================
+
+      if (
+        texto === "taxa" ||
+        texto === "taxas" ||
+        texto === "tasa" ||
+        texto === "tasas" ||
+        texto === "cambio"
+      ) {
+
+        await enviarMensagem(
+
+          numero,
+
+`Menos de 100 reales → 100 CUP
+100-499 reales → 115 CUP
+500+ reales → 118 CUP`
+        );
+
+        return res.sendStatus(200);
+      }
+
+      // =================================
+      // REAL
+      // =================================
+
+      if (
+        texto === "real" ||
+        texto === "reales"
+      ) {
+
+        await enviarMensagem(
+
+          numero,
+
+          "¿Cuántos reales deseas enviar?"
+        );
+
+        return res.sendStatus(200);
+      }
+
+      // =================================
+      // USD
+      // =================================
+
+      if (
+        texto === "usd" ||
+        texto === "dolar" ||
+        texto === "dólar"
+      ) {
+
+        await enviarMensagem(
+
+          numero,
+
+          "1 USD = 5.60 BRL 💵"
+        );
+
+        return res.sendStatus(200);
+      }
+
+      // =================================
+      // RECARGAS
+      // =================================
+
+      if (
+        texto.includes(
+          "recarga"
+        )
+      ) {
+
+        await enviarMensagem(
+
+          numero,
+
+          "Sí 👍 Hacemos recargas ETECSA. ¿De cuánto deseas la recarga?"
         );
 
         return res.sendStatus(200);
@@ -487,14 +591,14 @@ Nubank (260)`
       // =================================
 
       if (
-        mensagem
-        .toLowerCase()
-        .includes("real")
+        texto.includes(
+          "real"
+        )
       ) {
 
         const valor =
           extraerNumero(
-            mensagem
+            texto
           );
 
         if (valor) {
@@ -521,14 +625,14 @@ Nubank (260)`
       // =================================
 
       if (
-        mensagem
-        .toLowerCase()
-        .includes("usd")
+        texto.includes(
+          "usd"
+        )
       ) {
 
         const valor =
           extraerNumero(
-            mensagem
+            texto
           );
 
         if (valor) {
@@ -548,20 +652,26 @@ Nubank (260)`
       }
 
       // =================================
-      // OPENAI
+      // OPENAI SOLO SI ES NECESARIO
       // =================================
 
-      const resposta =
-        await gerarResposta(
-          mensagem
-        );
+      if (
+        clientes[numero]
+        .comercial
+      ) {
 
-      if (resposta) {
+        const resposta =
+          await gerarResposta(
+            mensagem
+          );
 
-        await enviarMensagem(
-          numero,
-          resposta
-        );
+        if (resposta) {
+
+          await enviarMensagem(
+            numero,
+            resposta
+          );
+        }
       }
 
       return res.sendStatus(200);
