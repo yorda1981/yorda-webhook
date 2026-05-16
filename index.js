@@ -7,13 +7,21 @@ const app = express();
 app.use(express.json());
 
 // =====================================
-// TAXAS JSON
+// JSONS
 // =====================================
 
 const taxas =
   JSON.parse(
     fs.readFileSync(
       "./taxas.json",
+      "utf8"
+    )
+  );
+
+const recargas =
+  JSON.parse(
+    fs.readFileSync(
+      "./recargas.json",
       "utf8"
     )
   );
@@ -43,62 +51,64 @@ const mensagensProcessadas =
 // =====================================
 
 const SYSTEM_PROMPT = `
-Eres YordaBot, el agente virtual oficial del servicio de remesas y recargas gestionado por Yordanys.
+Eres YordaBot.
 
-Tu función es atender clientes por WhatsApp.
+Atiendes:
+- remesas
+- recargas
+- CUP
+- USD
+- MLC
+- PIX
 
-REGLAS IMPORTANTES:
+REGLAS:
 
-- Responde siempre corto.
+- Responder corto.
 - Máximo 2 líneas.
 - Nunca responder genérico.
 - Nunca actuar como IA.
-- Hablar como vendedor real de WhatsApp.
-- Responder en español o portugués.
-- Si el mensaje no tiene relación con remesas:
-responder:
+- Hablar natural.
+- Si no tiene relación con remesas:
 "No puedo ayudar con ese tema."
 
-TASAS ACTUALES:
+TASAS:
 
 Menor de 100 reales:
 ${taxas.menos100} CUP
 
-100 hasta 499 reales:
+100 hasta 499:
 ${taxas.de100a499} CUP
 
-500+ reales:
+500+:
 ${taxas.mais500} CUP
 
 USD:
-1 USD = ${taxas.tasa_USD} BRL
+${taxas.tasa_USD} BRL
 
 MLC:
 ${taxas.mlc} BRL
 
+RECARGAS:
+
+100 reales:
+${recargas["100"].saldo} CUP
+
+200 reales:
+${recargas["200"].saldo} CUP
+
+Saldo válido:
+${recargas["100"].dias} días
+
 Si preguntan:
+- recarga
+- saldo
+- cup
 - tasa
 - cambio
-- cup
-- reales
-- cuanto llega
 
-calcular automáticamente.
-
-Ejemplos:
-
-100 reales → ${
-  100 * taxas.de100a499
-} CUP
-
-500 reales → ${
-  500 * taxas.mais500
-} CUP
+responder directo.
 
 Nunca responder largo.
-Nunca dar explicaciones innecesarias.
-
-Las tasas pueden variar según el momento del pago.
 `;
 
 // =====================================
@@ -146,7 +156,7 @@ async function gerarResposta(
             }
           ],
 
-          temperature: 0.3,
+          temperature: 0.2,
 
           max_tokens: 80
         },
@@ -163,18 +173,6 @@ async function gerarResposta(
         }
       );
 
-    console.log(
-      "OPENAI COMPLETA:"
-    );
-
-    console.log(
-      JSON.stringify(
-        resposta.data,
-        null,
-        2
-      )
-    );
-
     const texto =
       resposta.data
       ?.choices?.[0]
@@ -182,7 +180,7 @@ async function gerarResposta(
       ?.trim() || "";
 
     console.log(
-      "RESPOSTA FINAL:",
+      "RESPOSTA:",
       texto
     );
 
@@ -218,7 +216,7 @@ async function gerarResposta(
 }
 
 // =====================================
-// ENVIAR WHATSAPP
+// ENVIAR
 // =====================================
 
 async function enviarMensagem(
@@ -250,33 +248,18 @@ async function enviarMensagem(
     );
 
     console.log(
-      "ENVIADO COM SUCESSO"
+      "ENVIADO"
     );
 
   } catch (erro) {
 
     console.log(
-      "ERRO ZAPI:"
+      "ERRO ZAPI"
     );
 
-    if (
-      erro.response?.data
-    ) {
-
-      console.log(
-        JSON.stringify(
-          erro.response.data,
-          null,
-          2
-        )
-      );
-
-    } else {
-
-      console.log(
-        erro.message
-      );
-    }
+    console.log(
+      erro.message
+    );
   }
 }
 
@@ -290,13 +273,6 @@ app.post(
 
     try {
 
-      console.log("BODY:");
-      console.log(req.body);
-
-      // =================================
-      // IGNORAR NEWSLETTER
-      // =================================
-
       if (
         req.body.isNewsletter
       ) {
@@ -307,10 +283,6 @@ app.post(
 
         return res.sendStatus(200);
       }
-
-      // =================================
-      // IGNORAR GRUPOS
-      // =================================
 
       if (
         req.body.isGroup
@@ -323,24 +295,16 @@ app.post(
         return res.sendStatus(200);
       }
 
-      // =================================
-      // IGNORAR MENSAGENS DO BOT
-      // =================================
-
       if (
         req.body.fromMe === true
       ) {
 
         console.log(
-          "MENSAGEM DO BOT IGNORADA"
+          "MENSAGEM BOT IGNORADA"
         );
 
         return res.sendStatus(200);
       }
-
-      // =================================
-      // EVITAR DUPLICADAS
-      // =================================
 
       const messageId =
         req.body.messageId;
@@ -352,7 +316,7 @@ app.post(
       ) {
 
         console.log(
-          "MENSAGEM DUPLICADA"
+          "DUPLICADA"
         );
 
         return res.sendStatus(200);
@@ -370,10 +334,6 @@ app.post(
 
       }, 600000);
 
-      // =================================
-      // TEXTO
-      // =================================
-
       const mensagem =
         req.body.text?.message || "";
 
@@ -390,10 +350,6 @@ app.post(
         return res.sendStatus(200);
       }
 
-      // =================================
-      // OPENAI
-      // =================================
-
       const resposta =
         await gerarResposta(
           mensagem
@@ -408,10 +364,6 @@ app.post(
         return res.sendStatus(200);
       }
 
-      // =================================
-      // ENVIAR
-      // =================================
-
       await enviarMensagem(
         numero,
         resposta
@@ -425,24 +377,9 @@ app.post(
         "ERRO WEBHOOK:"
       );
 
-      if (
-        erro.response?.data
-      ) {
-
-        console.log(
-          JSON.stringify(
-            erro.response.data,
-            null,
-            2
-          )
-        );
-
-      } else {
-
-        console.log(
-          erro.message
-        );
-      }
+      console.log(
+        erro.message
+      );
 
       return res.sendStatus(500);
     }
@@ -459,6 +396,6 @@ const PORT =
 app.listen(PORT, () => {
 
   console.log(
-    `Servidor ONLINE na porta ${PORT}`
+    "Servidor ONLINE 🚀"
   );
 });
