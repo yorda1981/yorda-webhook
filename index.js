@@ -34,8 +34,6 @@ async function enviarMensaje(phone, texto) {
       ZAPI_TOKEN +
       "/send-text";
 
-    console.log("URL:", url);
-
     const response = await axios.post(
 
       url,
@@ -113,15 +111,6 @@ async function responderIA(mensagem) {
 
     );
 
-    console.log(
-      "OPENAI:",
-      JSON.stringify(
-        response.data,
-        null,
-        2
-      )
-    );
-
     const texto =
       response.data.output?.[0]?.content?.[0]?.text;
 
@@ -154,11 +143,6 @@ app.post("/webhook", async (req, res) => {
 
     const body = req.body;
 
-    console.log(
-      "BODY:",
-      JSON.stringify(body, null, 2)
-    );
-
     /* =========================
        IGNORAR
     ========================= */
@@ -179,11 +163,18 @@ app.post("/webhook", async (req, res) => {
 
     ) {
 
-      console.log("IGNORADO");
-
       return res.sendStatus(200);
 
     }
+
+    /* =========================
+       LOG SOLO VALIDOS
+    ========================= */
+
+    console.log(
+      "BODY:",
+      JSON.stringify(body, null, 2)
+    );
 
     const texto =
       body?.text?.message || "";
