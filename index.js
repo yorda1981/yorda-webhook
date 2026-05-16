@@ -20,6 +20,49 @@ const ZAPI_TOKEN = process.env.ZAPI_TOKEN;
 const ZAPI_CLIENT_TOKEN = process.env.ZAPI_CLIENT_TOKEN;
 
 /* =========================
+   PAUSA HUMANA
+========================= */
+
+const pausaHumana = {};
+
+/* =========================
+   GATILHOS NEGOCIO
+========================= */
+
+const gatilhos = [
+
+  "remesa",
+  "remesas",
+  "envio",
+  "enviar",
+  "transferencia",
+  "transferência",
+  "cambio",
+  "câmbio",
+  "tasa",
+  "taxa",
+  "tasas",
+  "taxas",
+  "real",
+  "reales",
+  "brl",
+  "cup",
+  "usd",
+  "dolar",
+  "dólar",
+  "pix",
+  "mlc",
+  "recarga",
+  "saldo",
+  "etecsa",
+  "dinero",
+  "dinheiro",
+  "deposito",
+  "depósito"
+
+];
+
+/* =========================
    ENVIAR MENSAJE
 ========================= */
 
@@ -91,7 +134,7 @@ async function responderIA(mensagem) {
         input:
           "Cliente escreveu: " +
           mensagem +
-          ". Responde corto y natural sobre remesas, cambios o recargas."
+          ". Responde corto, natural y comercial sobre remesas, cambios o recargas."
 
       },
 
@@ -145,11 +188,10 @@ app.post("/webhook", async (req, res) => {
 
     /* =========================
        IGNORAR
-    ========================= */
+    ========================== */
 
     if (
 
-      body.fromMe === true ||
       body.isGroup === true ||
       body.isNewsletter === true ||
       body.isEdit === true ||
@@ -166,15 +208,6 @@ app.post("/webhook", async (req, res) => {
       return res.sendStatus(200);
 
     }
-
-    /* =========================
-       LOG SOLO VALIDOS
-    ========================= */
-
-    console.log(
-      "BODY:",
-      JSON.stringify(body, null, 2)
-    );
 
     const texto =
       body?.text?.message || "";
@@ -194,15 +227,78 @@ app.post("/webhook", async (req, res) => {
     );
 
     /* =========================
+       PAUSA HUMANA
+    ========================== */
+
+    if (body.fromMe === true) {
+
+      pausaHumana[phone] =
+        Date.now() + (10 * 60 * 1000);
+
+      console.log(
+        "PAUSA HUMANA ATIVADA:",
+        phone
+      );
+
+      return res.sendStatus(200);
+
+    }
+
+    /* =========================
+       VERIFICAR PAUSA
+    ========================== */
+
+    if (
+
+      pausaHumana[phone] &&
+      Date.now() < pausaHumana[phone]
+
+    ) {
+
+      console.log(
+        "BOT EM PAUSA:",
+        phone
+      );
+
+      return res.sendStatus(200);
+
+    }
+
+    /* =========================
+       DETECTAR INTERES
+    ========================== */
+
+    const comercial =
+      gatilhos.some(g =>
+        texto
+          .toLowerCase()
+          .includes(g)
+      );
+
+    /* =========================
+       IGNORAR SIN GATILHO
+    ========================== */
+
+    if (!comercial) {
+
+      console.log(
+        "IGNORADO SEM GATILHO"
+      );
+
+      return res.sendStatus(200);
+
+    }
+
+    /* =========================
        OPENAI RESPONSE
-    ========================= */
+    ========================== */
 
     const respostaIA =
       await responderIA(texto);
 
     /* =========================
        ENVIAR WHATSAPP
-    ========================= */
+    ========================== */
 
     await enviarMensaje(
       phone,
