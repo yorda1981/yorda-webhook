@@ -20,7 +20,7 @@ const ZAPI_CLIENT_TOKEN =
 
 const SYSTEM_PROMPT =
   process.env.SYSTEM_PROMPT ||
-  "Responde corto y humano.";
+  "Responde corto y natural.";
 
 // =====================================
 // MEMORIA
@@ -133,13 +133,14 @@ function detectarComercial(
     "depósito",
 
     "saldo",
+
     "remesa",
     "remesas",
 
     "envio",
     "enviar",
-    "mandar",
 
+    "mandar",
     "receber",
     "recibir",
 
@@ -152,6 +153,7 @@ function detectarComercial(
     "tasas",
 
     "etecsa",
+
     "recarga",
     "recargas",
 
@@ -176,7 +178,11 @@ function detectarComercial(
     "comprobante",
 
     "quanto",
-    "cuanto"
+    "cuanto",
+
+    "yordanys",
+    "humano",
+    "atendente"
   ];
 
   return gatilhos.some(
@@ -184,20 +190,6 @@ function detectarComercial(
       t.includes(
         palavra
       )
-  );
-}
-
-// =====================================
-// PIX
-// =====================================
-
-function detectarPix(texto) {
-
-  const t =
-    texto.toLowerCase();
-
-  return (
-    t.includes("pix")
   );
 }
 
@@ -417,8 +409,39 @@ app.post(
 
           comercial: false,
 
-          modo: "normal"
+          modo: "normal",
+
+          ultimaMensagem: "",
+
+          ultimaResposta: ""
         };
+      }
+
+      // =================================
+      // EVITAR REPETICION
+      // =================================
+
+      if (
+        clientes[numero]
+        .ultimaMensagem === texto
+      ) {
+
+        return res.sendStatus(200);
+      }
+
+      clientes[numero]
+      .ultimaMensagem = texto;
+
+      // =================================
+      // MODO HUMANO
+      // =================================
+
+      if (
+        clientes[numero]
+        .modo === "humano"
+      ) {
+
+        return res.sendStatus(200);
       }
 
       // =================================
@@ -426,16 +449,18 @@ app.post(
       // =================================
 
       if (
-        esSaludo(
-          texto
-        )
+        esSaludo(texto)
       ) {
 
+        const resposta =
+          "Hola 👋 ¿Cómo puedo ayudarte?";
+
+        clientes[numero]
+        .ultimaResposta = resposta;
+
         await enviarMensagem(
-
           numero,
-
-          "Hola 👋 ¿Cómo puedo ayudarte?"
+          resposta
         );
 
         return res.sendStatus(200);
@@ -453,6 +478,39 @@ app.post(
 
         clientes[numero]
         .comercial = true;
+      }
+
+      // =================================
+      // HUMANO
+      // =================================
+
+      if (
+        texto.includes(
+          "yordanys"
+        ) ||
+        texto.includes(
+          "humano"
+        ) ||
+        texto.includes(
+          "atendente"
+        )
+      ) {
+
+        clientes[numero]
+        .modo = "humano";
+
+        const resposta =
+          "Claro 👍 Yordanys continuará contigo enseguida.";
+
+        clientes[numero]
+        .ultimaResposta = resposta;
+
+        await enviarMensagem(
+          numero,
+          resposta
+        );
+
+        return res.sendStatus(200);
       }
 
       // =================================
@@ -474,11 +532,15 @@ app.post(
         clientes[numero]
         .modo = "remesa";
 
+        const resposta =
+          "¿Cuántos reales deseas enviar?";
+
+        clientes[numero]
+        .ultimaResposta = resposta;
+
         await enviarMensagem(
-
           numero,
-
-          "¿Cuántos reales deseas enviar?"
+          resposta
         );
 
         return res.sendStatus(200);
@@ -497,11 +559,15 @@ app.post(
         clientes[numero]
         .modo = "recarga";
 
+        const resposta =
+          "¿De cuánto deseas la recarga?";
+
+        clientes[numero]
+        .ultimaResposta = resposta;
+
         await enviarMensagem(
-
           numero,
-
-          "¿De cuánto deseas la recarga?"
+          resposta
         );
 
         return res.sendStatus(200);
@@ -512,17 +578,21 @@ app.post(
       // =================================
 
       if (
-        detectarPix(
-          texto
+        texto.includes(
+          "pix"
         )
       ) {
 
-        await enviarMensagem(
-
-          numero,
-
+        const resposta =
 `PIX:
-8becaaf5-f296-4cbc-a115-46e3d23b042a`
+8becaaf5-f296-4cbc-a115-46e3d23b042a`;
+
+        clientes[numero]
+        .ultimaResposta = resposta;
+
+        await enviarMensagem(
+          numero,
+          resposta
         );
 
         return res.sendStatus(200);
@@ -540,13 +610,17 @@ app.post(
         texto === "cambio"
       ) {
 
-        await enviarMensagem(
-
-          numero,
-
+        const resposta =
 `Menos de 100 reales → 100 CUP
 100-499 reales → 115 CUP
-500+ reales → 118 CUP`
+500+ reales → 118 CUP`;
+
+        clientes[numero]
+        .ultimaResposta = resposta;
+
+        await enviarMensagem(
+          numero,
+          resposta
         );
 
         return res.sendStatus(200);
@@ -562,18 +636,22 @@ app.post(
         texto === "dólar"
       ) {
 
+        const resposta =
+          "1 USD = 5.60 BRL 💵";
+
+        clientes[numero]
+        .ultimaResposta = resposta;
+
         await enviarMensagem(
-
           numero,
-
-          "1 USD = 5.60 BRL 💵"
+          resposta
         );
 
         return res.sendStatus(200);
       }
 
       // =================================
-      // NUMEROS
+      // EXTRAER NUMERO
       // =================================
 
       const valor =
@@ -595,11 +673,15 @@ app.post(
           const saldo =
             valor * 20;
 
+          const resposta =
+`${valor} reales = ${saldo.toLocaleString()} CUP de saldo 📲`;
+
+          clientes[numero]
+          .ultimaResposta = resposta;
+
           await enviarMensagem(
-
             numero,
-
-`${valor} reales = ${saldo.toLocaleString()} CUP de saldo 📲`
+            resposta
           );
 
           return res.sendStatus(200);
@@ -623,11 +705,15 @@ app.post(
           const cup =
             valor * taxa;
 
+          const resposta =
+`${valor} reales → ${cup.toLocaleString()} CUP 🔥`;
+
+          clientes[numero]
+          .ultimaResposta = resposta;
+
           await enviarMensagem(
-
             numero,
-
-`${valor} reales → ${cup.toLocaleString()} CUP 🔥`
+            resposta
           );
 
           return res.sendStatus(200);
@@ -635,7 +721,7 @@ app.post(
       }
 
       // =================================
-      // OPENAI
+      // OPENAI SOLO SECUNDARIO
       // =================================
 
       if (
@@ -648,7 +734,15 @@ app.post(
             mensagem
           );
 
-        if (resposta) {
+        if (
+          resposta &&
+          resposta !==
+          clientes[numero]
+          .ultimaResposta
+        ) {
+
+          clientes[numero]
+          .ultimaResposta = resposta;
 
           await enviarMensagem(
             numero,
