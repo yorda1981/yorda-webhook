@@ -72,6 +72,28 @@ function detectarPix(texto) {
 }
 
 // =====================================
+// PIX SOLO
+// =====================================
+
+function detectarPixSolo(texto) {
+
+  const t =
+    texto.toLowerCase();
+
+  return (
+    t.includes("pix solo") ||
+    t.includes("solo pix") ||
+    t.includes("sólo pix") ||
+    t.includes("llave sola") ||
+    t.includes("chave sola") ||
+    t.includes("apenas pix") ||
+    t.includes("solo la llave") ||
+    t.includes("pix para copiar") ||
+    t.includes("copiar pix")
+  );
+}
+
+// =====================================
 // DETECTAR RECARGA
 // =====================================
 
@@ -89,10 +111,10 @@ function detectarRecarga(texto) {
 }
 
 // =====================================
-// EXTRAER REALES
+// EXTRAER NUMERO
 // =====================================
 
-function extraerReales(texto) {
+function extraerNumero(texto) {
 
   const regex =
     /(\d+)/g;
@@ -311,7 +333,27 @@ app.post(
       }
 
       // =================================
-      // PIX
+      // PIX SOLO
+      // =================================
+
+      if (
+        detectarPixSolo(
+          mensagem
+        )
+      ) {
+
+        await enviarMensagem(
+
+          numero,
+
+          "8becaaf5-f296-4cbc-a115-46e3d23b042a"
+        );
+
+        return res.sendStatus(200);
+      }
+
+      // =================================
+      // PIX NORMAL
       // =================================
 
       if (
@@ -324,7 +366,7 @@ app.post(
         .etapa =
           "pagamento";
 
-        await enviarMensagem(
+        await enviarMensaje(
 
           numero,
 
@@ -352,7 +394,7 @@ Nubank (260)`
       ) {
 
         const valor =
-          extraerReales(
+          extraerNumero(
             mensagem
           );
 
@@ -373,7 +415,7 @@ Nubank (260)`
       }
 
       // =================================
-      // REMESA
+      // REALES
       // =================================
 
       if (
@@ -383,7 +425,7 @@ Nubank (260)`
       ) {
 
         const valor =
-          extraerReales(
+          extraerNumero(
             mensagem
           );
 
@@ -400,6 +442,37 @@ Nubank (260)`
             numero,
 
 `${valor} reales → ${cup.toLocaleString()} CUP 🔥`
+          );
+
+          return res.sendStatus(200);
+        }
+      }
+
+      // =================================
+      // USD
+      // =================================
+
+      if (
+        mensagem
+        .toLowerCase()
+        .includes("usd")
+      ) {
+
+        const valor =
+          extraerNumero(
+            mensagem
+          );
+
+        if (valor) {
+
+          const brl =
+            valor * 5.6;
+
+          await enviarMensagem(
+
+            numero,
+
+`${valor} USD = ${brl.toFixed(2)} BRL`
           );
 
           return res.sendStatus(200);
