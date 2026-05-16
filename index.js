@@ -500,21 +500,41 @@ Solo sobre remesas, recargas o cambio.`
       let reply =
         "¿Cómo puedo ayudarte?";
 
-      if (
+      try {
 
-        respuesta.data.output &&
-        respuesta.data.output[0] &&
-        respuesta.data.output[0].content &&
-        respuesta.data.output[0].content[0]
-
-      ) {
-
-        reply =
+        const content =
           respuesta.data
           .output[0]
-          .content[0]
-          .text ||
-          reply;
+          .content[0];
+
+        if (
+          typeof content.text ===
+          "string"
+        ) {
+
+          reply =
+            content.text;
+
+        }
+
+        else if (
+
+          content.text &&
+          typeof content.text.value ===
+          "string"
+
+        ) {
+
+          reply =
+            content.text.value;
+
+        }
+
+      } catch (e) {
+
+        console.log(
+          "ERRO EXTRAINDO TEXTO"
+        );
 
       }
 
