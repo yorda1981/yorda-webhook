@@ -1,4 +1,3 @@
-```javascript id="v4m2rx"
 const express = require("express");
 const axios = require("axios");
 
@@ -13,8 +12,11 @@ const PORT = process.env.PORT || 8080;
 ========================= */
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+
 const ZAPI_INSTANCE = process.env.ZAPI_INSTANCE;
+
 const ZAPI_TOKEN = process.env.ZAPI_TOKEN;
+
 const ZAPI_CLIENT_TOKEN = process.env.ZAPI_CLIENT_TOKEN;
 
 /* =========================
@@ -73,6 +75,76 @@ async function enviarMensaje(phone, texto) {
 }
 
 /* =========================
+   OPENAI
+========================= */
+
+async function responderIA(mensagem) {
+
+  try {
+
+    const response = await axios.post(
+
+      "https://api.openai.com/v1/responses",
+
+      {
+
+        model: "gpt-4.1-mini",
+
+        input:
+          "Cliente escreveu: " +
+          mensagem +
+          ". Responde corto y natural sobre remesas, cambios o recargas."
+
+      },
+
+      {
+
+        headers: {
+
+          Authorization:
+            "Bearer " + OPENAI_API_KEY,
+
+          "Content-Type":
+            "application/json"
+
+        }
+
+      }
+
+    );
+
+    console.log(
+      "OPENAI:",
+      JSON.stringify(
+        response.data,
+        null,
+        2
+      )
+    );
+
+    const texto =
+      response.data.output?.[0]?.content?.[0]?.text;
+
+    return texto || "Hola 👋";
+
+  } catch (error) {
+
+    console.log(
+      "ERRO OPENAI:"
+    );
+
+    console.log(
+      error.response?.data ||
+      error.message
+    );
+
+    return "Hola 👋";
+
+  }
+
+}
+
+/* =========================
    WEBHOOK
 ========================= */
 
@@ -101,10 +173,11 @@ app.post("/webhook", async (req, res) => {
 
     }
 
-    const phone = body.phone;
-
     const texto =
       body?.text?.message || "";
+
+    const phone =
+      body.phone;
 
     if (!texto) {
 
@@ -118,12 +191,19 @@ app.post("/webhook", async (req, res) => {
     );
 
     /* =========================
-       RESPUESTA SIMPLE
+       OPENAI RESPONSE
+    ========================= */
+
+    const respostaIA =
+      await responderIA(texto);
+
+    /* =========================
+       ENVIAR WHATSAPP
     ========================= */
 
     await enviarMensaje(
       phone,
-      "Hola 👋 ¿Cómo puedo ayudarte?"
+      respostaIA
     );
 
     return res.sendStatus(200);
@@ -151,9 +231,15 @@ app.post("/webhook", async (req, res) => {
 
 app.get("/", (req, res) => {
 
-  res.send("YordaBot ONLINE");
+  res.send(
+    "YordaBot ONLINE"
+  );
 
 });
+
+/* =========================
+   START
+========================= */
 
 app.listen(PORT, () => {
 
@@ -162,4 +248,3 @@ app.listen(PORT, () => {
   );
 
 });
-```
