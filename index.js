@@ -45,6 +45,7 @@ const gatilhos = [
   "enviar",
   "transferencia",
   "transferência",
+  "transferir",
   "cambio",
   "câmbio",
   "tasa",
@@ -67,10 +68,12 @@ const gatilhos = [
   "dinheiro",
   "deposito",
   "depósito",
-  "pasarte dinero",
-  "mandar dinero",
-  "hacer un envío",
-  "hacer un envio"
+  "tarjeta",
+  "cartão",
+  "cartao",
+  "habana",
+  "efectivo",
+  "entrega"
 
 ];
 
@@ -184,37 +187,39 @@ Asistente humano de remesas.
 
 REGLAS:
 
+- Responder corto.
 - Máximo 2 líneas.
-- Hablar natural.
+- Sonar humano.
+- Sonar natural.
 - No sonar como IA.
-- No usar listas.
-- No repetir preguntas.
+- No usar listas largas.
 - No explicar demasiado.
 - Hablar en idioma del cliente.
 
-Si el cliente habla de envío:
-guiar la conversación paso a paso.
+OPERACIONES:
 
-Si ya sabes:
-- moneda
-- monto
-- destino
+1. Transferencia
+2. Entrega
+3. Recarga
 
-NO volver a preguntar eso.
+Transferencia:
+- necesita monto
+- necesita tarjeta
 
-Si cliente menciona:
-real/reales/brl
-interpretar BRL.
+Entrega:
+- necesita monto
+- necesita municipio
 
-Si cliente menciona:
-usd/dólar
-interpretar USD.
+Recarga:
+- necesita monto
+- necesita número
+
+No repetir datos ya informados.
 
 Si cliente pide PIX:
-entregar PIX directamente.
+enviar PIX directamente.
 
-Si cliente pide hablar con Yordanys:
-responder:
+Si cliente pide Yordanys:
 "Claro 👌 Yordanys continuará tu atención en breve."
 `
 
@@ -278,12 +283,7 @@ app.post("/webhook", async (req, res) => {
       body.isNewsletter === true ||
       body.isEdit === true ||
       body.fromApi === true ||
-      body.status !== "RECEIVED" ||
-      body.sticker ||
-      body.image ||
-      body.video ||
-      body.audio ||
-      body.document
+      body.status !== "RECEIVED"
 
     ) {
 
@@ -303,12 +303,12 @@ app.post("/webhook", async (req, res) => {
 
     }
 
-    /* =========================
-       HORÁRIO
-    ========================== */
-
     const hora =
       new Date().getHours();
+
+    /* =========================
+       SILÊNCIO NOTURNO
+    ========================== */
 
     if (hora >= 22 || hora < 6) {
 
@@ -369,17 +369,13 @@ app.post("/webhook", async (req, res) => {
         .replace(/[^\w\s]/gi, " ");
 
     /* =========================
-       GATILHO
+       GATILHOS
     ========================== */
 
     const comercial =
       gatilhos.some(g =>
         textoLimpo.includes(g)
       );
-
-    /* =========================
-       CONVERSA
-    ========================== */
 
     if (comercial) {
 
@@ -465,12 +461,61 @@ app.post("/webhook", async (req, res) => {
 
       estadoCliente[phone] = {
 
+        operacion: null,
         moeda: null,
-        destino: null,
         monto: null,
-        tipo: null
+        municipio: null,
+        tarjeta: null,
+        numero: null,
+        aguardando: null,
+        pixEnviado: false
 
       };
+
+    }
+
+    const estado =
+      estadoCliente[phone];
+
+    /* =========================
+       DETECTAR OPERAÇÃO
+    ========================== */
+
+    if (
+
+      textoLimpo.includes("transferencia") ||
+      textoLimpo.includes("transferir") ||
+      textoLimpo.includes("tarjeta")
+
+    ) {
+
+      estado.operacion =
+        "transferencia";
+
+    }
+
+    if (
+
+      textoLimpo.includes("entrega") ||
+      textoLimpo.includes("habana") ||
+      textoLimpo.includes("efectivo")
+
+    ) {
+
+      estado.operacion =
+        "entrega";
+
+    }
+
+    if (
+
+      textoLimpo.includes("recarga") ||
+      textoLimpo.includes("etecsa")
+
+    ) {
+
+      estado.operacion =
+        "recarga";
 
     }
 
@@ -486,8 +531,7 @@ app.post("/webhook", async (req, res) => {
 
     ) {
 
-      estadoCliente[phone].moeda =
-        "BRL";
+      estado.moeda = "BRL";
 
     }
 
@@ -499,36 +543,7 @@ app.post("/webhook", async (req, res) => {
 
     ) {
 
-      estadoCliente[phone].moeda =
-        "USD";
-
-    }
-
-    /* =========================
-       DETECTAR TIPO
-    ========================== */
-
-    if (
-
-      textoLimpo.includes("envio") ||
-      textoLimpo.includes("remesa") ||
-      textoLimpo.includes("transferencia")
-
-    ) {
-
-      estadoCliente[phone].tipo =
-        "remesa";
-
-    }
-
-    if (
-
-      textoLimpo.includes("recarga")
-
-    ) {
-
-      estadoCliente[phone].tipo =
-        "recarga";
+      estado.moeda = "USD";
 
     }
 
@@ -537,43 +552,251 @@ app.post("/webhook", async (req, res) => {
     ========================== */
 
     const numero =
-      texto.match(/\d+/);
+      texto.match(/\d+([.,]\d+)?/);
 
     if (numero) {
 
-      estadoCliente[phone].monto =
+      estado.monto =
         numero[0];
 
     }
 
     /* =========================
-       CONTEXTO
+       DETECTAR MUNICÍPIO
     ========================== */
 
-    const contexto = `
-TIPO:
-${estadoCliente[phone].tipo || "desconocido"}
+    const municipios = [
 
-MONEDA:
-${estadoCliente[phone].moeda || "desconocida"}
+      "habana",
+      "centro habana",
+      "habana vieja",
+      "cerro",
+      "boyeros",
+      "arroyo naranjo",
+      "marianao"
 
-MONTO:
-${estadoCliente[phone].monto || "desconocido"}
-`;
+    ];
+
+    municipios.forEach(m => {
+
+      if (textoLimpo.includes(m)) {
+
+        estado.municipio = m;
+
+      }
+
+    });
+
+    /* =========================
+       DETECTAR TARJETA
+    ========================== */
+
+    const tarjeta =
+      texto.replace(/\D/g, "");
+
+    if (
+
+      tarjeta.length >= 16
+
+    ) {
+
+      estado.tarjeta =
+        tarjeta;
+
+    }
+
+    /* =========================
+       FLUJO TRANSFERENCIA
+    ========================== */
+
+    if (
+
+      estado.operacion === "transferencia"
+
+    ) {
+
+      if (!estado.monto) {
+
+        estado.aguardando =
+          "monto";
+
+        await enviarMensaje(
+
+          phone,
+
+          "¿Cuántos reales deseas enviar?"
+
+        );
+
+        return res.sendStatus(200);
+
+      }
+
+      if (!estado.tarjeta) {
+
+        estado.aguardando =
+          "tarjeta";
+
+        await enviarMensaje(
+
+          phone,
+
+          "Envíame la tarjeta 👌"
+
+        );
+
+        return res.sendStatus(200);
+
+      }
+
+      if (!estado.pixEnviado) {
+
+        estado.pixEnviado = true;
+
+        estado.aguardando =
+          "comprovante";
+
+        await enviarMensaje(
+
+          phone,
+
+`PIX 👇
+
+8becaaf5-f296-4cbc-a115-46e3d23b042a
+
+YORDANYS RAFAEL SOSA REYES
+Nubank`
+
+        );
+
+        return res.sendStatus(200);
+
+      }
+
+    }
+
+    /* =========================
+       FLUJO ENTREGA
+    ========================== */
+
+    if (
+
+      estado.operacion === "entrega"
+
+    ) {
+
+      if (!estado.monto) {
+
+        await enviarMensaje(
+
+          phone,
+
+          "¿Cuántos reales deseas enviar?"
+
+        );
+
+        return res.sendStatus(200);
+
+      }
+
+      if (!estado.municipio) {
+
+        await enviarMensaje(
+
+          phone,
+
+          "¿Cuál municipio de La Habana?"
+
+        );
+
+        return res.sendStatus(200);
+
+      }
+
+      if (!estado.pixEnviado) {
+
+        estado.pixEnviado = true;
+
+        estado.aguardando =
+          "comprovante";
+
+        await enviarMensaje(
+
+          phone,
+
+`PIX 👇
+
+8becaaf5-f296-4cbc-a115-46e3d23b042a
+
+YORDANYS RAFAEL SOSA REYES
+Nubank`
+
+        );
+
+        return res.sendStatus(200);
+
+      }
+
+    }
+
+    /* =========================
+       FLUJO RECARGA
+    ========================== */
+
+    if (
+
+      estado.operacion === "recarga"
+
+    ) {
+
+      if (!estado.monto) {
+
+        await enviarMensaje(
+
+          phone,
+
+          "¿De cuánto será la recarga?"
+
+        );
+
+        return res.sendStatus(200);
+
+      }
+
+      if (!estado.numero) {
+
+        estado.aguardando =
+          "numero";
+
+        await enviarMensaje(
+
+          phone,
+
+          "Envíame el número 👌"
+
+        );
+
+        return res.sendStatus(200);
+
+      }
+
+    }
 
     /* =========================
        OPENAI
     ========================== */
+
+    const contexto = JSON.stringify(
+      estado,
+      null,
+      2
+    );
 
     const respostaIA =
       await responderIA(
         texto,
         contexto
       );
-
-    /* =========================
-       ENVIAR
-    ========================== */
 
     await enviarMensaje(
       phone,
