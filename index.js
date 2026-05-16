@@ -1,4 +1,4 @@
-```js
+```js id="u9v4za"
 const express = require("express");
 const axios = require("axios");
 
@@ -114,8 +114,7 @@ async function enviarMensaje(
 
     }
 
-    const url =
-`https://api.z-api.io/instances/${ZAPI_INSTANCE}/token/${ZAPI_TOKEN}/send-text`;
+    const url = `https://api.z-api.io/instances/${ZAPI_INSTANCE}/token/${ZAPI_TOKEN}/send-text`;
 
     console.log(
       "URL:",
@@ -434,10 +433,6 @@ Menos de 100 reales → 100 CUP
 
       if (!isNaN(numero)) {
 
-        /* =========================
-           RECARGA
-        ========================= */
-
         if (
           memoria[phone] ===
           "recarga"
@@ -457,10 +452,6 @@ Menos de 100 reales → 100 CUP
           return res.sendStatus(200);
 
         }
-
-        /* =========================
-           TRANSFERENCIA
-        ========================= */
 
         if (
           memoria[phone] ===
