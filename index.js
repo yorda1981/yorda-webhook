@@ -7,442 +7,211 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 8080;
 
-const clientes = {};
+/* =========================
+   CONFIG
+========================= */
 
-const GATILHOS = [
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
+const AGENT_ID = process.env.AGENT_ID;
+
+const ZAPI_INSTANCE = process.env.ZAPI_INSTANCE;
+const ZAPI_TOKEN = process.env.ZAPI_TOKEN;
+
+const ZAPI_URL = `https://api.z-api.io/instances/${ZAPI_INSTANCE}/token/${ZAPI_TOKEN}/send-text`;
+
+/* =========================
+   GATILLOS
+========================= */
+
+const gatilhos = [
   "remesa",
   "remesas",
   "envio",
   "enviar",
-  "mandar",
-  "transferencia",
-  "transferir",
-  "pix",
-  "cambio",
-  "câmbio",
-  "taxa",
-  "taxas",
+  "reais",
   "real",
-  "reales",
-  "cup",
   "usd",
   "dolar",
   "dólar",
-  "mlc",
-  "etecsa",
-  "recarga",
+  "pix",
+  "transferencia",
+  "transferência",
   "saldo",
-  "cuba",
+  "recarga",
+  "etecsa",
+  "cambio",
+  "cmb",
+  "cup",
+  "mlc",
   "dinero",
-  "dinheiro",
   "money",
+  "recibir",
+  "receber",
   "deposito",
   "depósito",
-  "receber",
-  "recibir"
+  "tarjeta",
+  "cartao",
+  "cartão"
 ];
 
-function detectarIdioma(texto) {
+/* =========================
+   FUNÇÃO
+========================= */
 
-  const pt =
-    texto.includes("você") ||
-    texto.includes("obrigado") ||
-    texto.includes("boa") ||
-    texto.includes("reais");
+function contieneGatilho(texto) {
+  const t = texto.toLowerCase();
 
-  return pt ? "pt" : "es";
+  return gatilhos.some(g => t.includes(g));
 }
 
-function saudacao(idioma) {
+/* =========================
+   WEBHOOK
+========================= */
 
-  if (idioma === "pt") {
-    return "Olá 👋 Como posso ajudar?";
-  }
-
-  return "Hola 👋 ¿Cómo puedo ayudarte?";
-}
-
-function taxaBRL(valor) {
-
-  if (valor < 100) return 100;
-
-  if (valor < 500) return 115;
-
-  return 118;
-}
-
-async function enviarMensagem(numero, texto) {
-
-  try {
-
-    await axios.post(
-
-      `https://api.z-api.io/instances/${process.env.ZAPI_INSTANCE}/token/${process.env.ZAPI_TOKEN}/send-text`,
-
-      {
-        phone: numero,
-        message: texto
-      },
-
-      {
-        headers: {
-          "Client-Token": process.env.ZAPI_CLIENT_TOKEN
-        }
-      }
-    );
-
-  } catch (erro) {
-
-    console.log("ERRO ENVIO:");
-    console.log(
-      erro.response?.data || erro.message
-    );
-  }
-}
-
-app.post("/webhook", async (req, res) => {
+app.post("/", async (req, res) => {
 
   try {
 
     const body = req.body;
 
-    if (!body?.text?.message) {
+    console.log("BODY:");
+    console.log(JSON.stringify(body, null, 2));
+
+    const mensagem =
+      body?.text?.message ||
+      "";
+
+    const telefone =
+      body?.phone ||
+      "";
+
+    const fromMe =
+      body?.fromMe ||
+      false;
+
+    const isGroup =
+      body?.isGroup ||
+      false;
+
+    if (!mensagem) {
       return res.sendStatus(200);
     }
 
-    const numero = body.phone;
+    console.log("MENSAGEM:", mensagem);
 
-    const textoOriginal =
-      body.text.message;
+    /* IGNORAR */
 
-    const texto =
-      textoOriginal
-      .toLowerCase()
-      .trim();
-
-    console.log("MENSAGEM:", textoOriginal);
-
-    if (
-      body.fromMe ||
-      body.isGroup ||
-      body.isNewsletter
-    ) {
+    if (fromMe) {
+      console.log("IGNORADO: mensagem própria");
       return res.sendStatus(200);
     }
 
-    if (!clientes[numero]) {
-
-      clientes[numero] = {
-
-        comercial: false,
-
-        modo: "normal",
-
-        ultimaMensagem: "",
-
-        ultimaResposta: "",
-
-        ultimoValor: null,
-
-        ultimoTipo: null
-      };
+    if (isGroup) {
+      console.log("IGNORADO: grupo");
+      return res.sendStatus(200);
     }
 
-    const idioma =
-      detectarIdioma(texto);
+    /* SAUDAÇÃO NORMAL */
 
-    const temGatilho =
-      GATILHOS.some(
-        palavra =>
-          texto.includes(palavra)
-      );
+    const msgLower = mensagem.toLowerCase();
 
-    // SAUDAÇÃO NORMAL
+    const saudacoes = [
+      "oi",
+      "ola",
+      "olá",
+      "hola",
+      "bom dia",
+      "boa tarde",
+      "boa noite",
+      "buenas",
+      "buenos dias",
+      "buenas noches"
+    ];
 
-    if (
-      (
-        texto === "hola" ||
-        texto === "olá" ||
-        texto === "ola" ||
-        texto === "boa noite" ||
-        texto === "buenas" ||
-        texto === "buenas noches"
-      ) &&
-      !clientes[numero].comercial
-    ) {
+    const somenteSaudacao = saudacoes.includes(msgLower);
 
-      const resposta =
-        saudacao(idioma);
+    if (somenteSaudacao) {
 
-      await enviarMensagem(
-        numero,
-        resposta
-      );
+      await axios.post(ZAPI_URL, {
+        phone: telefone,
+        message: "Olá 👋 Como posso ajudar?"
+      });
 
       return res.sendStatus(200);
     }
 
-    // ATIVA MODO COMERCIAL
+    /* DETECTAR INTERESSE */
 
-    if (temGatilho) {
+    const interessado = contieneGatilho(mensagem);
 
-      clientes[numero]
-      .comercial = true;
-    }
+    if (!interessado) {
 
-    // IGNORA CONVERSA NORMAL
-
-    if (
-      !clientes[numero]
-      .comercial
-    ) {
-      return res.sendStatus(200);
-    }
-
-    // FALAR COM HUMANO
-
-    if (
-      texto.includes("yordanys") ||
-      texto.includes("humano") ||
-      texto.includes("atendente") ||
-      texto.includes("persona")
-    ) {
-
-      const resposta =
-        idioma === "pt"
-        ? "Claro 👍 Yordanys continuará com você em instantes."
-        : "Claro 👍 Yordanys continuará contigo enseguida.";
-
-      await enviarMensagem(
-        numero,
-        resposta
-      );
+      console.log("SEM GATILHO");
 
       return res.sendStatus(200);
     }
 
-    // DEMORA
+    /* OPENAI */
 
-    if (
-      texto.includes("donde esta") ||
-      texto.includes("cadê") ||
-      texto.includes("demora")
-    ) {
+    const respostaOpenAI = await axios.post(
+      "https://api.openai.com/v1/responses",
+      {
+        model: "gpt-4.1-mini",
 
-      const resposta =
-        idioma === "pt"
-        ? "Yordanys responderá assim que estiver disponível 👍"
-        : "Yordanys responderá en cuanto esté disponible 👍";
-
-      await enviarMensagem(
-        numero,
-        resposta
-      );
-
-      return res.sendStatus(200);
-    }
-
-    // PIX
-
-    if (
-      texto.includes("pix")
-    ) {
-
-      const resposta =
-`8becaaf5-f296-4cbc-a115-46e3d23b042a`;
-
-      await enviarMensagem(
-        numero,
-        resposta
-      );
-
-      return res.sendStatus(200);
-    }
-
-    // RECARGA
-
-    if (
-      texto.includes("recarga") ||
-      texto.includes("saldo") ||
-      texto.includes("etecsa")
-    ) {
-
-      clientes[numero]
-      .modo = "recarga";
-
-      const resposta =
-        idioma === "pt"
-        ? "Qual valor da recarga em reais?"
-        : "¿Cuál es el valor de la recarga en reales?";
-
-      await enviarMensagem(
-        numero,
-        resposta
-      );
-
-      return res.sendStatus(200);
-    }
-
-    // REMESA
-
-    if (
-      texto.includes("remesa") ||
-      texto.includes("envio") ||
-      texto.includes("enviar") ||
-      texto.includes("cup")
-    ) {
-
-      clientes[numero]
-      .modo = "remesa";
-
-      const resposta =
-        idioma === "pt"
-        ? "Quantos reais deseja enviar?"
-        : "¿Cuántos reales deseas enviar?";
-
-      await enviarMensagem(
-        numero,
-        resposta
-      );
-
-      return res.sendStatus(200);
-    }
-
-    // TAXAS
-
-    if (
-      texto.includes("taxa") ||
-      texto.includes("taxas") ||
-      texto.includes("cambio")
-    ) {
-
-      const resposta =
-`Menos de 100 reais → 100 CUP
-100-499 reais → 115 CUP
-500+ reais → 118 CUP`;
-
-      await enviarMensagem(
-        numero,
-        resposta
-      );
-
-      return res.sendStatus(200);
-    }
-
-    // EXTRAI VALOR
-
-    const match =
-      texto.match(/\d+/);
-
-    const valor =
-      match
-      ? parseInt(match[0])
-      : null;
-
-    // RECARGA CALCULO
-
-    if (
-      clientes[numero]
-      .modo === "recarga"
-    ) {
-
-      if (valor) {
-
-        const saldo =
-          valor * 20;
-
-        const resposta =
-`${valor} reales = ${saldo.toLocaleString()} CUP de saldo 📲`;
-
-        await enviarMensagem(
-          numero,
-          resposta
-        );
-
-        return res.sendStatus(200);
+        input: [
+          {
+            role: "system",
+            content:
+              "Você é um atendente humano de remessas e recargas. Responda curto, natural e direto."
+          },
+          {
+            role: "user",
+            content: mensagem
+          }
+        ]
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${OPENAI_API_KEY}`,
+          "Content-Type": "application/json"
+        }
       }
+    );
 
-      if (
-        texto.includes("como") ||
-        texto.includes("funciona") ||
-        texto.includes("explica")
-      ) {
+    const resposta =
+      respostaOpenAI.data.output_text ||
+      "No entendí. ¿Puedes explicar mejor?";
 
-        const resposta =
-          idioma === "pt"
-          ? "A recarga envia saldo ETECSA para internet, SMS e chamadas."
-          : "La recarga envía saldo ETECSA para internet, SMS y llamadas.";
+    console.log("RESPOSTA:", resposta);
 
-        await enviarMensagem(
-          numero,
-          resposta
-        );
+    /* ENVIAR */
 
-        return res.sendStatus(200);
-      }
-    }
-
-    // REMESA CALCULO
-
-    if (
-      clientes[numero]
-      .modo === "remesa"
-    ) {
-
-      if (valor) {
-
-        const taxa =
-          taxaBRL(valor);
-
-        const cup =
-          valor * taxa;
-
-        const resposta =
-`${valor} reales → ${cup.toLocaleString()} CUP 🔥`;
-
-        await enviarMensagem(
-          numero,
-          resposta
-        );
-
-        return res.sendStatus(200);
-      }
-
-      if (
-        texto.includes("como") ||
-        texto.includes("funciona") ||
-        texto.includes("explica")
-      ) {
-
-        const resposta =
-          idioma === "pt"
-          ? "Você envia reais por PIX e a pessoa recebe CUP em Cuba."
-          : "Envías reales por PIX y la persona recibe CUP en Cuba.";
-
-        await enviarMensagem(
-          numero,
-          resposta
-        );
-
-        return res.sendStatus(200);
-      }
-    }
+    await axios.post(ZAPI_URL, {
+      phone: telefone,
+      message: resposta
+    });
 
     return res.sendStatus(200);
 
   } catch (erro) {
 
-    console.log("ERRO GERAL:");
-    console.log(erro);
+    console.log("ERRO:");
 
-    return res.sendStatus(500);
+    if (erro.response) {
+      console.log(JSON.stringify(erro.response.data, null, 2));
+    } else {
+      console.log(erro.message);
+    }
+
+    return res.sendStatus(200);
   }
 });
 
-app.listen(PORT, () => {
+/* =========================
+   START
+========================= */
 
-  console.log(
-    `Servidor ONLINE na porta ${PORT}`
-  );
+app.listen(PORT, () => {
+  console.log(`Servidor ONLINE na porta ${PORT}`);
 });
