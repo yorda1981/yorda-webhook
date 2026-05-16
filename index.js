@@ -1,5 +1,3 @@
-require("dotenv").config();
-
 const express = require("express");
 const axios = require("axios");
 
@@ -97,7 +95,9 @@ async function enviarMensagem(numero, texto) {
   } catch (erro) {
 
     console.log("ERRO ENVIO:");
-    console.log(erro.response?.data || erro.message);
+    console.log(
+      erro.response?.data || erro.message
+    );
   }
 }
 
@@ -106,9 +106,6 @@ app.post("/webhook", async (req, res) => {
   try {
 
     const body = req.body;
-
-    console.log("BODY:");
-    console.log(body);
 
     if (!body?.text?.message) {
       return res.sendStatus(200);
@@ -333,7 +330,7 @@ app.post("/webhook", async (req, res) => {
       return res.sendStatus(200);
     }
 
-    // VALOR
+    // EXTRAI VALOR
 
     const match =
       texto.match(/\d+/);
