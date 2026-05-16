@@ -28,9 +28,7 @@ const ZAPI_CLIENT_TOKEN =
 ========================= */
 
 const pausaHumana = {};
-
 const conversaAtiva = {};
-
 const estadoCliente = {};
 
 /* =========================
@@ -68,7 +66,6 @@ const gatilhos = [
   "dinheiro",
   "deposito",
   "depósito",
-  "tarjeta",
   "cartão",
   "cartao",
   "habana",
@@ -107,18 +104,14 @@ async function enviarMensaje(phone, texto) {
   try {
 
     const url =
-      "https://api.z-api.io/instances/" +
-      ZAPI_INSTANCE +
-      "/token/" +
-      ZAPI_TOKEN +
-      "/send-text";
+      `https://api.z-api.io/instances/${ZAPI_INSTANCE}/token/${ZAPI_TOKEN}/send-text`;
 
     const response = await axios.post(
 
       url,
 
       {
-        phone: phone,
+        phone,
         message: texto
       },
 
@@ -191,17 +184,15 @@ REGLAS:
 - Máximo 2 líneas.
 - Sonar natural.
 - No sonar como IA.
-- No usar listas largas.
-- No explicar demasiado.
 - Hablar en idioma del cliente.
+- No inventar información.
+- No repetir preguntas.
+- Ayudar solamente si el flujo no está activo.
 
 Operaciones:
 - transferencia
 - entrega
 - recarga
-
-No repetir preguntas.
-No pedir datos ya informados.
 `
 
       },
@@ -211,7 +202,7 @@ No pedir datos ya informados.
         headers: {
 
           Authorization:
-            "Bearer " + OPENAI_API_KEY,
+            `Bearer ${OPENAI_API_KEY}`,
 
           "Content-Type":
             "application/json"
@@ -253,12 +244,19 @@ function resetEstado(phone) {
   estadoCliente[phone] = {
 
     operacion: null,
+
+    etapa: "inicio",
+
+    idioma: "es",
+
     moeda: null,
     monto: null,
     municipio: null,
     tarjeta: null,
     numero: null,
+
     aguardando: null,
+
     pixEnviado: false
 
   };
@@ -277,10 +275,10 @@ app.post("/webhook", async (req, res) => {
 
     if (
 
-      body.isGroup === true ||
-      body.isNewsletter === true ||
-      body.isEdit === true ||
-      body.fromApi === true ||
+      body.isGroup ||
+      body.isNewsletter ||
+      body.isEdit ||
+      body.fromApi ||
       body.status !== "RECEIVED"
 
     ) {
@@ -295,7 +293,7 @@ app.post("/webhook", async (req, res) => {
     const phone =
       body.phone;
 
-    if (!texto) {
+    if (!texto && !body.image) {
 
       return res.sendStatus(200);
 
@@ -305,10 +303,6 @@ app.post("/webhook", async (req, res) => {
       new Date().getHours();
 
     if (hora >= 22 || hora < 6) {
-
-      console.log(
-        "HORÁRIO DE DESCANSO"
-      );
 
       return res.sendStatus(200);
 
@@ -323,11 +317,6 @@ app.post("/webhook", async (req, res) => {
       pausaHumana[phone] =
         Date.now() + (30 * 60 * 1000);
 
-      console.log(
-        "PAUSA HUMANA:",
-        phone
-      );
-
       return res.sendStatus(200);
 
     }
@@ -339,19 +328,9 @@ app.post("/webhook", async (req, res) => {
 
     ) {
 
-      console.log(
-        "BOT PAUSADO:",
-        phone
-      );
-
       return res.sendStatus(200);
 
     }
-
-    console.log(
-      "MENSAGEM:",
-      texto
-    );
 
     const textoLimpo =
       texto
@@ -386,44 +365,6 @@ app.post("/webhook", async (req, res) => {
     }
 
     /* =========================
-       GATILHOS
-    ========================== */
-
-    const comercial =
-      gatilhos.some(g =>
-        textoLimpo.includes(g)
-      );
-
-    if (comercial) {
-
-      conversaAtiva[phone] =
-        Date.now() + (5 * 60 * 1000);
-
-    }
-
-    const conversaEmAndamento =
-
-      conversaAtiva[phone] &&
-      Date.now() < conversaAtiva[phone];
-
-    /* =========================
-       LIMPAR CONTEXTO VELHO
-    ========================== */
-
-    if (
-
-      conversaAtiva[phone] &&
-      Date.now() > conversaAtiva[phone]
-
-    ) {
-
-      delete conversaAtiva[phone];
-
-      resetEstado(phone);
-
-    }
-
-    /* =========================
        SAUDAÇÃO
     ========================== */
 
@@ -432,11 +373,15 @@ app.post("/webhook", async (req, res) => {
         textoLimpo.includes(s)
       );
 
+    const comercial =
+      gatilhos.some(g =>
+        textoLimpo.includes(g)
+      );
+
     if (
 
       saudacao &&
-      !comercial &&
-      !conversaEmAndamento
+      !comercial
 
     ) {
 
@@ -468,18 +413,27 @@ app.post("/webhook", async (req, res) => {
 
     }
 
+    /* =========================
+       CONTEXTO
+    ========================== */
+
+    if (comercial) {
+
+      conversaAtiva[phone] =
+        Date.now() + (5 * 60 * 1000);
+
+    }
+
     if (
 
-      !comercial &&
-      !conversaEmAndamento
+      conversaAtiva[phone] &&
+      Date.now() > conversaAtiva[phone]
 
     ) {
 
-      console.log(
-        "SEM INTENÇÃO COMERCIAL"
-      );
+      delete conversaAtiva[phone];
 
-      return res.sendStatus(200);
+      resetEstado(phone);
 
     }
 
@@ -489,7 +443,7 @@ app.post("/webhook", async (req, res) => {
 
     }
 
-    const estado =
+    let estado =
       estadoCliente[phone];
 
     /* =========================
@@ -498,40 +452,54 @@ app.post("/webhook", async (req, res) => {
 
     let novaOperacao = null;
 
-    if (
+    const mudarFluxo =
 
-      !estado.operacion ||
-
-      textoLimpo.includes("entrega") ||
-      textoLimpo.includes("habana") ||
-      textoLimpo.includes("efectivo")
-
-    ) {
-
-      novaOperacao = "entrega";
-
-    }
+      textoLimpo.includes("cambiar") ||
+      textoLimpo.includes("mejor");
 
     if (
 
-      textoLimpo.includes("transferencia") ||
-      textoLimpo.includes("transferir") ||
-      textoLimpo.includes("tarjeta")
+      estado.etapa === "inicio" ||
+      mudarFluxo
 
     ) {
 
-      novaOperacao = "transferencia";
+      if (
 
-    }
+        textoLimpo.includes("transferencia") ||
+        textoLimpo.includes("transferir")
 
-    if (
+      ) {
 
-      textoLimpo.includes("recarga") ||
-      textoLimpo.includes("etecsa")
+        novaOperacao =
+          "transferencia";
 
-    ) {
+      }
 
-      novaOperacao = "recarga";
+      if (
+
+        textoLimpo.includes("entrega") ||
+        textoLimpo.includes("habana") ||
+        textoLimpo.includes("efectivo")
+
+      ) {
+
+        novaOperacao =
+          "entrega";
+
+      }
+
+      if (
+
+        textoLimpo.includes("recarga") ||
+        textoLimpo.includes("etecsa")
+
+      ) {
+
+        novaOperacao =
+          "recarga";
+
+      }
 
     }
 
@@ -542,38 +510,22 @@ app.post("/webhook", async (req, res) => {
 
     ) {
 
+      if (estado.operacion) {
+
+        await enviarMensaje(
+          phone,
+          "Entendido 👍 cambiando operación."
+        );
+
+      }
+
       resetEstado(phone);
 
       estadoCliente[phone].operacion =
         novaOperacao;
 
-    }
-
-    /* =========================
-       DETECTAR MOEDA
-    ========================== */
-
-    if (
-
-      textoLimpo.includes("real") ||
-      textoLimpo.includes("reales") ||
-      textoLimpo.includes("brl")
-
-    ) {
-
-      estado.moeda = "BRL";
-
-    }
-
-    if (
-
-      textoLimpo.includes("usd") ||
-      textoLimpo.includes("dolar") ||
-      textoLimpo.includes("dólar")
-
-    ) {
-
-      estado.moeda = "USD";
+      estado =
+        estadoCliente[phone];
 
     }
 
@@ -584,7 +536,28 @@ app.post("/webhook", async (req, res) => {
     const numero =
       texto.match(/\d+([.,]\d+)?/);
 
-    if (numero) {
+    if (
+
+      numero &&
+
+      (
+
+        textoLimpo.includes("real") ||
+        textoLimpo.includes("reales") ||
+        textoLimpo.includes("brl") ||
+        textoLimpo.includes("cup") ||
+        textoLimpo.includes("usd")
+
+      ) &&
+
+      (
+
+        estado.etapa === "esperando_monto" ||
+        estado.etapa === "inicio"
+
+      )
+
+    ) {
 
       estado.monto =
         numero[0];
@@ -600,6 +573,7 @@ app.post("/webhook", async (req, res) => {
 
     if (
 
+      estado.etapa === "esperando_tarjeta" &&
       tarjeta.length >= 16
 
     ) {
@@ -610,7 +584,7 @@ app.post("/webhook", async (req, res) => {
     }
 
     /* =========================
-       MUNICIPIOS
+       DETECTAR MUNICIPIO
     ========================== */
 
     const municipios = [
@@ -627,7 +601,12 @@ app.post("/webhook", async (req, res) => {
 
     municipios.forEach(m => {
 
-      if (textoLimpo.includes(m)) {
+      if (
+
+        estado.etapa === "esperando_municipio" &&
+        textoLimpo.includes(m)
+
+      ) {
 
         estado.municipio = m;
 
@@ -636,7 +615,7 @@ app.post("/webhook", async (req, res) => {
     });
 
     /* =========================
-       RECARGA
+       RECARGA NUMERO
     ========================== */
 
     if (
@@ -650,7 +629,9 @@ app.post("/webhook", async (req, res) => {
 
       if (
 
-        numeroRecarga.length >= 8
+        estado.etapa === "esperando_numero" &&
+        numeroRecarga.length >= 8 &&
+        numeroRecarga.length <= 12
 
       ) {
 
@@ -662,7 +643,7 @@ app.post("/webhook", async (req, res) => {
     }
 
     /* =========================
-       FLUJOS
+       TRANSFERENCIA
     ========================== */
 
     if (
@@ -672,6 +653,9 @@ app.post("/webhook", async (req, res) => {
     ) {
 
       if (!estado.monto) {
+
+        estado.etapa =
+          "esperando_monto";
 
         await enviarMensaje(
           phone,
@@ -684,6 +668,9 @@ app.post("/webhook", async (req, res) => {
 
       if (!estado.tarjeta) {
 
+        estado.etapa =
+          "esperando_tarjeta";
+
         await enviarMensaje(
           phone,
           "Envíame la tarjeta 👌"
@@ -693,7 +680,35 @@ app.post("/webhook", async (req, res) => {
 
       }
 
+      if (!estado.pixEnviado) {
+
+        estado.pixEnviado = true;
+
+        estado.aguardando =
+          "comprovante";
+
+        estado.etapa =
+          "esperando_comprovante";
+
+        await enviarMensaje(
+          phone,
+          "8becaaf5-f296-4cbc-a115-46e3d23b042a"
+        );
+
+        await enviarMensaje(
+          phone,
+          "YORDANYS RAFAEL SOSA REYES\nNubank"
+        );
+
+        return res.sendStatus(200);
+
+      }
+
     }
+
+    /* =========================
+       ENTREGA
+    ========================== */
 
     if (
 
@@ -702,6 +717,9 @@ app.post("/webhook", async (req, res) => {
     ) {
 
       if (!estado.monto) {
+
+        estado.etapa =
+          "esperando_monto";
 
         await enviarMensaje(
           phone,
@@ -714,6 +732,9 @@ app.post("/webhook", async (req, res) => {
 
       if (!estado.municipio) {
 
+        estado.etapa =
+          "esperando_municipio";
+
         await enviarMensaje(
           phone,
           "¿Cuál municipio de La Habana?"
@@ -723,7 +744,35 @@ app.post("/webhook", async (req, res) => {
 
       }
 
+      if (!estado.pixEnviado) {
+
+        estado.pixEnviado = true;
+
+        estado.aguardando =
+          "comprovante";
+
+        estado.etapa =
+          "esperando_comprovante";
+
+        await enviarMensaje(
+          phone,
+          "8becaaf5-f296-4cbc-a115-46e3d23b042a"
+        );
+
+        await enviarMensaje(
+          phone,
+          "YORDANYS RAFAEL SOSA REYES\nNubank"
+        );
+
+        return res.sendStatus(200);
+
+      }
+
     }
+
+    /* =========================
+       RECARGA
+    ========================== */
 
     if (
 
@@ -732,6 +781,9 @@ app.post("/webhook", async (req, res) => {
     ) {
 
       if (!estado.monto) {
+
+        estado.etapa =
+          "esperando_monto";
 
         await enviarMensaje(
           phone,
@@ -744,6 +796,9 @@ app.post("/webhook", async (req, res) => {
 
       if (!estado.numero) {
 
+        estado.etapa =
+          "esperando_numero";
+
         await enviarMensaje(
           phone,
           "Envíame el número 👌"
@@ -753,30 +808,29 @@ app.post("/webhook", async (req, res) => {
 
       }
 
-    }
+      if (!estado.pixEnviado) {
 
-    /* =========================
-       PIX
-    ========================== */
+        estado.pixEnviado = true;
 
-    if (!estado.pixEnviado) {
+        estado.aguardando =
+          "comprovante";
 
-      estado.pixEnviado = true;
+        estado.etapa =
+          "esperando_comprovante";
 
-      estado.aguardando =
-        "comprovante";
+        await enviarMensaje(
+          phone,
+          "8becaaf5-f296-4cbc-a115-46e3d23b042a"
+        );
 
-      await enviarMensaje(
-        phone,
-        "8becaaf5-f296-4cbc-a115-46e3d23b042a"
-      );
+        await enviarMensaje(
+          phone,
+          "YORDANYS RAFAEL SOSA REYES\nNubank"
+        );
 
-      await enviarMensaje(
-        phone,
-        "YORDANYS RAFAEL SOSA REYES\nNubank"
-      );
+        return res.sendStatus(200);
 
-      return res.sendStatus(200);
+      }
 
     }
 
@@ -809,6 +863,9 @@ app.post("/webhook", async (req, res) => {
         "Sua operação será processada."
       );
 
+      estado.etapa =
+        "finalizado";
+
       resetEstado(phone);
 
       delete conversaAtiva[phone];
@@ -818,23 +875,20 @@ app.post("/webhook", async (req, res) => {
     }
 
     /* =========================
-       EVITAR OPENAI LOUCO
+       OPENAI CONTROLADO
     ========================== */
 
     if (
 
-      conversaEmAndamento &&
-      !estado.operacion
+      estado.operacion &&
+      estado.etapa !== "inicio" &&
+      estado.etapa !== "finalizado"
 
     ) {
 
       return res.sendStatus(200);
 
     }
-
-    /* =========================
-       OPENAI FALLBACK
-    ========================== */
 
     const contexto = JSON.stringify(
       estado,
@@ -872,10 +926,6 @@ app.post("/webhook", async (req, res) => {
 
 });
 
-/* =========================
-   ONLINE
-========================= */
-
 app.get("/", (req, res) => {
 
   res.send(
@@ -883,10 +933,6 @@ app.get("/", (req, res) => {
   );
 
 });
-
-/* =========================
-   START
-========================= */
 
 app.listen(PORT, () => {
 
