@@ -1,5 +1,4 @@
 const express = require("express");
-const axios = require("axios");
 
 const app = express();
 
@@ -16,9 +15,6 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const ZAPI_INSTANCE = process.env.ZAPI_INSTANCE;
 const ZAPI_TOKEN = process.env.ZAPI_TOKEN;
 
-const ZAPI_URL =
-  `https://api.z-api.io/instances/${ZAPI_INSTANCE}/token/${ZAPI_TOKEN}/send-text`;
-
 /* =========================
    GATILLOS
 ========================= */
@@ -28,302 +24,352 @@ const gatilhos = [
   "remesas",
   "envio",
   "enviar",
-  "reais",
-  "real",
+  "recarga",
+  "recargar",
+  "saldo",
+  "cambio",
+  "taxa",
+  "tasas",
+  "cup",
   "usd",
   "dolar",
   "dólar",
   "pix",
   "transferencia",
-  "transferência",
-  "saldo",
-  "recarga",
-  "etecsa",
-  "cambio",
-  "cmb",
-  "cup",
-  "mlc",
+  "transferir",
+  "reales",
+  "real",
   "dinero",
-  "money",
-  "receber",
-  "recibir",
+  "mlc",
+  "etecsa",
+  "cuba",
   "deposito",
   "depósito",
-  "tarjeta",
-  "cartao",
-  "cartão",
-  "taxa",
-  "tasas",
-  "câmbio",
-  "troca"
+  "mandar",
+  "money"
 ];
 
 /* =========================
-   FUNÇÕES
+   PIX
 ========================= */
 
-function contieneGatilho(texto) {
-  const t = texto.toLowerCase();
+const PIX =
+"8becaaf5-f296-4cbc-a115-46e3d23b042a";
 
-  return gatilhos.some(g => t.includes(g));
+/* =========================
+   FUNCIONES
+========================= */
+
+function tieneGatillo(texto) {
+
+  texto = texto.toLowerCase();
+
+  return gatilhos.some(g =>
+    texto.includes(g)
+  );
 }
 
 function calcularCUP(valor) {
 
-  let taxa = 100;
+  valor = Number(valor);
+
+  if (valor < 100) {
+    return valor * 100;
+  }
 
   if (valor >= 100 && valor <= 499) {
-    taxa = 115;
+    return valor * 115;
   }
 
-  if (valor >= 500) {
-    taxa = 118;
-  }
-
-  return {
-    taxa,
-    cup: valor * taxa
-  };
+  return valor * 118;
 }
 
-async function enviarMensagem(phone, message) {
+function calcularRecarga(valor) {
+
+  valor = Number(valor);
+
+  return valor * 20;
+}
+
+async function enviarMensaje(numero, mensaje) {
 
   try {
 
-    await axios.post(
-      ZAPI_URL,
-      {
-        phone,
-        message
-      },
-      {
-        headers: {
-          "Content-Type": "application/json"
-        }
-      }
-    );
+    const url =
+`https://api.z-api.io/instances/${ZAPI_INSTANCE}/token/${ZAPI_TOKEN}/send-text`;
 
-  } catch (err) {
+    await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        phone: numero,
+        message: mensaje
+      })
+    });
+
+  } catch (error) {
 
     console.log("ERRO ZAPI:");
+    console.log(error);
 
-    if (err.response) {
-      console.log(err.response.data);
-    } else {
-      console.log(err.message);
-    }
   }
 }
+
+/* =========================
+   HOME
+========================= */
+
+app.get("/", (req, res) => {
+
+  res.send("YordaBot ONLINE");
+
+});
 
 /* =========================
    WEBHOOK
 ========================= */
 
-app.post("/", async (req, res) => {
+app.post("/webhook", async (req, res) => {
 
   try {
 
+    console.log("BODY:", req.body);
+
     const body = req.body;
 
-    console.log("BODY:");
-    console.log(JSON.stringify(body, null, 2));
+    const texto =
+      body?.text?.message ||
+      "";
 
-    const mensagem =
-      body?.text?.message || "";
+    const numero =
+      body?.phone;
 
-    const telefone =
-      body?.phone || "";
+    if (!texto || !numero) {
 
-    const fromMe =
-      body?.fromMe || false;
+      return res.sendStatus(200);
 
-    const isGroup =
-      body?.isGroup || false;
+    }
 
-    if (!mensagem) {
+    console.log("MENSAGEM:", texto);
+
+    const msg = texto.toLowerCase();
+
+    /* =========================
+       IGNORAR
+    ========================= */
+
+    if (
+      body.fromMe === true ||
+      body.isGroup === true ||
+      body.isNewsletter === true
+    ) {
       return res.sendStatus(200);
     }
 
-    console.log("MENSAGEM:", mensagem);
+    /* =========================
+       SAUDAÇÃO NORMAL
+    ========================= */
 
-    /* IGNORAR */
+    if (
+      msg === "hola" ||
+      msg === "oi" ||
+      msg === "ola" ||
+      msg === "bom dia" ||
+      msg === "boa tarde" ||
+      msg === "boa noite"
+    ) {
 
-    if (fromMe) {
-      console.log("IGNORADO: própria");
-      return res.sendStatus(200);
-    }
-
-    if (isGroup) {
-      console.log("IGNORADO: grupo");
-      return res.sendStatus(200);
-    }
-
-    const texto = mensagem.toLowerCase();
-
-    /* SAUDAÇÃO */
-
-    const saudacoes = [
-      "oi",
-      "ola",
-      "olá",
-      "hola",
-      "bom dia",
-      "boa tarde",
-      "boa noite",
-      "buenas",
-      "buenos dias",
-      "buenas noches"
-    ];
-
-    if (saudacoes.includes(texto)) {
-
-      await enviarMensagem(
-        telefone,
-        "Olá 👋 Como posso ajudar?"
+      await enviarMensaje(
+        numero,
+        "Hola 👋 ¿Cómo puedo ayudarte?"
       );
 
       return res.sendStatus(200);
     }
 
-    /* SEM GATILHO */
+    /* =========================
+       SEM GATILHO
+    ========================= */
 
-    const interessado = contieneGatilho(texto);
-
-    if (!interessado) {
-
-      console.log("SEM GATILHO");
+    if (!tieneGatillo(msg)) {
 
       return res.sendStatus(200);
+
     }
 
-    /* PIX */
+    /* =========================
+       FALAR COM YORDANYS
+    ========================= */
 
     if (
-      texto.includes("pix") &&
-      (
-        texto.includes("copiar") ||
-        texto.includes("pagar") ||
-        texto.includes("llave") ||
-        texto.includes("clave")
-      )
+      msg.includes("yordanys") ||
+      msg.includes("humano") ||
+      msg.includes("atendente")
     ) {
 
-      await enviarMensagem(
-        telefone,
-        "8becaaf5-f296-4cbc-a115-46e3d23b042a"
-      );
-
-      return res.sendStatus(200);
-    }
-
-    /* CÁLCULO REAIS */
-
-    const matchReais =
-      texto.match(/(\d+)/);
-
-    if (
-      matchReais &&
-      (
-        texto.includes("real") ||
-        texto.includes("reais") ||
-        texto.includes("cup")
-      )
-    ) {
-
-      const valor =
-        parseInt(matchReais[1]);
-
-      const resultado =
-        calcularCUP(valor);
-
-      await enviarMensagem(
-        telefone,
-        `${valor} reais → ${resultado.cup.toLocaleString("pt-BR")} CUP 🔥`
-      );
-
-      return res.sendStatus(200);
-    }
-
-    /* RECARGA */
-
-    if (
-      texto.includes("recarga") ||
-      texto.includes("saldo")
-    ) {
-
-      await enviarMensagem(
-        telefone,
-        "Recargas ETECSA disponíveis 📱"
-      );
-
-      return res.sendStatus(200);
-    }
-
-    /* FALAR COM YORDANYS */
-
-    if (
-      texto.includes("yordanys") ||
-      texto.includes("atendente")
-    ) {
-
-      await enviarMensagem(
-        telefone,
+      await enviarMensaje(
+        numero,
         "Claro 👍 Yordanys continuará contigo enseguida."
       );
 
       return res.sendStatus(200);
     }
 
-    /* OPENAI */
+    /* =========================
+       PIX
+    ========================= */
 
-    const respostaOpenAI = await axios.post(
+    if (
+      msg.includes("pix")
+    ) {
+
+      await enviarMensaje(
+        numero,
+        PIX
+      );
+
+      return res.sendStatus(200);
+    }
+
+    /* =========================
+       TAXAS
+    ========================= */
+
+    if (
+      msg.includes("taxa") ||
+      msg.includes("tasas") ||
+      msg.includes("cambio")
+    ) {
+
+      await enviarMensaje(
+        numero,
+`Menos de 100 reales → 100 CUP
+100-499 reales → 115 CUP
+500+ reales → 118 CUP`
+      );
+
+      return res.sendStatus(200);
+    }
+
+    /* =========================
+       RECARGA
+    ========================= */
+
+    if (
+      msg.includes("recarga")
+    ) {
+
+      await enviarMensaje(
+        numero,
+        "¿De cuánto deseas la recarga?"
+      );
+
+      return res.sendStatus(200);
+    }
+
+    /* =========================
+       MONTO + RECARGA
+    ========================= */
+
+    const recargaMatch =
+      msg.match(/(\d+)/);
+
+    if (
+      recargaMatch &&
+      msg.includes("recarga")
+    ) {
+
+      const valor =
+        Number(recargaMatch[1]);
+
+      const saldo =
+        calcularRecarga(valor);
+
+      await enviarMensaje(
+        numero,
+`${valor} reales = ${saldo.toLocaleString()} CUP de saldo 📲`
+      );
+
+      return res.sendStatus(200);
+    }
+
+    /* =========================
+       CALCULO REALES
+    ========================= */
+
+    const match =
+      msg.match(/(\d+)/);
+
+    if (
+      match &&
+      (
+        msg.includes("real") ||
+        msg.includes("reales")
+      )
+    ) {
+
+      const valor =
+        Number(match[1]);
+
+      const cup =
+        calcularCUP(valor);
+
+      await enviarMensaje(
+        numero,
+`${valor} reales → ${cup.toLocaleString()} CUP 🔥`
+      );
+
+      return res.sendStatus(200);
+    }
+
+    /* =========================
+       OPENAI FALLBACK
+    ========================= */
+
+    const resposta = await fetch(
       "https://api.openai.com/v1/responses",
       {
-        model: "gpt-4.1-mini",
-
-        input: [
-          {
-            role: "system",
-            content:
-              "Você trabalha com remessas Brasil Cuba. Responda curto, natural e humano."
-          },
-          {
-            role: "user",
-            content: mensagem
-          }
-        ]
-      },
-      {
+        method: "POST",
         headers: {
-          Authorization: `Bearer ${OPENAI_API_KEY}`,
-          "Content-Type": "application/json"
-        }
+          "Authorization":
+`Bearer ${OPENAI_API_KEY}`,
+          "Content-Type":
+"application/json"
+        },
+        body: JSON.stringify({
+          model: "gpt-4.1-mini",
+          input: `Responde corto y profesional sobre remesas y recargas: ${texto}`
+        })
       }
     );
 
-    const resposta =
-      respostaOpenAI.data.output_text ||
-      "No entendí. ¿Puedes explicar mejor?";
+    const data =
+      await resposta.json();
 
-    await enviarMensagem(
-      telefone,
-      resposta
+    console.log(data);
+
+    const respostaTexto =
+      data?.output?.[0]?.content?.[0]?.text ||
+      "No entendí. ¿Puedes explicarme mejor?";
+
+    await enviarMensaje(
+      numero,
+      respostaTexto
     );
 
     return res.sendStatus(200);
 
-  } catch (erro) {
+  } catch (error) {
 
     console.log("ERRO GERAL:");
-
-    if (erro.response) {
-      console.log(JSON.stringify(erro.response.data, null, 2));
-    } else {
-      console.log(erro.message);
-    }
+    console.log(error);
 
     return res.sendStatus(200);
+
   }
+
 });
 
 /* =========================
@@ -331,5 +377,9 @@ app.post("/", async (req, res) => {
 ========================= */
 
 app.listen(PORT, () => {
-  console.log(`Servidor ONLINE na porta ${PORT}`);
+
+  console.log(
+`Servidor ONLINE na porta ${PORT}`
+  );
+
 });
