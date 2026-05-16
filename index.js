@@ -20,7 +20,7 @@ const ZAPI_CLIENT_TOKEN =
 
 const SYSTEM_PROMPT =
   process.env.SYSTEM_PROMPT ||
-  "Responde corto, humano y natural.";
+  "Responde corto y humano.";
 
 // =====================================
 // MEMORIA
@@ -139,11 +139,13 @@ function detectarComercial(
     "envio",
     "enviar",
     "mandar",
+
     "receber",
     "recibir",
 
     "cambio",
     "cmb",
+
     "taxa",
     "taxas",
     "tasa",
@@ -159,6 +161,7 @@ function detectarComercial(
 
     "dinero",
     "money",
+
     "tarjeta",
 
     "cuba",
@@ -194,12 +197,7 @@ function detectarPix(texto) {
     texto.toLowerCase();
 
   return (
-    t.includes("pix") ||
-    t.includes("llave pix") ||
-    t.includes("chave pix") ||
-    t.includes("pix para pagar") ||
-    t.includes("quiero pagar") ||
-    t.includes("quero pagar")
+    t.includes("pix")
   );
 }
 
@@ -254,13 +252,10 @@ async function gerarResposta(
         }
       );
 
-    const texto =
-      resposta.data
+    return resposta.data
       ?.output?.[0]
       ?.content?.[0]
       ?.text;
-
-    return texto;
 
   } catch (erro) {
 
@@ -309,10 +304,6 @@ async function enviarMensagem(
       }
     );
 
-    console.log(
-      "MENSAGEM ENVIADA"
-    );
-
   } catch (erro) {
 
     console.log(
@@ -349,8 +340,6 @@ app.post(
 
       const body =
         req.body;
-
-      console.log(body);
 
       // =================================
       // IGNORAR
@@ -408,24 +397,27 @@ app.post(
         return res.sendStatus(200);
       }
 
-      console.log(
-        "MENSAGEM:",
-        mensagem
-      );
-
       const texto =
         mensagem
         .toLowerCase()
         .trim();
 
+      console.log(
+        "MENSAGEM:",
+        texto
+      );
+
       // =================================
-      // MEMORIA
+      // CLIENTE
       // =================================
 
       if (!clientes[numero]) {
 
         clientes[numero] = {
-          comercial: false
+
+          comercial: false,
+
+          modo: "normal"
         };
       }
 
@@ -435,7 +427,7 @@ app.post(
 
       if (
         esSaludo(
-          mensagem
+          texto
         )
       ) {
 
@@ -455,7 +447,7 @@ app.post(
 
       if (
         detectarComercial(
-          mensagem
+          texto
         )
       ) {
 
@@ -464,12 +456,64 @@ app.post(
       }
 
       // =================================
+      // REMESA
+      // =================================
+
+      if (
+        texto.includes(
+          "remesa"
+        ) ||
+        texto.includes(
+          "envio"
+        ) ||
+        texto.includes(
+          "enviar"
+        )
+      ) {
+
+        clientes[numero]
+        .modo = "remesa";
+
+        await enviarMensagem(
+
+          numero,
+
+          "¿Cuántos reales deseas enviar?"
+        );
+
+        return res.sendStatus(200);
+      }
+
+      // =================================
+      // RECARGA
+      // =================================
+
+      if (
+        texto.includes(
+          "recarga"
+        )
+      ) {
+
+        clientes[numero]
+        .modo = "recarga";
+
+        await enviarMensagem(
+
+          numero,
+
+          "¿De cuánto deseas la recarga?"
+        );
+
+        return res.sendStatus(200);
+      }
+
+      // =================================
       // PIX
       // =================================
 
       if (
         detectarPix(
-          mensagem
+          texto
         )
       ) {
 
@@ -479,25 +523,6 @@ app.post(
 
 `PIX:
 8becaaf5-f296-4cbc-a115-46e3d23b042a`
-        );
-
-        return res.sendStatus(200);
-      }
-
-      // =================================
-      // REMESAS
-      // =================================
-
-      if (
-        texto === "remesa" ||
-        texto === "remesas"
-      ) {
-
-        await enviarMensagem(
-
-          numero,
-
-          "Sí 👍 Hacemos remesas Brasil → Cuba. ¿Cuánto deseas enviar?"
         );
 
         return res.sendStatus(200);
@@ -528,25 +553,6 @@ app.post(
       }
 
       // =================================
-      // REAL
-      // =================================
-
-      if (
-        texto === "real" ||
-        texto === "reales"
-      ) {
-
-        await enviarMensagem(
-
-          numero,
-
-          "¿Cuántos reales deseas enviar?"
-        );
-
-        return res.sendStatus(200);
-      }
-
-      // =================================
       // USD
       // =================================
 
@@ -567,39 +573,47 @@ app.post(
       }
 
       // =================================
-      // RECARGAS
+      // NUMEROS
+      // =================================
+
+      const valor =
+        extraerNumero(
+          texto
+        );
+
+      // =================================
+      // RECARGA CALCULO
       // =================================
 
       if (
-        texto.includes(
-          "recarga"
-        )
+        clientes[numero]
+        .modo === "recarga"
       ) {
 
-        await enviarMensagem(
+        if (valor) {
 
-          numero,
+          const saldo =
+            valor * 20;
 
-          "Sí 👍 Hacemos recargas ETECSA. ¿De cuánto deseas la recarga?"
-        );
+          await enviarMensagem(
 
-        return res.sendStatus(200);
+            numero,
+
+`${valor} reales = ${saldo.toLocaleString()} CUP de saldo 📲`
+          );
+
+          return res.sendStatus(200);
+        }
       }
 
       // =================================
-      // CALCULO REALES
+      // REMESA CALCULO
       // =================================
 
       if (
-        texto.includes(
-          "real"
-        )
+        clientes[numero]
+        .modo === "remesa"
       ) {
-
-        const valor =
-          extraerNumero(
-            texto
-          );
 
         if (valor) {
 
@@ -621,38 +635,7 @@ app.post(
       }
 
       // =================================
-      // CALCULO USD
-      // =================================
-
-      if (
-        texto.includes(
-          "usd"
-        )
-      ) {
-
-        const valor =
-          extraerNumero(
-            texto
-          );
-
-        if (valor) {
-
-          const brl =
-            valor * 5.6;
-
-          await enviarMensagem(
-
-            numero,
-
-`${valor} USD = ${brl.toFixed(2)} BRL`
-          );
-
-          return res.sendStatus(200);
-        }
-      }
-
-      // =================================
-      // OPENAI SOLO SI ES NECESARIO
+      // OPENAI
       // =================================
 
       if (
