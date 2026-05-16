@@ -18,6 +18,15 @@ const ZAPI_URL =
 const ZAPI_CLIENT_TOKEN =
   process.env.ZAPI_CLIENT_TOKEN;
 
+const SYSTEM_PROMPT =
+  process.env.SYSTEM_PROMPT;
+
+// =====================================
+// MEMORIA CLIENTES
+// =====================================
+
+const clientes = {};
+
 // =====================================
 // DUPLICADAS
 // =====================================
@@ -26,33 +35,79 @@ const mensagensProcessadas =
   new Set();
 
 // =====================================
-// PROMPT YORDA
+// TASAS
 // =====================================
 
-const SYSTEM_PROMPT = `
-Eres YordaBot.
+function taxaBRL(valor) {
 
-Atiendes remesas y recargas.
+  if (valor < 100) {
+    return 100;
+  }
 
-Responde en el idioma del cliente.
+  if (valor < 500) {
+    return 115;
+  }
 
-Sé corto, natural y profesional.
+  return 118;
+}
 
-Tasas:
-Menor de 100 reales = 100 CUP
-100-499 reales = 115 CUP
-500+ reales = 118 CUP
+// =====================================
+// DETECTAR PIX
+// =====================================
 
-USD = 5.60 BRL
+function detectarPix(texto) {
 
-Si preguntan montos:
-calcula automáticamente.
+  const t =
+    texto.toLowerCase();
 
-Ejemplo:
-300 reales = 34.500 CUP
+  return (
+    t.includes("pix") ||
+    t.includes("llave pix") ||
+    t.includes("chave pix") ||
+    t.includes("manda pix") ||
+    t.includes("envia pix") ||
+    t.includes("quiero pagar") ||
+    t.includes("quero pagar")
+  );
+}
 
-No uses textos largos.
-`;
+// =====================================
+// DETECTAR RECARGA
+// =====================================
+
+function detectarRecarga(texto) {
+
+  const t =
+    texto.toLowerCase();
+
+  return (
+    t.includes("recarga") ||
+    t.includes("saldo") ||
+    t.includes("telefone") ||
+    t.includes("telefono")
+  );
+}
+
+// =====================================
+// EXTRAER REALES
+// =====================================
+
+function extraerReales(texto) {
+
+  const regex =
+    /(\d+)/g;
+
+  const encontrados =
+    texto.match(regex);
+
+  if (!encontrados) {
+    return null;
+  }
+
+  return parseInt(
+    encontrados[0]
+  );
+}
 
 // =====================================
 // OPENAI
@@ -77,12 +132,14 @@ async function gerarResposta(
 
             {
               role: "system",
-              content: SYSTEM_PROMPT
+              content:
+                SYSTEM_PROMPT
             },
 
             {
               role: "user",
-              content: mensagem
+              content:
+                mensagem
             }
           ]
         },
@@ -99,30 +156,10 @@ async function gerarResposta(
         }
       );
 
-    console.log(
-      "OPENAI RESPONSE:"
-    );
-
-    console.log(
-      JSON.stringify(
-        resposta.data,
-        null,
-        2
-      )
-    );
-
-    const texto =
-      resposta.data
+    return resposta.data
       ?.output?.[0]
       ?.content?.[0]
       ?.text;
-
-    console.log(
-      "TEXTO FINAL:",
-      texto
-    );
-
-    return texto;
 
   } catch (erro) {
 
@@ -130,31 +167,17 @@ async function gerarResposta(
       "ERRO OPENAI:"
     );
 
-    if (
-      erro.response?.data
-    ) {
-
-      console.log(
-        JSON.stringify(
-          erro.response.data,
-          null,
-          2
-        )
-      );
-
-    } else {
-
-      console.log(
-        erro.message
-      );
-    }
+    console.log(
+      erro.response?.data ||
+      erro.message
+    );
 
     return null;
   }
 }
 
 // =====================================
-// WHATSAPP
+// ENVIAR WHATSAPP
 // =====================================
 
 async function enviarMensagem(
@@ -185,34 +208,15 @@ async function enviarMensagem(
       }
     );
 
-    console.log(
-      "MENSAGEM ENVIADA"
-    );
-
   } catch (erro) {
 
     console.log(
       "ERRO ZAPI:"
     );
 
-    if (
-      erro.response?.data
-    ) {
-
-      console.log(
-        JSON.stringify(
-          erro.response.data,
-          null,
-          2
-        )
-      );
-
-    } else {
-
-      console.log(
-        erro.message
-      );
-    }
+    console.log(
+      erro.message
+    );
   }
 }
 
@@ -237,31 +241,15 @@ app.post(
 
     try {
 
-      console.log("BODY:");
-      console.log(req.body);
+      const body =
+        req.body;
 
-      // IGNORAR GRUPOS
-
-      if (
-        req.body.isGroup
-      ) {
-
-        return res.sendStatus(200);
-      }
-
-      // IGNORAR BOT
+      // IGNORAR
 
       if (
-        req.body.fromMe
-      ) {
-
-        return res.sendStatus(200);
-      }
-
-      // IGNORAR NEWSLETTER
-
-      if (
-        req.body.isNewsletter
+        body.isGroup ||
+        body.fromMe ||
+        body.isNewsletter
       ) {
 
         return res.sendStatus(200);
@@ -270,7 +258,7 @@ app.post(
       // DUPLICADAS
 
       const messageId =
-        req.body.messageId;
+        body.messageId;
 
       if (
         mensagensProcessadas.has(
@@ -296,43 +284,144 @@ app.post(
       // TEXTO
 
       const mensagem =
-        req.body.text?.message;
+        body.text?.message;
 
       const numero =
-        req.body.phone;
-
-      console.log(
-        "MENSAGEM:",
-        mensagem
-      );
+        body.phone;
 
       if (!mensagem) {
 
         return res.sendStatus(200);
       }
 
+      console.log(
+        "MENSAGEM:",
+        mensagem
+      );
+
+      // =================================
+      // MEMORIA
+      // =================================
+
+      if (!clientes[numero]) {
+
+        clientes[numero] = {
+          etapa: "inicio"
+        };
+      }
+
+      // =================================
+      // PIX
+      // =================================
+
+      if (
+        detectarPix(
+          mensagem
+        )
+      ) {
+
+        clientes[numero]
+        .etapa =
+          "pagamento";
+
+        await enviarMensagem(
+
+          numero,
+
+`PIX:
+8becaaf5-f296-4cbc-a115-46e3d23b042a
+
+Titular:
+YORDANYS RAFAEL SOSA REYES
+
+Banco:
+Nubank (260)`
+        );
+
+        return res.sendStatus(200);
+      }
+
+      // =================================
+      // RECARGA
+      // =================================
+
+      if (
+        detectarRecarga(
+          mensagem
+        )
+      ) {
+
+        const valor =
+          extraerReales(
+            mensagem
+          );
+
+        if (valor) {
+
+          const saldo =
+            valor * 20;
+
+          await enviarMensagem(
+
+            numero,
+
+`${valor} reales = ${saldo.toLocaleString()} CUP de saldo 📲`
+          );
+
+          return res.sendStatus(200);
+        }
+      }
+
+      // =================================
+      // REMESA
+      // =================================
+
+      if (
+        mensagem
+        .toLowerCase()
+        .includes("reales")
+      ) {
+
+        const valor =
+          extraerReales(
+            mensagem
+          );
+
+        if (valor) {
+
+          const taxa =
+            taxaBRL(valor);
+
+          const cup =
+            valor * taxa;
+
+          await enviarMensagem(
+
+            numero,
+
+`${valor} reales → ${cup.toLocaleString()} CUP 🔥`
+          );
+
+          return res.sendStatus(200);
+        }
+      }
+
+      // =================================
       // OPENAI
+      // =================================
 
       const resposta =
         await gerarResposta(
           mensagem
         );
 
-      if (!resposta) {
+      if (resposta) {
 
-        console.log(
-          "SEM RESPOSTA"
+        await enviarMensagem(
+          numero,
+          resposta
         );
-
-        return res.sendStatus(200);
       }
-
-      // ENVIAR
-
-      await enviarMensagem(
-        numero,
-        resposta
-      );
 
       return res.sendStatus(200);
 
