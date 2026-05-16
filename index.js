@@ -86,7 +86,9 @@ function detectarIdioma(
     "cup",
     "tasa",
     "transferencia",
-    "tarjeta"
+    "tarjeta",
+    "envio",
+    "remesa"
   ];
 
   const textoLower =
@@ -108,7 +110,7 @@ function detectarIdioma(
 }
 
 // =====================================
-// OPENAI WORKFLOW
+// OPENAI
 // =====================================
 
 async function gerarResposta(
@@ -122,15 +124,24 @@ async function gerarResposta(
       clientes[numero];
 
     const contexto = `
+Você é um atendente de remessas.
+
 Idioma do cliente:
 ${cliente.idioma}
 
-Estado atual:
-${cliente.estado}
-
-Mensagem do cliente:
+Mensagem:
 ${mensagem}
+
+Responda normalmente ao cliente.
 `;
+
+    console.log(
+      "CONTEXTO ENVIADO:"
+    );
+
+    console.log(
+      contexto
+    );
 
     const resposta =
       await axios.post(
@@ -140,9 +151,6 @@ ${mensagem}
         {
           model:
             "gpt-4.1-mini",
-
-          workflow:
-            "wf_68f65c9bd8648190a572e1272e6ae1880cf508aff8bcf40e",
 
           input:
             contexto
@@ -161,7 +169,7 @@ ${mensagem}
       );
 
     console.log(
-      "OPENAI RESPONSE:"
+      "RESPOSTA OPENAI:"
     );
 
     console.log(
@@ -176,14 +184,14 @@ ${mensagem}
       resposta.data
       ?.output?.[0]
       ?.content?.[0]
-      ?.text || "";
+      ?.text;
 
     console.log(
-      "RESPOSTA FINAL:",
+      "TEXTO FINAL:",
       texto
     );
 
-    return texto;
+    return texto || "Olá 👋";
 
   } catch (erro) {
 
@@ -210,7 +218,7 @@ ${mensagem}
       );
     }
 
-    return null;
+    return "Erro ao responder.";
   }
 }
 
@@ -301,54 +309,26 @@ app.post(
       console.log("BODY:");
       console.log(req.body);
 
-      // =================================
-      // IGNORAR NEWSLETTER
-      // =================================
-
       if (
         req.body.isNewsletter
       ) {
 
-        console.log(
-          "NEWSLETTER IGNORADA"
-        );
-
         return res.sendStatus(200);
       }
-
-      // =================================
-      // IGNORAR GRUPOS
-      // =================================
 
       if (
         req.body.isGroup
       ) {
 
-        console.log(
-          "GRUPO IGNORADO"
-        );
-
         return res.sendStatus(200);
       }
-
-      // =================================
-      // IGNORAR MENSAGENS PRÓPRIAS
-      // =================================
 
       if (
         req.body.fromMe === true
       ) {
 
-        console.log(
-          "MENSAGEM DO BOT IGNORADA"
-        );
-
         return res.sendStatus(200);
       }
-
-      // =================================
-      // EVITAR DUPLICADAS
-      // =================================
 
       const messageId =
         req.body.messageId;
@@ -358,10 +338,6 @@ app.post(
           messageId
         )
       ) {
-
-        console.log(
-          "MENSAGEM DUPLICADA"
-        );
 
         return res.sendStatus(200);
       }
@@ -377,10 +353,6 @@ app.post(
         );
 
       }, 600000);
-
-      // =================================
-      // TEXTO
-      // =================================
 
       const mensagem =
         req.body.text?.message || "";
@@ -424,13 +396,9 @@ app.post(
         );
 
         console.log(
-          "NOVO CLIENTE SALVO"
+          "CLIENTE SALVO"
         );
       }
-
-      // =================================
-      // ATUALIZAR CLIENTE
-      // =================================
 
       clientes[numero]
       .ultimaInteracao =
@@ -442,7 +410,7 @@ app.post(
       );
 
       // =================================
-      // OPENAI AGENT
+      // GERAR RESPOSTA
       // =================================
 
       const resposta =
@@ -451,18 +419,10 @@ app.post(
           mensagem
         );
 
-      if (!resposta) {
-
-        console.log(
-          "SEM RESPOSTA"
-        );
-
-        return res.sendStatus(200);
-      }
-
-      // =================================
-      // ENVIAR RESPOSTA
-      // =================================
+      console.log(
+        "ENVIANDO:",
+        resposta
+      );
 
       await enviarMensagem(
         numero,
