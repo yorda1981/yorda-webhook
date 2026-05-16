@@ -58,12 +58,13 @@ const gatilhos = [
   "dinero",
   "dinheiro",
   "deposito",
-  "depósito"
+  "depósito",
+  "cuba"
 
 ];
 
 /* =========================
-   ENVIAR MENSAJE
+   ENVIAR WHATSAPP
 ========================= */
 
 async function enviarMensaje(phone, texto) {
@@ -88,8 +89,13 @@ async function enviarMensaje(phone, texto) {
 
       {
         headers: {
-          "Client-Token": ZAPI_CLIENT_TOKEN,
-          "Content-Type": "application/json"
+
+          "Client-Token":
+            ZAPI_CLIENT_TOKEN,
+
+          "Content-Type":
+            "application/json"
+
         }
       }
 
@@ -116,7 +122,7 @@ async function enviarMensaje(phone, texto) {
 }
 
 /* =========================
-   OPENAI
+   OPENAI AGENT
 ========================= */
 
 async function responderIA(mensagem) {
@@ -131,10 +137,42 @@ async function responderIA(mensagem) {
 
         model: "gpt-4.1-mini",
 
-        input:
-          "Cliente escreveu: " +
-          mensagem +
-          ". Responde corto, natural y comercial sobre remesas, cambios o recargas."
+        input: mensagem,
+
+        instructions: `
+Eres YordaBot.
+
+Asistente de remesas por WhatsApp.
+
+REGLAS:
+
+- Responder corto.
+- Máximo 2 líneas.
+- Sonar humano.
+- Sonar natural.
+- No sonar como ChatGPT.
+- No explicar demasiado.
+- No usar listas.
+- No repetir preguntas.
+- No repetir saludos.
+- Hablar en el idioma del cliente.
+
+Responder solamente temas relacionados con:
+remesas,
+cambios,
+PIX,
+USD,
+BRL,
+CUP,
+MLC,
+recargas,
+transferencias,
+envíos.
+
+Si el mensaje NO tiene intención comercial:
+Responder EXACTAMENTE:
+"No puedo ayudar con ese tema."
+`
 
       },
 
@@ -157,7 +195,7 @@ async function responderIA(mensagem) {
     const texto =
       response.data.output?.[0]?.content?.[0]?.text;
 
-    return texto || "Hola 👋";
+    return texto || "Dime 👍";
 
   } catch (error) {
 
@@ -170,7 +208,7 @@ async function responderIA(mensagem) {
       error.message
     );
 
-    return "Hola 👋";
+    return "Dime 👍";
 
   }
 
@@ -187,7 +225,7 @@ app.post("/webhook", async (req, res) => {
     const body = req.body;
 
     /* =========================
-       IGNORAR
+       IGNORAR EVENTOS
     ========================== */
 
     if (
@@ -221,22 +259,17 @@ app.post("/webhook", async (req, res) => {
 
     }
 
-    console.log(
-      "MENSAGEM:",
-      texto
-    );
-
     /* =========================
-       PAUSA HUMANA
+       INTERVENCIÓN HUMANA
     ========================== */
 
     if (body.fromMe === true) {
 
       pausaHumana[phone] =
-        Date.now() + (10 * 60 * 1000);
+        Date.now() + (5 * 60 * 1000);
 
       console.log(
-        "PAUSA HUMANA ATIVADA:",
+        "PAUSA HUMANA 5 MIN:",
         phone
       );
 
@@ -256,7 +289,7 @@ app.post("/webhook", async (req, res) => {
     ) {
 
       console.log(
-        "BOT EM PAUSA:",
+        "BOT PAUSADO:",
         phone
       );
 
@@ -264,8 +297,13 @@ app.post("/webhook", async (req, res) => {
 
     }
 
+    console.log(
+      "MENSAGEM:",
+      texto
+    );
+
     /* =========================
-       DETECTAR INTERES
+       DETECTAR INTENCIÓN
     ========================== */
 
     const comercial =
@@ -275,14 +313,10 @@ app.post("/webhook", async (req, res) => {
           .includes(g)
       );
 
-    /* =========================
-       IGNORAR SIN GATILHO
-    ========================== */
-
     if (!comercial) {
 
       console.log(
-        "IGNORADO SEM GATILHO"
+        "SEM INTENÇÃO COMERCIAL"
       );
 
       return res.sendStatus(200);
@@ -297,7 +331,7 @@ app.post("/webhook", async (req, res) => {
       await responderIA(texto);
 
     /* =========================
-       ENVIAR WHATSAPP
+       ENVIAR RESPOSTA
     ========================== */
 
     await enviarMensaje(
