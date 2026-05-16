@@ -1,3 +1,4 @@
+```js
 const express = require("express");
 const axios = require("axios");
 
@@ -12,16 +13,16 @@ const PORT = process.env.PORT || 8080;
 ========================= */
 
 const OPENAI_API_KEY =
-  process.env.OPENAI_API_KEY;
+  process.env.OPENAI_API_KEY?.trim();
 
 const ZAPI_INSTANCE =
-  process.env.ZAPI_INSTANCE;
+  process.env.ZAPI_INSTANCE?.trim();
 
 const ZAPI_TOKEN =
-  process.env.ZAPI_TOKEN;
+  process.env.ZAPI_TOKEN?.trim();
 
 const ZAPI_CLIENT_TOKEN =
-  process.env.ZAPI_CLIENT_TOKEN;
+  process.env.ZAPI_CLIENT_TOKEN?.trim();
 
 /* =========================
    PIX
@@ -599,3 +600,4 @@ app.listen(PORT, () => {
   );
 
 });
+```
