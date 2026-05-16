@@ -189,38 +189,19 @@ REGLAS:
 
 - Responder corto.
 - Máximo 2 líneas.
-- Sonar humano.
 - Sonar natural.
 - No sonar como IA.
 - No usar listas largas.
 - No explicar demasiado.
 - Hablar en idioma del cliente.
 
-OPERACIONES:
+Operaciones:
+- transferencia
+- entrega
+- recarga
 
-1. Transferencia
-2. Entrega
-3. Recarga
-
-Transferencia:
-- necesita monto
-- necesita tarjeta
-
-Entrega:
-- necesita monto
-- necesita municipio
-
-Recarga:
-- necesita monto
-- necesita número
-
-No repetir datos ya informados.
-
-Si cliente pide PIX:
-enviar PIX directamente.
-
-Si cliente pide Yordanys:
-"Claro 👌 Yordanys continuará tu atención en breve."
+No repetir preguntas.
+No pedir datos ya informados.
 `
 
       },
@@ -606,6 +587,32 @@ app.post("/webhook", async (req, res) => {
     }
 
     /* =========================
+       DETECTAR NÚMERO RECARGA
+    ========================== */
+
+    if (
+
+      estado.operacion === "recarga"
+
+    ) {
+
+      const numeroRecarga =
+        texto.replace(/\D/g, "");
+
+      if (
+
+        numeroRecarga.length >= 8
+
+      ) {
+
+        estado.numero =
+          numeroRecarga;
+
+      }
+
+    }
+
+    /* =========================
        FLUJO TRANSFERENCIA
     ========================== */
 
@@ -660,12 +667,15 @@ app.post("/webhook", async (req, res) => {
 
           phone,
 
-`PIX 👇
+          "8becaaf5-f296-4cbc-a115-46e3d23b042a"
 
-8becaaf5-f296-4cbc-a115-46e3d23b042a
+        );
 
-YORDANYS RAFAEL SOSA REYES
-Nubank`
+        await enviarMensaje(
+
+          phone,
+
+          "YORDANYS RAFAEL SOSA REYES\nNubank"
 
         );
 
@@ -687,6 +697,9 @@ Nubank`
 
       if (!estado.monto) {
 
+        estado.aguardando =
+          "monto";
+
         await enviarMensaje(
 
           phone,
@@ -700,6 +713,9 @@ Nubank`
       }
 
       if (!estado.municipio) {
+
+        estado.aguardando =
+          "municipio";
 
         await enviarMensaje(
 
@@ -724,12 +740,15 @@ Nubank`
 
           phone,
 
-`PIX 👇
+          "8becaaf5-f296-4cbc-a115-46e3d23b042a"
 
-8becaaf5-f296-4cbc-a115-46e3d23b042a
+        );
 
-YORDANYS RAFAEL SOSA REYES
-Nubank`
+        await enviarMensaje(
+
+          phone,
+
+          "YORDANYS RAFAEL SOSA REYES\nNubank"
 
         );
 
@@ -750,6 +769,9 @@ Nubank`
     ) {
 
       if (!estado.monto) {
+
+        estado.aguardando =
+          "monto";
 
         await enviarMensaje(
 
@@ -780,10 +802,91 @@ Nubank`
 
       }
 
+      if (!estado.pixEnviado) {
+
+        estado.pixEnviado = true;
+
+        estado.aguardando =
+          "comprovante";
+
+        await enviarMensaje(
+
+          phone,
+
+          "8becaaf5-f296-4cbc-a115-46e3d23b042a"
+
+        );
+
+        await enviarMensaje(
+
+          phone,
+
+          "YORDANYS RAFAEL SOSA REYES\nNubank"
+
+        );
+
+        return res.sendStatus(200);
+
+      }
+
     }
 
     /* =========================
-       OPENAI
+       COMPROVANTE
+    ========================== */
+
+    if (
+
+      estado.aguardando === "comprovante" &&
+
+      (
+
+        body.image ||
+        textoLimpo.includes("pix") ||
+        textoLimpo.includes("enviado") ||
+        textoLimpo.includes("comprovante")
+
+      )
+
+    ) {
+
+      await enviarMensaje(
+
+        phone,
+
+        "Comprovante recebido 👌"
+
+      );
+
+      await enviarMensaje(
+
+        phone,
+
+        "Sua operação será processada."
+
+      );
+
+      estadoCliente[phone] = {
+
+        operacion: null,
+        moeda: null,
+        monto: null,
+        municipio: null,
+        tarjeta: null,
+        numero: null,
+        aguardando: null,
+        pixEnviado: false
+
+      };
+
+      delete conversaAtiva[phone];
+
+      return res.sendStatus(200);
+
+    }
+
+    /* =========================
+       OPENAI FALLBACK
     ========================== */
 
     const contexto = JSON.stringify(
