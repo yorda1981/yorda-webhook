@@ -403,7 +403,7 @@ Agora estamos fora do horário 👌
     }
 
     // =========================
-    // REGISTRAR ODOO
+    // ODOO
     // =========================
     registrarEnOdoo({
       phone,
@@ -438,6 +438,8 @@ Agora estamos fora do horário 👌
     const ai = await axios.post(
       "https://api.openai.com/v1/responses",
       {
+        model: "gpt-4o-mini",
+
         workflow: {
           id: "wf_68f65c9bd8648190a572e1272e6ae1880cf508aff8bcf40e"
         },
