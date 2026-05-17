@@ -136,7 +136,8 @@ async function enviarMensaje(phone, message) {
     },
     data: {
       phone,
-      message
+      message,
+      checkContact: false
     },
     timeout: 15000
   });
@@ -208,7 +209,7 @@ async function autenticarOdoo() {
 }
 
 // =========================
-// CONSULTAR TASAS
+// CONSULTAR TASAS ODOO
 // =========================
 async function consultarTasasOdoo(
   tipoMoneda = "CUP"
@@ -268,14 +269,6 @@ async function consultarTasasOdoo(
         ];
       }
 
-      const timeout = setTimeout(() => {
-
-        reject(
-          new Error("Timeout Odoo")
-        );
-
-      }, 15000);
-
       models.methodCall(
         "execute_kw",
         [
@@ -299,8 +292,6 @@ async function consultarTasasOdoo(
           }
         ],
         (err, products) => {
-
-          clearTimeout(timeout);
 
           if (err) {
 
@@ -444,18 +435,15 @@ Agora estamos fora do horário 👌
 
     if (quierePix) {
 
-      // SOLO PIX
       await enviarMensaje(
         phone,
 `8becaaf5-f296-4cbc-a115-46e3d23b042a`
       );
 
-      // PAUSA
       await new Promise(resolve =>
         setTimeout(resolve, 1500)
       );
 
-      // DATOS APARTE
       await enviarMensaje(
         phone,
 `Titular: YORDANYS RAFAEL SOSA REYES
@@ -471,7 +459,7 @@ Banco: Nubank (260)`
     }
 
     // =========================
-    // ODOO LEAD
+    // ODOO
     // =========================
     registrarEnOdoo({
       phone,
@@ -488,7 +476,7 @@ Banco: Nubank (260)`
     if (
       !saludosEnviados[phone] ||
       (
-        agora -
+        ahora -
         saludosEnviados[phone]
       ) > (1000 * 60 * 60 * 3)
     ) {
@@ -560,9 +548,6 @@ REGLAS:
       `${saludo}${respuestaIA}`
       .trim();
 
-    // =========================
-    // ENVIAR
-    // =========================
     await enviarMensaje(
       phone,
       mensajeFinal
@@ -659,9 +644,6 @@ app.post("/webhook", async (req, res) => {
       body.isGroup === true ||
       body.isGroup === "true";
 
-    // =========================
-    // FILTROS
-    // =========================
     if (
       !phoneRaw ||
       fromMe ||
@@ -727,7 +709,6 @@ app.post("/webhook", async (req, res) => {
     // =========================
     const gatillos = [
 
-      // Remesas
       "remesa",
       "envio",
       "enviar",
@@ -737,7 +718,6 @@ app.post("/webhook", async (req, res) => {
       "giro",
       "cambio",
 
-      // Monedas
       "cup",
       "usd",
       "mlc",
@@ -746,19 +726,16 @@ app.post("/webhook", async (req, res) => {
       "dolar",
       "dólar",
 
-      // PIX
       "pix",
       "pagar",
       "pago",
       "llave pix",
 
-      // Recargas
       "recarga",
       "saldo",
       "etecsa",
       "nauta",
 
-      // Saludos
       "hola",
       "buenas",
       "buen dia",
@@ -794,8 +771,8 @@ app.post("/webhook", async (req, res) => {
     }
 
     buffers[phone]
-    .texts
-    .push(textMessage);
+      .texts
+      .push(textMessage);
 
     clearTimeout(
       buffers[phone].timer
