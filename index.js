@@ -46,13 +46,15 @@ for (const key of required) {
 // =========================
 // CONFIG
 // =========================
-const TASA_CUP = parseFloat(process.env.TASA_CUP) || 115;
+const HORA_APERTURA = 6;
+const HORA_CIERRE = 22;
 
 // =========================
 // MEMORIA
 // =========================
 const mensajesProcesados = new Set();
 const buffers = {};
+const saludosEnviados = {};
 
 // =========================
 // LIMPIEZA RAM
@@ -72,13 +74,56 @@ function logger(level, event, meta = {}) {
 }
 
 // =========================
+// HORARIO
+// =========================
+function obtenerSaludo() {
+
+  const ahora = new Date();
+
+  const horaBrasil = new Intl.DateTimeFormat("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+    hour: "numeric",
+    hour12: false
+  }).format(ahora);
+
+  const hora = Number(horaBrasil);
+
+  if (hora >= 6 && hora < 12) {
+    return "Bom dia 👋";
+  }
+
+  if (hora >= 12 && hora < 18) {
+    return "Boa tarde 👋";
+  }
+
+  return "Boa noite 👋";
+}
+
+function horarioAbierto() {
+
+  const ahora = new Date();
+
+  const horaBrasil = new Intl.DateTimeFormat("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+    hour: "numeric",
+    hour12: false
+  }).format(ahora);
+
+  const hora = Number(horaBrasil);
+
+  return hora >= HORA_APERTURA &&
+         hora < HORA_CIERRE;
+}
+
+// =========================
 // ODOO
 // =========================
 function registrarEnOdoo(datos) {
 
   try {
 
-    const urlLimpia = String(ODOO_URL || "").replace(/\/$/, "");
+    const urlLimpia =
+      String(ODOO_URL || "").replace(/\/$/, "");
 
     const common = xmlrpc.createSecureClient({
       url: `${urlLimpia}/xmlrpc/2/common`
@@ -103,9 +148,6 @@ function registrarEnOdoo(datos) {
           return logger("error", "ODOO_UID_INVALID");
         }
 
-        // =========================
-        // BUSCAR LEAD EXISTENTE
-        // =========================
         models.methodCall(
           "execute_kw",
           [
@@ -128,7 +170,6 @@ function registrarEnOdoo(datos) {
               });
             }
 
-            // Ya existe lead
             if (Array.isArray(leads) && leads.length > 0) {
 
               logger("info", "ODOO_LEAD_EXISTS", {
@@ -139,7 +180,6 @@ function registrarEnOdoo(datos) {
               return;
             }
 
-            // Crear nuevo lead
             models.methodCall(
               "execute_kw",
               [
@@ -183,7 +223,27 @@ function registrarEnOdoo(datos) {
 }
 
 // =========================
-// PROCESAMIENTO PRINCIPAL
+// ENVIAR MENSAJE
+// =========================
+async function enviarMensaje(phone, message) {
+
+  await axios({
+    method: "post",
+    url: `https://api.z-api.io/instances/${ZAPI_INSTANCE}/token/${ZAPI_TOKEN}/send-text`,
+    headers: {
+      "Client-Token": ZAPI_CLIENT_TOKEN,
+      "Content-Type": "application/json"
+    },
+    data: {
+      phone,
+      message
+    },
+    timeout: 15000
+  });
+}
+
+// =========================
+// PROCESAMIENTO
 // =========================
 async function procesarMensaje(phone, textMessage) {
 
@@ -195,12 +255,88 @@ async function procesarMensaje(phone, textMessage) {
     });
 
     // =========================
+    // HORARIO
+    // =========================
+    if (!horarioAbierto()) {
+
+      const fueraHorario =
+`${obtenerSaludo()}
+
+Agora estamos fora do horário de atendimento 👌
+
+⏰ Funcionamos das 06:00 às 22:00.`;
+
+      await enviarMensaje(phone, fueraHorario);
+
+      logger("warn", "OUTSIDE_BUSINESS_HOURS", {
+        phone
+      });
+
+      return;
+    }
+
+    // =========================
+    // PIX DIRECTO
+    // =========================
+    const pixTriggers = [
+      "pix",
+      "llave pix",
+      "clave pix",
+      "manda pix",
+      "enviar pix",
+      "quiero pagar",
+      "pix para pagar",
+      "pagar",
+      "pago"
+    ];
+
+    const quierePix =
+      pixTriggers.some(g =>
+        textMessage.toLowerCase().includes(g)
+      );
+
+    if (quierePix) {
+
+      await enviarMensaje(
+        phone,
+`PIX: 8becaaf5-f296-4cbc-a115-46e3d23b042a
+
+Titular: YORDANYS RAFAEL SOSA REYES
+
+Banco: Nubank (260)`
+      );
+
+      logger("info", "PIX_SENT", {
+        phone
+      });
+
+      return;
+    }
+
+    // =========================
     // ODOO
     // =========================
     registrarEnOdoo({
       phone,
       mensaje: textMessage
     });
+
+    // =========================
+    // SALUDO
+    // =========================
+    let saludo = "";
+
+    const ahora = Date.now();
+
+    if (
+      !saludosEnviados[phone] ||
+      (ahora - saludosEnviados[phone]) > (1000 * 60 * 60 * 3)
+    ) {
+
+      saludo = `${obtenerSaludo()}\n\n`;
+
+      saludosEnviados[phone] = ahora;
+    }
 
     // =========================
     // OPENAI
@@ -214,10 +350,16 @@ async function procesarMensaje(phone, textMessage) {
             role: "system",
             content:
               `Eres YordaBot.
-              Tasa actual: ${TASA_CUP} CUP por BRL.
-              Responde corto, humano y natural.
-              Máximo 2 líneas.
-              No uses markdown.`
+
+              Reglas:
+              - Responde corto.
+              - Máximo 2 líneas.
+              - Sonido humano.
+              - No markdown.
+              - Idioma del cliente.
+              - No repetir saludos.
+              - No inventar tasas.
+              - No hablar de tasas.`
           },
           {
             role: "user",
@@ -247,22 +389,16 @@ async function procesarMensaje(phone, textMessage) {
       return;
     }
 
+    const mensajeFinal =
+      `${saludo}${respuestaIA}`.trim();
+
     // =========================
-    // Z-API
+    // ENVIAR
     // =========================
-    await axios({
-      method: "post",
-      url: `https://api.z-api.io/instances/${ZAPI_INSTANCE}/token/${ZAPI_TOKEN}/send-text`,
-      headers: {
-        "Client-Token": ZAPI_CLIENT_TOKEN,
-        "Content-Type": "application/json"
-      },
-      data: {
-        phone,
-        message: respuestaIA
-      },
-      timeout: 15000
-    });
+    await enviarMensaje(
+      phone,
+      mensajeFinal
+    );
 
     logger("info", "MESSAGE_SENT", {
       phone
@@ -288,7 +424,6 @@ app.post("/webhook", async (req, res) => {
     const body = req.body || {};
 
     const phoneRaw = body.phone || "";
-    const messageId = body.messageId || "";
 
     const textMessage =
       String(body.text?.message || "").trim();
@@ -301,22 +436,7 @@ app.post("/webhook", async (req, res) => {
       body.isGroup === true ||
       body.isGroup === "true";
 
-    // =========================
-    // FILTROS
-    // =========================
-    if (!phoneRaw) {
-      return res.sendStatus(200);
-    }
-
-    if (fromMe || isGroup) {
-      return res.sendStatus(200);
-    }
-
-    if (!messageId) {
-      return res.sendStatus(200);
-    }
-
-    if (!textMessage) {
+    if (!phoneRaw || fromMe || isGroup || !textMessage) {
       return res.sendStatus(200);
     }
 
@@ -358,22 +478,50 @@ app.post("/webhook", async (req, res) => {
     // GATILLOS
     // =========================
     const gatillos = [
+
+      // Remesas
       "remesa",
-      "tasa",
       "envio",
-      "recarga",
-      "precio",
-      "cuanto",
-      "hola",
-      "pix",
-      "usd",
-      "cup",
-      "mlc",
+      "enviar",
       "transferencia",
+      "mandar",
+      "dinero",
+      "giro",
       "cambio",
+
+      // Monedas
+      "cup",
+      "usd",
+      "mlc",
+      "brl",
+      "reales",
+      "dolar",
+      "dólar",
+
+      // PIX
+      "pix",
+      "pagar",
+      "pago",
+      "llave pix",
+
+      // Recargas
+      "recarga",
       "saldo",
       "etecsa",
-      "reales"
+      "nauta",
+
+      // Saludos
+      "hola",
+      "buenas",
+      "buen dia",
+      "buen día",
+      "bom dia",
+      "boa tarde",
+      "boa noite",
+      "oi",
+      "ola",
+      "olá"
+
     ];
 
     const esNegocio =
@@ -386,7 +534,7 @@ app.post("/webhook", async (req, res) => {
     }
 
     // =========================
-    // BUFFER / DEBOUNCE
+    // BUFFER
     // =========================
     if (!buffers[phone]) {
       buffers[phone] = {
@@ -428,9 +576,7 @@ app.post("/webhook", async (req, res) => {
   } catch (e) {
 
     logger("error", "WEBHOOK_ERROR", {
-      message: e.message,
-      status: e.response?.status,
-      response: e.response?.data
+      message: e.message
     });
 
     return res.sendStatus(200);
@@ -445,7 +591,7 @@ app.get("/", (req, res) => {
 });
 
 // =========================
-// START SERVER
+// START
 // =========================
 const server = app.listen(
   PORT,
@@ -461,7 +607,7 @@ server.keepAliveTimeout = 65000;
 server.headersTimeout = 66000;
 
 // =========================
-// ANTI-CRASH
+// ANTI CRASH
 // =========================
 process.on("unhandledRejection", (err) => {
 
