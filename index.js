@@ -11,10 +11,20 @@ const PORT = process.env.PORT || 8080;
    VARIABLES
 ========================= */
 
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const ZAPI_INSTANCE = String(process.env.ZAPI_INSTANCE || "").trim();
-const ZAPI_TOKEN = String(process.env.ZAPI_TOKEN || "").trim();
-const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
+const OPENAI_API_KEY =
+  process.env.OPENAI_API_KEY;
+
+const ZAPI_INSTANCE =
+  String(process.env.ZAPI_INSTANCE || "").trim();
+
+const ZAPI_TOKEN =
+  String(process.env.ZAPI_TOKEN || "").trim();
+
+const ZAPI_CLIENT_TOKEN =
+  String(process.env.ZAPI_CLIENT_TOKEN || "").trim();
+
+const WEBHOOK_SECRET =
+  process.env.WEBHOOK_SECRET;
 
 /* =========================
    MEMORIA RAM
@@ -28,8 +38,11 @@ const estadoCliente = {};
    CONSTANTES
 ========================= */
 
-const PAUSA_HUMANA_MS = 30 * 60 * 1000;
-const CONVERSA_ATIVA_MS = 5 * 60 * 1000;
+const PAUSA_HUMANA_MS =
+  30 * 60 * 1000;
+
+const CONVERSA_ATIVA_MS =
+  5 * 60 * 1000;
 
 const PIX_CHAVE =
   "8becaaf5-f296-4cbc-a115-46e3d23b042a";
@@ -104,7 +117,9 @@ const MUNICIPIOS = [
 ========================= */
 
 function resetEstado(phone) {
+
   estadoCliente[phone] = {
+
     operacion: null,
     etapa: "inicio",
     monto: null,
@@ -113,31 +128,40 @@ function resetEstado(phone) {
     numero: null,
     aguardando: null,
     pixEnviado: false
+
   };
+
 }
 
 function getEstado(phone) {
+
   if (!estadoCliente[phone]) {
     resetEstado(phone);
   }
 
   return estadoCliente[phone];
+
 }
 
 function escapeRegex(str) {
+
   return str.replace(
     /[.*+?^${}()|[\]\\]/g,
     "\\$&"
   );
+
 }
 
 function contemPalavra(texto, palavra) {
-  const segura = escapeRegex(palavra);
+
+  const segura =
+    escapeRegex(palavra);
 
   return new RegExp(
     "(^|\\s)" + segura + "(\\s|$)",
     "i"
   ).test(texto);
+
 }
 
 function saudacaoPorHora(hora) {
@@ -151,6 +175,7 @@ function saudacaoPorHora(hora) {
   }
 
   return "Buenas noches 👋 ¿Cómo puedo ayudarte?";
+
 }
 
 /* =========================
@@ -162,15 +187,19 @@ setInterval(() => {
   const agora = Date.now();
 
   for (const phone in conversaAtiva) {
+
     if (agora > conversaAtiva[phone]) {
       delete conversaAtiva[phone];
     }
+
   }
 
   for (const phone in pausaHumana) {
+
     if (agora > pausaHumana[phone]) {
       delete pausaHumana[phone];
     }
+
   }
 
   for (const phone in estadoCliente) {
@@ -179,7 +208,9 @@ setInterval(() => {
       !conversaAtiva[phone] &&
       !pausaHumana[phone]
     ) {
+
       delete estadoCliente[phone];
+
     }
 
   }
@@ -198,19 +229,32 @@ async function enviarMensaje(phone, texto) {
       `https://api.z-api.io/instances/${ZAPI_INSTANCE}/token/${ZAPI_TOKEN}/send-text`;
 
     const response = await axios.post(
+
       url,
+
       {
         phone,
         message: texto
       },
+
       {
         headers: {
-          "Content-Type": "application/json"
+
+          "Client-Token":
+            ZAPI_CLIENT_TOKEN,
+
+          "Content-Type":
+            "application/json"
+
         }
       }
+
     );
 
-    console.log("ENVIADO:", response.data);
+    console.log(
+      "ENVIADO:",
+      response.data
+    );
 
   } catch (error) {
 
@@ -232,8 +276,11 @@ async function responderIA(mensagem, estado) {
   try {
 
     const response = await axios.post(
+
       "https://api.openai.com/v1/responses",
+
       {
+
         model: "gpt-4.1-mini",
 
         input:
@@ -249,22 +296,28 @@ ${mensagem}`,
 Asistente humano de remesas.
 
 REGLAS:
+- Responder corto
 - Máximo 2 líneas
 - Sonar natural
-- Hablar en idioma del cliente
-- No sonar como IA
-- No repetir preguntas`
+- Hablar idioma cliente
+- No sonar IA`
+
       },
 
       {
+
         headers: {
+
           Authorization:
             "Bearer " + OPENAI_API_KEY,
 
           "Content-Type":
             "application/json"
+
         }
+
       }
+
     );
 
     const textoIA =
@@ -311,7 +364,9 @@ function verificarAutorizacao(
     headerSecret === WEBHOOK_SECRET ||
     queryToken === WEBHOOK_SECRET
   ) {
+
     return next();
+
   }
 
   console.log(
@@ -351,21 +406,25 @@ app.post(
         phone.includes("-group")
       ) {
 
-        console.log("IGNORANDO GRUPO");
+        console.log(
+          "IGNORANDO GRUPO"
+        );
 
         return res.sendStatus(200);
 
       }
 
       /* =========================
-         ANTI LOOP API
+         ANTI LOOP
       ========================== */
 
       if (
         body.fromApi === true &&
         body.fromMe === true
       ) {
+
         return res.sendStatus(200);
+
       }
 
       /* =========================
@@ -397,10 +456,11 @@ app.post(
       }
 
       /* =========================
-         HORARIO
+         HORA
       ========================== */
 
       const hora = Number(
+
         new Date().toLocaleString(
           "en-US",
           {
@@ -409,6 +469,7 @@ app.post(
             hour12: false
           }
         )
+
       );
 
       if (hora >= 22 || hora < 6) {
@@ -433,7 +494,10 @@ app.post(
 
       }
 
-      console.log("MENSAGEM:", texto);
+      console.log(
+        "MENSAGEM:",
+        texto
+      );
 
       const textoLimpo =
         texto
@@ -510,14 +574,17 @@ app.post(
         !esComercial &&
         !conversaEmAndamento
       ) {
+
         return res.sendStatus(200);
+
       }
 
       /* =========================
          ESTADO
       ========================== */
 
-      let estado = getEstado(phone);
+      let estado =
+        getEstado(phone);
 
       /* =========================
          OPERACION
@@ -562,7 +629,8 @@ app.post(
 
       if (
         matchMonto &&
-        estado.etapa === "esperando_monto"
+        estado.etapa ===
+          "esperando_monto"
       ) {
 
         estado.monto =
@@ -578,7 +646,9 @@ app.post(
         texto.replace(/\D/g, "");
 
       if (
-        estado.etapa === "esperando_tarjeta" &&
+        estado.etapa ===
+          "esperando_tarjeta" &&
+
         /^\d{16}$/.test(numeros)
       ) {
 
@@ -588,11 +658,13 @@ app.post(
       }
 
       /* =========================
-         NUMERO RECARGA
+         NUMERO
       ========================== */
 
       if (
-        estado.etapa === "esperando_numero" &&
+        estado.etapa ===
+          "esperando_numero" &&
+
         /^\d{8,11}$/.test(numeros)
       ) {
 
@@ -607,13 +679,17 @@ app.post(
 
       if (
         estado.etapa ===
-        "esperando_municipio"
+          "esperando_municipio"
       ) {
 
         for (const m of MUNICIPIOS) {
 
-          if (textoLimpo.includes(m)) {
+          if (
+            textoLimpo.includes(m)
+          ) {
+
             estado.municipio = m;
+
           }
 
         }
@@ -625,6 +701,7 @@ app.post(
       ========================== */
 
       if (
+
         estado.aguardando ===
           "comprovante" &&
 
@@ -636,6 +713,7 @@ app.post(
           textoLimpo.includes("enviado") ||
           textoLimpo.includes("comprovante")
         )
+
       ) {
 
         await enviarMensaje(
@@ -657,12 +735,12 @@ app.post(
       }
 
       /* =========================
-         FLUJOS
+         TRANSFERENCIA
       ========================== */
 
       if (
         estado.operacion ===
-        "transferencia"
+          "transferencia"
       ) {
 
         if (!estado.monto) {
@@ -695,9 +773,13 @@ app.post(
 
       }
 
+      /* =========================
+         ENTREGA
+      ========================== */
+
       if (
         estado.operacion ===
-        "entrega"
+          "entrega"
       ) {
 
         if (!estado.monto) {
@@ -730,9 +812,13 @@ app.post(
 
       }
 
+      /* =========================
+         RECARGA
+      ========================== */
+
       if (
         estado.operacion ===
-        "recarga"
+          "recarga"
       ) {
 
         if (!estado.monto) {
@@ -775,8 +861,12 @@ app.post(
       ) {
 
         estado.pixEnviado = true;
-        estado.aguardando = "comprovante";
-        estado.etapa = "esperando_comprovante";
+
+        estado.aguardando =
+          "comprovante";
+
+        estado.etapa =
+          "esperando_comprovante";
 
         await enviarMensaje(
           phone,
@@ -829,7 +919,9 @@ app.post(
 ========================= */
 
 app.get("/", (req, res) => {
+
   res.send("YordaBot ONLINE");
+
 });
 
 /* =========================
