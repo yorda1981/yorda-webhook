@@ -13,7 +13,6 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const ZAPI_INSTANCE = String(process.env.ZAPI_INSTANCE || "").trim();
 const ZAPI_TOKEN = String(process.env.ZAPI_TOKEN || "").trim();
 const ZAPI_CLIENT_TOKEN = String(process.env.ZAPI_CLIENT_TOKEN || "").trim();
-const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 
 /* =========================
    MEMORIA RAM (ESTADOS)
@@ -32,7 +31,7 @@ const GATILHOS = ["remesa", "envio", "enviar", "transferencia", "cambio", "tasa"
 const SAUDACOES = ["hola", "oi", "ola", "buenas", "buen dia", "bom dia"];
 
 /* =========================
-   HELPERS
+   HELPERS (CORREGIDOS)
 ========================= */
 function resetEstado(phone) {
   estadoCliente[phone] = {
@@ -52,8 +51,12 @@ function getEstado(phone) {
   return estadoCliente[phone];
 }
 
-function contemPalavra(texto, palavra) {
-  return new RegExp("(^|\\s)" + palabra + "(\\s|$)", "i").test(texto);
+// ESTA ES LA FUNCIÓN QUE DABA ERROR: Corregida
+function contemPalavra(texto, palabra) {
+  if (!texto || !palabra) return false;
+  // Escapamos caracteres especiales por seguridad
+  const palabraEscapada = palabra.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp("(^|\\s)" + palabraEscapada + "(\\s|$)", "i").test(texto);
 }
 
 /* =========================
@@ -75,7 +78,7 @@ async function enviarMensaje(phone, texto) {
 }
 
 /* =========================
-   OPENAI (CORREGIDO)
+   OPENAI
 ========================= */
 async function responderIA(mensagem, estado) {
   try {
@@ -86,8 +89,8 @@ async function responderIA(mensagem, estado) {
         messages: [
           {
             role: "system",
-            content: `Eres YordaBot, asistente de remesas de Yordanys. Contexto actual del cliente: ${JSON.stringify(estado)}. 
-            REGLAS: Responde muy corto (máximo 2 líneas), natural, en el idioma del cliente y no parezcas un robot.`
+            content: `Eres YordaBot, asistente de remesas de Yordanys. Contexto actual: ${JSON.stringify(estado)}. 
+            Responde corto (máx 2 líneas), natural y amable.`
           },
           { role: "user", content: mensagem }
         ],
@@ -115,33 +118,29 @@ app.post("/webhook", async (req, res) => {
   const phone = String(body.phone || "");
   const texto = body?.text?.message || "";
 
-  // Ignorar grupos y mensajes propios de la API
   if (!phone || body.isGroup || (body.fromMe && body.fromApi)) {
     return res.sendStatus(200);
   }
 
-  // Pausa Humana: Si tú escribes manualmente, el bot se calla 30 min
+  // Pausa Humana
   if (body.fromMe) {
     pausaHumana[phone] = Date.now() + PAUSA_HUMANA_MS;
     return res.sendStatus(200);
   }
 
   if (pausaHumana[phone] && Date.now() < pausaHumana[phone]) {
-    console.log(`🤫 Bot pausado para ${phone}`);
     return res.sendStatus(200);
   }
 
   const textoLimpo = texto.toLowerCase();
   let estado = getEstado(phone);
 
-  // Lógica de detección de intención
   const esComercial = GATILHOS.some(g => contemPalavra(textoLimpo, g));
   const esSaudacao = SAUDACOES.some(s => contemPalavra(textoLimpo, s));
 
   if (esComercial || esSaudacao || (conversaAtiva[phone] && Date.now() < conversaAtiva[phone])) {
     conversaAtiva[phone] = Date.now() + CONVERSA_ATIVA_MS;
     
-    // Procesar con IA
     const respuestaIA = await responderIA(texto, estado);
     await enviarMensaje(phone, respuestaIA);
   }
