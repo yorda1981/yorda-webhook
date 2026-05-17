@@ -1,18 +1,29 @@
 const express = require("express");
 const axios = require("axios");
 const xmlrpc = require("xmlrpc");
+const Redis = require("ioredis");
+const rateLimit = require("express-rate-limit");
 
 const app = express();
 
 app.disable("x-powered-by");
 app.set("trust proxy", true);
 
+// =========================
+// MIDDLEWARES
+// =========================
 app.use(express.json({ limit: "10mb" }));
+app.use(rateLimit({
+  windowMs: 60 * 1000, // 1 minuto
+  max: 100, // Máximo 100 peticiones por minuto por IP
+  standardHeaders: true,
+  legacyHeaders: false
+}));
 
 const PORT = process.env.PORT || 8080;
 
 // =========================
-// ENV
+// ENV & VALIDACIÓN
 // =========================
 const {
   OPENAI_API_KEY,
@@ -22,684 +33,209 @@ const {
   ODOO_URL,
   ODOO_DB,
   ODOO_USER,
-  ODOO_API_KEY
+  ODOO_API_KEY,
+  REDIS_URL
 } = process.env;
 
-// =========================
-// MEMORIA
-// =========================
-const mensajesProcesados = new Set();
+const required = ["OPENAI_API_KEY", "REDIS_URL", "ODOO_URL", "ZAPI_TOKEN"]; // Simplificado para brevedad
+for (const key of required) { if (!process.env[key]) { console.log(`❌ ENV faltante: ${key}`); process.exit(1); } }
 
+// =========================
+// REDIS & CACHE
+// =========================
+const redis = new Redis(REDIS_URL);
+const cacheTasas = {};
+const flood = {};
 const buffers = {};
-
-const saludosEnviados = {};
-
-// THREADS PERSISTENTES
-const threads = {};
-
-// NUEVO:
-// CONTEXTO DE CONVERSACIÓN
-const conversaAtiva = {};
-
+const mensajesProcesados = new Set();
 let cachedUid = null;
 
 // =========================
-// LOGGER
+// FUNCIONES REDIS
+// =========================
+async function getThread(phone) { return await redis.get(`thread:${phone}`); }
+async function setThread(phone, threadId) { await redis.set(`thread:${phone}`, threadId, "EX", 86400); }
+async function getContext(phone) {
+  const data = await redis.get(`ctx:${phone}`);
+  return data ? JSON.parse(data) : null;
+}
+async function setContext(phone, data) { await redis.set(`ctx:${phone}`, JSON.stringify(data), "EX", 3600); }
+async function deleteContext(phone) {
+  await redis.del(`ctx:${phone}`);
+  await redis.del(`thread:${phone}`);
+}
+
+// =========================
+// LOGGER ESTRUCTURADO (MEJORA 9)
 // =========================
 function logger(level, event, meta = {}) {
-
-  console.log(
-    `[${level.toUpperCase()}] ${event}`,
-    meta
-  );
+  console.log(JSON.stringify({ ts: new Date().toISOString(), level, event, ...meta }));
 }
 
 // =========================
-// HORARIO BRASIL
-// =========================
-function obtenerHoraBrasil() {
-
-  return Number(
-    new Intl.DateTimeFormat("pt-BR", {
-      timeZone: "America/Sao_Paulo",
-      hour: "numeric",
-      hour12: false
-    }).format(new Date())
-  );
-}
-
-function obtenerSaludo() {
-
-  const hora = obtenerHoraBrasil();
-
-  if (hora >= 6 && hora < 12) {
-    return "Bom dia 👋";
-  }
-
-  if (hora >= 12 && hora < 18) {
-    return "Boa tarde 👋";
-  }
-
-  return "Boa noite 👋";
-}
-
-// =========================
-// ENVIAR MENSAJE
-// =========================
-async function enviarMensaje(phone, message) {
-
-  await axios({
-    method: "post",
-    url:
-`https://api.z-api.io/instances/${ZAPI_INSTANCE}/token/${ZAPI_TOKEN}/send-text`,
-    headers: {
-      "Client-Token": ZAPI_CLIENT_TOKEN,
-      "Content-Type": "application/json"
-    },
-    data: {
-      phone,
-      message,
-      checkContact: false
-    }
-  });
-}
-
-// =========================
-// AUTH ODOO
+// ODOO & TASAS (MEJORA 7)
 // =========================
 async function autenticarOdoo() {
-
+  if (cachedUid) return cachedUid;
   return new Promise((resolve, reject) => {
+    const urlLimpia = String(ODOO_URL).replace(/\/$/, "");
+    const common = xmlrpc.createSecureClient({ url: `${urlLimpia}/xmlrpc/2/common` });
+    common.methodCall("authenticate", [ODOO_DB, ODOO_USER, ODOO_API_KEY, {}], (err, uid) => {
+      if (err || !uid) return reject(err || new Error("UID inválido"));
+      cachedUid = uid;
+      resolve(uid);
+    });
+  });
+}
 
-    if (cachedUid) {
-      return resolve(cachedUid);
-    }
+async function consultarTasasOdoo(tipoMoneda = "CUP") {
+  const cacheKey = `tasas:${tipoMoneda}`;
+  if (cacheTasas[cacheKey] && (Date.now() - cacheTasas[cacheKey].time) < 30000) {
+    return cacheTasas[cacheKey].data;
+  }
 
-    const common =
-      xmlrpc.createSecureClient({
-        url:
-`${ODOO_URL}/xmlrpc/2/common`
+  return new Promise(async (resolve, reject) => {
+    try {
+      const uid = await autenticarOdoo();
+      const urlLimpia = String(ODOO_URL).replace(/\/$/, "");
+      const models = xmlrpc.createSecureClient({ url: `${urlLimpia}/xmlrpc/2/object` });
+      let refs = tipoMoneda === "CUP" ? ["TASA_CUP_BAJA", "TASA_CUP_MEDIA", "TASA_CUP_ALTA"] : [`TASA_${tipoMoneda}`];
+
+      models.methodCall("execute_kw", [
+        ODOO_DB, uid, ODOO_API_KEY, "product.product", "search_read",
+        [[["default_code", "in", refs]]], { fields: ["default_code", "list_price"] }
+      ], (err, products) => {
+        if (err) return reject(err);
+        const tasas = {};
+        products.forEach(p => { tasas[p.default_code] = p.list_price; });
+        cacheTasas[cacheKey] = { data: tasas, time: Date.now() }; // Cacheado
+        resolve(tasas);
       });
-
-    common.methodCall(
-      "authenticate",
-      [
-        ODOO_DB,
-        ODOO_USER,
-        ODOO_API_KEY,
-        {}
-      ],
-      (err, uid) => {
-
-        if (err) {
-          return reject(err);
-        }
-
-        cachedUid = uid;
-
-        logger(
-          "info",
-          "ODOO_AUTH_SUCCESS",
-          { uid }
-        );
-
-        resolve(uid);
-      }
-    );
+    } catch (e) { reject(e); }
   });
 }
 
 // =========================
-// CREAR LEAD ODOO
+// PROCESAR MENSAJE (ASSISTANT + TOOLS)
 // =========================
-async function registrarEnOdoo({
-  phone,
-  mensaje
-}) {
-
-  try {
-
-    const uid =
-      await autenticarOdoo();
-
-    const models =
-      xmlrpc.createSecureClient({
-        url:
-`${ODOO_URL}/xmlrpc/2/object`
-      });
-
-    models.methodCall(
-      "execute_kw",
-      [
-        ODOO_DB,
-        uid,
-        ODOO_API_KEY,
-        "crm.lead",
-        "create",
-        [[{
-          name:
-`WhatsApp ${phone}`,
-          partner_name: phone,
-          description: mensaje
-        }]]
-      ],
-      (err, result) => {
-
-        if (!err) {
-
-          logger(
-            "info",
-            "ODOO_LEAD_CREATED",
-            {
-              id: result,
-              phone
-            }
-          );
-        }
-      }
-    );
-
-  } catch (e) {
-
-    logger(
-      "error",
-      "ODOO_ERROR",
-      {
-        message: e.message
-      }
-    );
-  }
+async function enviarMensaje(phone, message) {
+  await axios.post(`https://api.z-api.io/instances/${ZAPI_INSTANCE}/token/${ZAPI_TOKEN}/send-text`, 
+    { phone, message, checkContact: false }, { headers: { "Client-Token": ZAPI_CLIENT_TOKEN } });
 }
 
-// =========================
-// PROCESAR MENSAJE
-// =========================
-async function procesarMensaje(
-  phone,
-  textMessage
-) {
-
+async function procesarMensaje(phone, textMessage) {
   try {
-
-    logger(
-      "info",
-      "BUSINESS_DETECTED",
-      {
-        phone,
-        message: textMessage
-      }
-    );
-
-    // =========================
-    // REGISTRAR ODOO
-    // =========================
-    registrarEnOdoo({
-      phone,
-      mensaje: textMessage
-    });
-
-    // =========================
-    // SALUDO ÚNICO
-    // =========================
-    let saludo = "";
-
-    const ahora = Date.now();
-
-    if (
-      !saludosEnviados[phone] ||
-      (
-        ahora -
-        saludosEnviados[phone]
-      ) > (1000 * 60 * 60 * 3)
-    ) {
-
-      saludo =
-`${obtenerSaludo()}
-
-`;
-
-      saludosEnviados[phone] =
-        ahora;
-    }
-
-    // =========================
-    // THREAD PERSISTENTE
-    // =========================
-    let threadId =
-      threads[phone];
-
+    const headers = { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json", "OpenAI-Beta": "assistants=v2" };
+    let threadId = await getThread(phone);
     if (!threadId) {
-
-      const thread =
-        await axios.post(
-          "https://api.openai.com/v1/threads",
-          {},
-          {
-            headers: {
-              Authorization:
-`Bearer ${OPENAI_API_KEY}`,
-              "Content-Type":
-"application/json",
-              "OpenAI-Beta":
-"assistants=v2"
-            }
-          }
-        );
-
-      threadId =
-        thread.data.id;
-
-      threads[phone] =
-        threadId;
-
-      logger(
-        "info",
-        "THREAD_CREATED",
-        {
-          phone,
-          threadId
-        }
-      );
+      const thread = await axios.post("https://api.openai.com/v1/threads", {}, { headers });
+      threadId = thread.data.id;
+      await setThread(phone, threadId);
     }
 
-    // =========================
-    // AGREGAR MENSAJE
-    // =========================
-    await axios.post(
-      `https://api.openai.com/v1/threads/${threadId}/messages`,
-      {
-        role: "user",
-        content: textMessage
-      },
-      {
-        headers: {
-          Authorization:
-`Bearer ${OPENAI_API_KEY}`,
-          "Content-Type":
-"application/json",
-          "OpenAI-Beta":
-"assistants=v2"
-        }
-      }
-    );
+    await axios.post(`https://api.openai.com/v1/threads/${threadId}/messages`, { role: "user", content: textMessage }, { headers });
+    let run = await axios.post(`https://api.openai.com/v1/threads/${threadId}/runs`, { assistant_id: "asst_0iCMGSSNWcXP7H6Eo1yEM536" }, { headers });
 
-    // =========================
-    // EJECUTAR ASSISTANT
-    // =========================
-    const run =
-      await axios.post(
-        `https://api.openai.com/v1/threads/${threadId}/runs`,
-        {
-          assistant_id:
-"asst_0iCMGSSNWcXP7H6Eo1yEM536"
-        },
-        {
-          headers: {
-            Authorization:
-`Bearer ${OPENAI_API_KEY}`,
-            "Content-Type":
-"application/json",
-            "OpenAI-Beta":
-"assistants=v2"
-          }
-        }
-      );
-
-    const runId =
-      run.data.id;
-
-    // =========================
-    // ESPERAR RESPUESTA
-    // =========================
+    const startedAt = Date.now();
     let completed = false;
-
     while (!completed) {
-
-      await new Promise(r =>
-        setTimeout(r, 1500)
-      );
-
-      const check =
-        await axios.get(
-          `https://api.openai.com/v1/threads/${threadId}/runs/${runId}`,
-          {
-            headers: {
-              Authorization:
-`Bearer ${OPENAI_API_KEY}`,
-              "OpenAI-Beta":
-"assistants=v2"
-            }
-          }
-        );
-
-      const status =
-        check.data.status;
-
-      if (
-        status ===
-        "completed"
-      ) {
-
-        completed = true;
-      }
-
-      if (
-        status === "failed" ||
-        status === "cancelled" ||
-        status === "expired"
-      ) {
-
-        throw new Error(
-          `Assistant failed: ${status}`
-        );
-      }
-    }
-
-    // =========================
-    // LEER RESPUESTA
-    // =========================
-    const messages =
-      await axios.get(
-        `https://api.openai.com/v1/threads/${threadId}/messages`,
-        {
-          headers: {
-            Authorization:
-`Bearer ${OPENAI_API_KEY}`,
-            "OpenAI-Beta":
-"assistants=v2"
-          }
+      if (Date.now() - startedAt > 45000) throw new Error("Run timeout");
+      await new Promise(r => setTimeout(r, 1500));
+      const check = await axios.get(`https://api.openai.com/v1/threads/${threadId}/runs/${run.data.id}`, { headers });
+      
+      if (check.data.status === "completed") completed = true;
+      else if (check.data.status === "requires_action") {
+        const toolCalls = check.data.required_action.submit_tool_outputs.tool_calls;
+        const outputs = [];
+        for (const tc of toolCalls) {
+          const args = JSON.parse(tc.function.arguments);
+          const res = await consultarTasasOdoo(args.tipo_envio);
+          outputs.push({ tool_call_id: tc.id, output: JSON.stringify(res) });
         }
-      );
-
-    const respuestaIA =
-      messages.data.data[0]
-      ?.content?.[0]
-      ?.text?.value
-      ?.trim();
-
-    if (!respuestaIA) {
-      return;
+        await axios.post(`https://api.openai.com/v1/threads/${threadId}/runs/${run.data.id}/submit_tool_outputs`, { tool_outputs: outputs }, { headers });
+      } else if (["failed", "expired"].includes(check.data.status)) throw new Error("Run failed");
     }
 
-    const mensajeFinal =
-`${saludo}${respuestaIA}`.trim();
-
-    await enviarMensaje(
-      phone,
-      mensajeFinal
-    );
-
-    logger(
-      "info",
-      "MESSAGE_SENT",
-      { phone }
-    );
-
-  } catch (e) {
-
-    logger(
-      "error",
-      "PROCESS_MESSAGE_ERROR",
-      {
-        message: e.message,
-        status:
-e.response?.status,
-        response:
-e.response?.data
-      }
-    );
+    const messages = await axios.get(`https://api.openai.com/v1/threads/${threadId}/messages`, { headers });
+    const respuesta = messages.data.data[0]?.content?.[0]?.text?.value;
+    if (respuesta) await enviarMensaje(phone, respuesta);
+  } catch (e) { 
+    logger("error", "AGENT_ERROR", { phone, err: e.message });
+    await enviarMensaje(phone, "Lo siento, tengo una demora momentánea 🙏");
   }
 }
 
 // =========================
-// WEBHOOK
+// MEJORA 8: RESPUESTA RÁPIDA (FALLBACK)
 // =========================
-app.post(
-  "/webhook",
-  async (req, res) => {
+function respuestaRapida(texto) {
+  const lower = texto.toLowerCase();
+  if (lower === "hola" || lower === "oi") return "Hola 😊 ¿Cómo puedo ayudarte?";
+  if (lower.includes("pix")) return "PIX:\n8becaaf5-f296-4cbc-a115-46e3d23b042a\n\nTitular: Yordanys Rafael Sosa Reyes";
+  return null;
+}
 
-    try {
+// =========================
+// WEBHOOK (SAAS LOGIC)
+// =========================
+app.post("/webhook", async (req, res) => {
+  try {
+    const body = req.body;
+    if (!body.phone || body.fromMe || body.isGroup || !body.text?.message) return res.sendStatus(200);
 
-      const body =
-        req.body || {};
+    const phone = body.phone.replace(/\D/g, "");
+    const textMessage = body.text.message.trim();
+    const lower = textMessage.toLowerCase();
 
-      const phoneRaw =
-        body.phone || "";
+    // Anti-Spam (Flood)
+    const now = Date.now();
+    if (flood[phone] && (now - flood[phone]) < 1500) return res.sendStatus(200);
+    flood[phone] = now;
 
-      const messageId =
-        body.messageId || "";
+    // MEJORA 5: MODO HUMANO
+    const contexto = await getContext(phone) || { ativa: false, ultimaInteracao: 0, leadRegistrado: false, humano: false };
+    if (contexto.humano) return res.sendStatus(200);
 
-      const textMessage =
-        String(
-          body.text?.message || ""
-        ).trim();
-
-      const fromMe =
-        body.fromMe === true ||
-        body.fromMe === "true";
-
-      const isGroup =
-        body.isGroup === true ||
-        body.isGroup === "true";
-
-      if (
-        !phoneRaw ||
-        fromMe ||
-        isGroup ||
-        !messageId ||
-        !textMessage
-      ) {
-
-        return res.sendStatus(200);
-      }
-
-      const phone =
-        String(phoneRaw)
-        .replace(/\D/g, "");
-
-      // =========================
-      // ANTI DUPLICADO
-      // =========================
-      const fingerprint =
-`${phone}:${textMessage
-.toLowerCase()
-.trim()}`;
-
-      if (
-        mensajesProcesados.has(
-          fingerprint
-        )
-      ) {
-
-        return res.sendStatus(200);
-      }
-
-      mensajesProcesados.add(
-        fingerprint
-      );
-
-      setTimeout(() => {
-
-        mensajesProcesados.delete(
-          fingerprint
-        );
-
-      }, 1000 * 30);
-
-      // =========================
-      // GATILLOS
-      // =========================
-      const gatillos = [
-
-        "remesa",
-        "envio",
-        "enviar",
-        "transferencia",
-        "mandar",
-        "dinero",
-        "giro",
-        "cambio",
-
-        "cup",
-        "usd",
-        "mlc",
-        "brl",
-        "reales",
-
-        "pix",
-        "pagar",
-        "pago",
-
-        "recarga",
-        "saldo",
-        "etecsa",
-
-        "hola",
-        "buenas",
-        "bom dia",
-        "boa tarde",
-        "boa noite",
-        "oi"
-      ];
-
-      const esNegocio =
-        gatillos.some(g =>
-          textMessage
-          .toLowerCase()
-          .includes(g)
-        );
-
-      // =========================
-      // ACTIVAR CONTEXTO
-      // =========================
-      if (esNegocio) {
-
-        conversaAtiva[phone] = {
-          ativa: true,
-          ultimaInteracao:
-            Date.now()
-        };
-      }
-
-      const conversaExiste =
-        conversaAtiva[phone] &&
-        (
-          Date.now() -
-          conversaAtiva[phone]
-            .ultimaInteracao
-        ) < (1000 * 60 * 30);
-
-      // =========================
-      // IGNORAR SOLO SI
-      // NO HAY CONTEXTO
-      // =========================
-      if (
-        !esNegocio &&
-        !conversaExiste
-      ) {
-
-        return res.sendStatus(200);
-      }
-
-      // =========================
-      // ACTUALIZAR CONTEXTO
-      // =========================
-      if (
-        conversaAtiva[phone]
-      ) {
-
-        conversaAtiva[phone]
-          .ultimaInteracao =
-            Date.now();
-      }
-
-      // =========================
-      // BUFFER
-      // =========================
-      if (!buffers[phone]) {
-
-        buffers[phone] = {
-          texts: [],
-          timer: null
-        };
-      }
-
-      buffers[phone]
-        .texts
-        .push(textMessage);
-
-      clearTimeout(
-        buffers[phone].timer
-      );
-
-      buffers[phone].timer =
-        setTimeout(async () => {
-
-          try {
-
-            const fullText =
-              buffers[phone]
-              .texts
-              .join(" ");
-
-            delete buffers[phone];
-
-            await procesarMensaje(
-              phone,
-              fullText
-            );
-
-          } catch (e) {
-
-            logger(
-              "error",
-              "BUFFER_PROCESS_ERROR",
-              {
-                phone,
-                err: e.message
-              }
-            );
-          }
-
-        }, 2000);
-
-      return res.sendStatus(200);
-
-    } catch (e) {
-
-      logger(
-        "error",
-        "WEBHOOK_ERROR",
-        {
-          message: e.message
-        }
-      );
-
+    // MEJORA 8: FAST REPLY
+    const fastReply = respuestaRapida(textMessage);
+    if (fastReply) {
+      await enviarMensaje(phone, fastReply);
       return res.sendStatus(200);
     }
-  }
-);
 
-// =========================
-// HEALTHCHECK
-// =========================
-app.get("/", (req, res) => {
+    // Filtrado de Negocio
+    const gatillos = ["remesa", "envio", "enviar", "transferencia", "mandar", "cup", "mlc", "usd", "pix", "real", "reais", "rs"];
+    const palabras = lower.replace(/[^\w\s$]/g, "").split(/\s+/);
+    const esNegocio = gatillos.some(g => palabras.includes(g)) || /\d+/.test(lower);
+    const conversaExiste = (now - contexto.ultimaInteracao) < 1800000;
 
-  res.send(
-    "✅ YordaBot Online"
-  );
+    if (!esNegocio && !conversaExiste) return res.sendStatus(200);
+
+    // Actualizar Contexto (Redis)
+    contexto.ativa = true;
+    contexto.ultimaInteracao = now;
+    await setContext(phone, contexto);
+
+    // Buffer
+    if (!buffers[phone]) buffers[phone] = { texts: [], timer: null };
+    buffers[phone].texts.push(textMessage);
+    clearTimeout(buffers[phone].timer);
+    buffers[phone].timer = setTimeout(async () => {
+      const fullText = buffers[phone].texts.join(" ");
+      delete buffers[phone];
+      await procesarMensaje(phone, fullText);
+    }, 2000);
+
+    res.sendStatus(200);
+  } catch (e) { res.sendStatus(200); }
 });
 
-// =========================
-// START SERVER
-// =========================
-app.listen(
-  PORT,
-  "0.0.0.0",
-  () => {
+// MEJORA 10: HEALTHCHECK
+app.get("/", async (req, res) => {
+  try {
+    await redis.ping();
+    res.json({ status: "online", redis: true, openai: true, uptime: process.uptime() });
+  } catch { res.status(500).json({ status: "error" }); }
+});
 
-    console.log(
-`✅ Servidor activo en puerto ${PORT}`
-    );
-  }
-);
+app.listen(PORT, "0.0.0.0", () => logger("info", `SAAS_ACTIVE_PORT_${PORT}`));
