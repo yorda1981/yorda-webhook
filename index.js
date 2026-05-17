@@ -224,16 +224,6 @@ async function consultarTasasOdoo(
         .trim()
         .toUpperCase();
 
-      if (
-        !["CUP", "MLC", "USD"]
-        .includes(tipo)
-      ) {
-
-        return reject(
-          new Error("Tipo inválido")
-        );
-      }
-
       const uid =
         await autenticarOdoo();
 
@@ -413,53 +403,7 @@ Agora estamos fora do horário 👌
     }
 
     // =========================
-    // PIX DIRECTO
-    // =========================
-    const pixTriggers = [
-      "pix",
-      "llave pix",
-      "clave pix",
-      "manda pix",
-      "pix para pagar",
-      "quiero pagar",
-      "pagar",
-      "pago"
-    ];
-
-    const quierePix =
-      pixTriggers.some(g =>
-        textMessage
-        .toLowerCase()
-        .includes(g)
-      );
-
-    if (quierePix) {
-
-      await enviarMensaje(
-        phone,
-`8becaaf5-f296-4cbc-a115-46e3d23b042a`
-      );
-
-      await new Promise(resolve =>
-        setTimeout(resolve, 1500)
-      );
-
-      await enviarMensaje(
-        phone,
-`Titular: YORDANYS RAFAEL SOSA REYES
-
-Banco: Nubank (260)`
-      );
-
-      logger("info", "PIX_SENT", {
-        phone
-      });
-
-      return;
-    }
-
-    // =========================
-    // ODOO
+    // REGISTRAR ODOO
     // =========================
     registrarEnOdoo({
       phone,
@@ -489,35 +433,16 @@ Banco: Nubank (260)`
     }
 
     // =========================
-    // OPENAI
+    // OPENAI WORKFLOW
     // =========================
     const ai = await axios.post(
-      "https://api.openai.com/v1/chat/completions",
+      "https://api.openai.com/v1/responses",
       {
-        model: "gpt-4o-mini",
-        messages: [
-          {
-            role: "system",
-            content:
-`Eres YordaBot.
+        workflow: {
+          id: "wf_68f65c9bd8648190a572e1272e6ae1880cf508aff8bcf40e"
+        },
 
-REGLAS:
-- Responde corto.
-- Máximo 2 líneas.
-- Sonido humano.
-- No markdown.
-- No inventar tasas.
-- No hablar de tasas.
-- Idioma del cliente.
-- No repetir saludos.`
-          },
-          {
-            role: "user",
-            content:
-              textMessage.slice(0, 1000)
-          }
-        ],
-        temperature: 0.3
+        input: textMessage
       },
       {
         headers: {
@@ -526,13 +451,14 @@ REGLAS:
           "Content-Type":
             "application/json"
         },
-        timeout: 10000
+        timeout: 20000
       }
     );
 
     const respuestaIA =
-      ai.data?.choices?.[0]
-      ?.message?.content
+      ai.data?.output?.[0]
+      ?.content?.[0]
+      ?.text
       ?.trim();
 
     if (!respuestaIA) {
@@ -659,18 +585,6 @@ app.post("/webhook", async (req, res) => {
       String(phoneRaw)
       .replace(/\D/g, "");
 
-    if (
-      phone.length < 10 ||
-      phone.length > 15
-    ) {
-
-      logger("warn", "INVALID_PHONE", {
-        phone
-      });
-
-      return res.sendStatus(200);
-    }
-
     // =========================
     // ANTI DUPLICADO
     // =========================
@@ -738,8 +652,6 @@ app.post("/webhook", async (req, res) => {
 
       "hola",
       "buenas",
-      "buen dia",
-      "buen día",
       "bom dia",
       "boa tarde",
       "boa noite",
