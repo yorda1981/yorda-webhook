@@ -297,11 +297,21 @@ Agora estamos fora do horário de atendimento 👌
 
     if (quierePix) {
 
+      // SOLO CÓDIGO PIX
       await enviarMensaje(
         phone,
-`PIX: 8becaaf5-f296-4cbc-a115-46e3d23b042a
+`8becaaf5-f296-4cbc-a115-46e3d23b042a`
+      );
 
-Titular: YORDANYS RAFAEL SOSA REYES
+      // PAUSA
+      await new Promise(resolve =>
+        setTimeout(resolve, 1500)
+      );
+
+      // DATOS APARTE
+      await enviarMensaje(
+        phone,
+`Titular: YORDANYS RAFAEL SOSA REYES
 
 Banco: Nubank (260)`
       );
