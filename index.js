@@ -29,7 +29,7 @@ try {
   sheets = google.sheets({ version: "v4", auth });
   console.log("✅ Conexión con Google Sheets configurada");
 } catch (e) {
-  console.log("❌ Error configurando Google Sheets:", e.message);
+  console.log("❌ Error en Google Sheets:", e.message);
 }
 
 async function salvarEnGoogleSheets(datos) {
@@ -37,17 +37,17 @@ async function salvarEnGoogleSheets(datos) {
   try {
     await sheets.spreadsheets.values.append({
       spreadsheetId: SPREADSHEET_ID,
-      range: "Hoja 1!A:G", // Ajustado a tu pestaña "Hoja 1"
+      range: "Hoja 1!A:G",
       valueInputOption: "USER_ENTERED",
       resource: {
         values: [[
           new Date().toLocaleString("es-ES", { timeZone: "America/Sao_Paulo" }),
           datos.phone,
-          datos.mensaje,
-          datos.operacion || "N/A",
-          datos.monto || "N/A",
-          datos.etapa || "conversando",
-          datos.respuestaIA || ""
+          datos.operacion || "Consulta",
+          datos.monto || "",
+          datos.destino || "",
+          datos.municipio || "",
+          "🟠 Pendiente"
         ]],
       },
     });
@@ -68,13 +68,14 @@ const CONVERSA_ATIVA_MS = 5 * 60 * 1000;
 
 const GATILHOS = ["remesa", "envio", "enviar", "transferencia", "cambio", "tasa", "real", "brl", "cup", "pix", "mlc", "recarga", "etecsa"];
 const SAUDACOES = ["hola", "oi", "ola", "buenas", "buen dia", "bom dia"];
+const MUNICIPIOS_LISTA = ["habana", "centro habana", "habana vieja", "cerro", "boyeros", "arroyo naranjo", "marianao"];
 
 /* =========================
    HELPERS
 ========================= */
 function getEstado(phone) {
   if (!estadoCliente[phone]) {
-    estadoCliente[phone] = { operacion: null, etapa: "inicio", monto: null, pixEnviado: false };
+    estadoCliente[phone] = { operacion: null, monto: null, destino: null, municipio: null };
   }
   return estadoCliente[phone];
 }
@@ -136,33 +137,46 @@ app.post("/webhook", async (req, res) => {
   const textoLimpo = texto.toLowerCase();
   let estado = getEstado(phone);
 
+  // EXTRAER DATOS AUTOMÁTICAMENTE
+  // Buscar montos (números de 1 a 5 dígitos)
+  const matchMonto = texto.match(/\b\d{1,5}\b/);
+  if (matchMonto && !estado.monto) estado.monto = matchMonto[0];
+
+  // Buscar Tarjetas (16 dígitos) o Celulares (8-10 dígitos)
+  const numeros = texto.replace(/\D/g, "");
+  if (numeros.length === 16) estado.destino = numeros;
+  else if (numeros.length >= 8 && numeros.length <= 11) estado.destino = numeros;
+
+  // Buscar Municipio
+  for (const m of MUNICIPIOS_LISTA) {
+    if (textoLimpo.includes(m)) estado.municipio = m;
+  }
+
   const esComercial = GATILHOS.some(g => contemPalavra(textoLimpo, g));
   const esSaudacao = SAUDACOES.some(s => contemPalavra(textoLimpo, s));
 
   if (esComercial || esSaudacao || (conversaAtiva[phone] && Date.now() < conversaAtiva[phone])) {
     conversaAtiva[phone] = Date.now() + CONVERSA_ATIVA_MS;
     
-    // Capturar intención básica para el Excel
     if (textoLimpo.includes("remesa")) estado.operacion = "remesa";
     if (textoLimpo.includes("recarga")) estado.operacion = "recarga";
 
     const respuesta = await responderIA(texto, estado);
     await enviarMensaje(phone, respuesta);
 
-    // GUARDAR EN EXCEL
+    // GUARDAR EN GOOGLE SHEETS DE FORMA ORGANIZADA
     await salvarEnGoogleSheets({
       phone,
-      mensaje: texto,
       operacion: estado.operacion,
       monto: estado.monto,
-      etapa: estado.etapa,
-      respuestaIA: respuesta
+      destino: estado.destino,
+      municipio: estado.municipio
     });
   }
 
   res.sendStatus(200);
 });
 
-app.get("/", (req, res) => res.send("🚀 YordaBot Online con Google Sheets ✅"));
+app.get("/", (req, res) => res.send("🚀 YordaBot CRM Online ✅"));
 
-app.listen(PORT, "0.0.0.0", () => console.log(`Puerto ${PORT}`));
+app.listen(PORT, "0.0.0.0", () => console.log(`Servidor en puerto ${PORT}`));
