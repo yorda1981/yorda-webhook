@@ -3,6 +3,7 @@ const axios = require("axios");
 const xmlrpc = require("xmlrpc");
 
 const app = express();
+
 app.disable("x-powered-by");
 app.set("trust proxy", true);
 
@@ -42,14 +43,20 @@ for (const key of required) {
   }
 }
 
+// =========================
+// CONFIG
+// =========================
 const TASA_CUP = parseFloat(process.env.TASA_CUP) || 115;
 
 // =========================
 // MEMORIA
 // =========================
 const mensajesProcesados = new Set();
+const buffers = {};
 
-// Limpieza automática RAM
+// =========================
+// LIMPIEZA RAM
+// =========================
 setInterval(() => {
   mensajesProcesados.clear();
 }, 1000 * 60 * 30);
@@ -58,19 +65,19 @@ setInterval(() => {
 // LOGGER
 // =========================
 function logger(level, event, meta = {}) {
-  console.log(JSON.stringify({
-    level,
-    event,
-    timestamp: new Date().toISOString(),
-    ...meta
-  }));
+  console.log(
+    `[${level.toUpperCase()}] ${event}`,
+    meta
+  );
 }
 
 // =========================
 // ODOO
 // =========================
 function registrarEnOdoo(datos) {
+
   try {
+
     const urlLimpia = String(ODOO_URL || "").replace(/\/$/, "");
 
     const common = xmlrpc.createSecureClient({
@@ -96,6 +103,9 @@ function registrarEnOdoo(datos) {
           return logger("error", "ODOO_UID_INVALID");
         }
 
+        // =========================
+        // BUSCAR LEAD EXISTENTE
+        // =========================
         models.methodCall(
           "execute_kw",
           [
@@ -103,32 +113,69 @@ function registrarEnOdoo(datos) {
             uid,
             ODOO_API_KEY,
             "crm.lead",
-            "create",
-            [[{
-              name: `WhatsApp: ${datos.phone}`,
-              partner_name: datos.phone,
-              description: datos.mensaje,
-              type: "opportunity"
-            }]]
+            "search",
+            [[
+              ["partner_name", "=", datos.phone],
+              ["type", "=", "opportunity"]
+            ]],
+            { limit: 1 }
           ],
-          (err, res) => {
+          (err, leads) => {
 
             if (err) {
-              return logger("error", "ODOO_CREATE_ERROR", {
+              return logger("error", "ODOO_SEARCH_ERROR", {
                 err: err.message
               });
             }
 
-            logger("info", "ODOO_LEAD_CREATED", {
-              id: res,
-              phone: datos.phone
-            });
+            // Ya existe lead
+            if (Array.isArray(leads) && leads.length > 0) {
+
+              logger("info", "ODOO_LEAD_EXISTS", {
+                phone: datos.phone,
+                leadId: leads[0]
+              });
+
+              return;
+            }
+
+            // Crear nuevo lead
+            models.methodCall(
+              "execute_kw",
+              [
+                ODOO_DB,
+                uid,
+                ODOO_API_KEY,
+                "crm.lead",
+                "create",
+                [[{
+                  name: `WhatsApp: ${datos.phone}`,
+                  partner_name: datos.phone,
+                  description: datos.mensaje,
+                  type: "opportunity"
+                }]]
+              ],
+              (err, res) => {
+
+                if (err) {
+                  return logger("error", "ODOO_CREATE_ERROR", {
+                    err: err.message
+                  });
+                }
+
+                logger("info", "ODOO_LEAD_CREATED", {
+                  id: res,
+                  phone: datos.phone
+                });
+              }
+            );
           }
         );
       }
     );
 
   } catch (e) {
+
     logger("error", "ODOO_FATAL", {
       err: e.message
     });
@@ -136,95 +183,11 @@ function registrarEnOdoo(datos) {
 }
 
 // =========================
-// WEBHOOK
+// PROCESAMIENTO PRINCIPAL
 // =========================
-app.post("/webhook", async (req, res) => {
+async function procesarMensaje(phone, textMessage) {
 
   try {
-
-    const body = req.body || {};
-
-    const phoneRaw = body.phone || "";
-    const messageId = body.messageId || "";
-    const textMessage = String(body.text?.message || "").trim();
-
-    const fromMe =
-      body.fromMe === true ||
-      body.fromMe === "true";
-
-    const isGroup =
-      body.isGroup === true ||
-      body.isGroup === "true";
-
-    // =========================
-    // FILTROS
-    // =========================
-    if (!phoneRaw) {
-      return res.sendStatus(200);
-    }
-
-    if (fromMe || isGroup) {
-      return res.sendStatus(200);
-    }
-
-    if (!messageId) {
-      return res.sendStatus(200);
-    }
-
-    if (mensajesProcesados.has(messageId)) {
-      return res.sendStatus(200);
-    }
-
-    mensajesProcesados.add(messageId);
-
-    // limpieza individual
-    setTimeout(() => {
-      mensajesProcesados.delete(messageId);
-    }, 1000 * 60 * 5);
-
-    const phone = String(phoneRaw).replace(/\D/g, "");
-
-    if (phone.length < 10 || phone.length > 15) {
-
-      logger("warn", "INVALID_PHONE", {
-        phone
-      });
-
-      return res.sendStatus(200);
-    }
-
-    if (!textMessage) {
-      return res.sendStatus(200);
-    }
-
-    // =========================
-    // GATILLOS
-    // =========================
-    const gatillos = [
-      "remesa",
-      "tasa",
-      "envio",
-      "recarga",
-      "precio",
-      "cuanto",
-      "hola",
-      "pix",
-      "usd",
-      "cup",
-      "mlc",
-      "transferencia",
-      "cambio",
-      "saldo",
-      "etecsa"
-    ];
-
-    const esNegocio = gatillos.some(g =>
-      textMessage.toLowerCase().includes(g)
-    );
-
-    if (!esNegocio) {
-      return res.sendStatus(200);
-    }
 
     logger("info", "BUSINESS_DETECTED", {
       phone,
@@ -281,7 +244,7 @@ app.post("/webhook", async (req, res) => {
         phone
       });
 
-      return res.sendStatus(200);
+      return;
     }
 
     // =========================
@@ -296,8 +259,7 @@ app.post("/webhook", async (req, res) => {
       },
       data: {
         phone,
-        message: respuestaIA,
-        checkContact: false
+        message: respuestaIA
       },
       timeout: 15000
     });
@@ -305,6 +267,161 @@ app.post("/webhook", async (req, res) => {
     logger("info", "MESSAGE_SENT", {
       phone
     });
+
+  } catch (e) {
+
+    logger("error", "PROCESS_MESSAGE_ERROR", {
+      message: e.message,
+      status: e.response?.status,
+      response: e.response?.data
+    });
+  }
+}
+
+// =========================
+// WEBHOOK
+// =========================
+app.post("/webhook", async (req, res) => {
+
+  try {
+
+    const body = req.body || {};
+
+    const phoneRaw = body.phone || "";
+    const messageId = body.messageId || "";
+
+    const textMessage =
+      String(body.text?.message || "").trim();
+
+    const fromMe =
+      body.fromMe === true ||
+      body.fromMe === "true";
+
+    const isGroup =
+      body.isGroup === true ||
+      body.isGroup === "true";
+
+    // =========================
+    // FILTROS
+    // =========================
+    if (!phoneRaw) {
+      return res.sendStatus(200);
+    }
+
+    if (fromMe || isGroup) {
+      return res.sendStatus(200);
+    }
+
+    if (!messageId) {
+      return res.sendStatus(200);
+    }
+
+    if (!textMessage) {
+      return res.sendStatus(200);
+    }
+
+    const phone =
+      String(phoneRaw).replace(/\D/g, "");
+
+    if (phone.length < 10 || phone.length > 15) {
+
+      logger("warn", "INVALID_PHONE", {
+        phone
+      });
+
+      return res.sendStatus(200);
+    }
+
+    // =========================
+    // ANTI DUPLICADO
+    // =========================
+    const fingerprint =
+      `${phone}:${textMessage.toLowerCase().trim()}`;
+
+    if (mensajesProcesados.has(fingerprint)) {
+
+      logger("warn", "DUPLICATED_MESSAGE", {
+        phone,
+        text: textMessage
+      });
+
+      return res.sendStatus(200);
+    }
+
+    mensajesProcesados.add(fingerprint);
+
+    setTimeout(() => {
+      mensajesProcesados.delete(fingerprint);
+    }, 1000 * 30);
+
+    // =========================
+    // GATILLOS
+    // =========================
+    const gatillos = [
+      "remesa",
+      "tasa",
+      "envio",
+      "recarga",
+      "precio",
+      "cuanto",
+      "hola",
+      "pix",
+      "usd",
+      "cup",
+      "mlc",
+      "transferencia",
+      "cambio",
+      "saldo",
+      "etecsa",
+      "reales"
+    ];
+
+    const esNegocio =
+      gatillos.some(g =>
+        textMessage.toLowerCase().includes(g)
+      );
+
+    if (!esNegocio) {
+      return res.sendStatus(200);
+    }
+
+    // =========================
+    // BUFFER / DEBOUNCE
+    // =========================
+    if (!buffers[phone]) {
+      buffers[phone] = {
+        texts: [],
+        timer: null
+      };
+    }
+
+    buffers[phone].texts.push(textMessage);
+
+    clearTimeout(buffers[phone].timer);
+
+    buffers[phone].timer = setTimeout(async () => {
+
+      try {
+
+        const fullText =
+          buffers[phone].texts.join(" ");
+
+        delete buffers[phone];
+
+        await procesarMensaje(
+          phone,
+          fullText
+        );
+
+      } catch (e) {
+
+        logger("error", "BUFFER_PROCESS_ERROR", {
+          phone,
+          err: e.message
+        });
+      }
+
+    }, 2000);
 
     return res.sendStatus(200);
 
@@ -330,9 +447,15 @@ app.get("/", (req, res) => {
 // =========================
 // START SERVER
 // =========================
-const server = app.listen(PORT, "0.0.0.0", () => {
-  console.log(`✅ Servidor activo en puerto ${PORT}`);
-});
+const server = app.listen(
+  PORT,
+  "0.0.0.0",
+  () => {
+    console.log(
+      `✅ Servidor activo en puerto ${PORT}`
+    );
+  }
+);
 
 server.keepAliveTimeout = 65000;
 server.headersTimeout = 66000;
@@ -341,12 +464,14 @@ server.headersTimeout = 66000;
 // ANTI-CRASH
 // =========================
 process.on("unhandledRejection", (err) => {
+
   logger("error", "UNHANDLED_REJECTION", {
     err: err?.message
   });
 });
 
 process.on("uncaughtException", (err) => {
+
   logger("error", "UNCAUGHT_EXCEPTION", {
     err: err?.message
   });
