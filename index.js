@@ -11,6 +11,9 @@ app.use(express.json({ limit: "10mb" }));
 
 const PORT = process.env.PORT || 8080;
 
+// =========================
+// ENV
+// =========================
 const {
   OPENAI_API_KEY,
   ZAPI_INSTANCE,
@@ -37,7 +40,9 @@ const required = [
 ];
 
 for (const key of required) {
+
   if (!process.env[key]) {
+
     console.log(`❌ ENV faltante: ${key}`);
     process.exit(1);
   }
@@ -56,17 +61,22 @@ const mensajesProcesados = new Set();
 const buffers = {};
 const saludosEnviados = {};
 
+let cachedUid = null;
+
 // =========================
 // LIMPIEZA RAM
 // =========================
 setInterval(() => {
+
   mensajesProcesados.clear();
+
 }, 1000 * 60 * 30);
 
 // =========================
 // LOGGER
 // =========================
 function logger(level, event, meta = {}) {
+
   console.log(
     `[${level.toUpperCase()}] ${event}`,
     meta
@@ -76,17 +86,20 @@ function logger(level, event, meta = {}) {
 // =========================
 // HORARIO
 // =========================
+function obtenerHoraBrasil() {
+
+  return Number(
+    new Intl.DateTimeFormat("pt-BR", {
+      timeZone: "America/Sao_Paulo",
+      hour: "numeric",
+      hour12: false
+    }).format(new Date())
+  );
+}
+
 function obtenerSaludo() {
 
-  const ahora = new Date();
-
-  const horaBrasil = new Intl.DateTimeFormat("pt-BR", {
-    timeZone: "America/Sao_Paulo",
-    hour: "numeric",
-    hour12: false
-  }).format(ahora);
-
-  const hora = Number(horaBrasil);
+  const hora = obtenerHoraBrasil();
 
   if (hora >= 6 && hora < 12) {
     return "Bom dia 👋";
@@ -101,125 +114,12 @@ function obtenerSaludo() {
 
 function horarioAbierto() {
 
-  const ahora = new Date();
+  const hora = obtenerHoraBrasil();
 
-  const horaBrasil = new Intl.DateTimeFormat("pt-BR", {
-    timeZone: "America/Sao_Paulo",
-    hour: "numeric",
-    hour12: false
-  }).format(ahora);
-
-  const hora = Number(horaBrasil);
-
-  return hora >= HORA_APERTURA &&
-         hora < HORA_CIERRE;
-}
-
-// =========================
-// ODOO
-// =========================
-function registrarEnOdoo(datos) {
-
-  try {
-
-    const urlLimpia =
-      String(ODOO_URL || "").replace(/\/$/, "");
-
-    const common = xmlrpc.createSecureClient({
-      url: `${urlLimpia}/xmlrpc/2/common`
-    });
-
-    const models = xmlrpc.createSecureClient({
-      url: `${urlLimpia}/xmlrpc/2/object`
-    });
-
-    common.methodCall(
-      "authenticate",
-      [ODOO_DB, ODOO_USER, ODOO_API_KEY, {}],
-      (err, uid) => {
-
-        if (err) {
-          return logger("error", "ODOO_AUTH_ERROR", {
-            err: err.message
-          });
-        }
-
-        if (!uid) {
-          return logger("error", "ODOO_UID_INVALID");
-        }
-
-        models.methodCall(
-          "execute_kw",
-          [
-            ODOO_DB,
-            uid,
-            ODOO_API_KEY,
-            "crm.lead",
-            "search",
-            [[
-              ["partner_name", "=", datos.phone],
-              ["type", "=", "opportunity"]
-            ]],
-            { limit: 1 }
-          ],
-          (err, leads) => {
-
-            if (err) {
-              return logger("error", "ODOO_SEARCH_ERROR", {
-                err: err.message
-              });
-            }
-
-            if (Array.isArray(leads) && leads.length > 0) {
-
-              logger("info", "ODOO_LEAD_EXISTS", {
-                phone: datos.phone,
-                leadId: leads[0]
-              });
-
-              return;
-            }
-
-            models.methodCall(
-              "execute_kw",
-              [
-                ODOO_DB,
-                uid,
-                ODOO_API_KEY,
-                "crm.lead",
-                "create",
-                [[{
-                  name: `WhatsApp: ${datos.phone}`,
-                  partner_name: datos.phone,
-                  description: datos.mensaje,
-                  type: "opportunity"
-                }]]
-              ],
-              (err, res) => {
-
-                if (err) {
-                  return logger("error", "ODOO_CREATE_ERROR", {
-                    err: err.message
-                  });
-                }
-
-                logger("info", "ODOO_LEAD_CREATED", {
-                  id: res,
-                  phone: datos.phone
-                });
-              }
-            );
-          }
-        );
-      }
-    );
-
-  } catch (e) {
-
-    logger("error", "ODOO_FATAL", {
-      err: e.message
-    });
-  }
+  return (
+    hora >= HORA_APERTURA &&
+    hora < HORA_CIERRE
+  );
 }
 
 // =========================
@@ -243,9 +143,258 @@ async function enviarMensaje(phone, message) {
 }
 
 // =========================
-// PROCESAMIENTO
+// AUTH ODOO
 // =========================
-async function procesarMensaje(phone, textMessage) {
+async function autenticarOdoo() {
+
+  return new Promise((resolve, reject) => {
+
+    try {
+
+      if (cachedUid) {
+        return resolve(cachedUid);
+      }
+
+      const urlLimpia =
+        String(ODOO_URL || "")
+        .replace(/\/$/, "");
+
+      const common =
+        xmlrpc.createSecureClient({
+          url: `${urlLimpia}/xmlrpc/2/common`
+        });
+
+      common.methodCall(
+        "authenticate",
+        [
+          ODOO_DB,
+          ODOO_USER,
+          ODOO_API_KEY,
+          {}
+        ],
+        (err, uid) => {
+
+          if (err) {
+
+            logger("error", "ODOO_AUTH_ERROR", {
+              err: err.message
+            });
+
+            return reject(err);
+          }
+
+          if (!uid) {
+
+            return reject(
+              new Error("UID inválido")
+            );
+          }
+
+          cachedUid = uid;
+
+          logger("info", "ODOO_AUTH_SUCCESS", {
+            uid
+          });
+
+          resolve(uid);
+        }
+      );
+
+    } catch (e) {
+
+      reject(e);
+    }
+  });
+}
+
+// =========================
+// CONSULTAR TASAS
+// =========================
+async function consultarTasasOdoo(
+  tipoMoneda = "CUP"
+) {
+
+  return new Promise(async (resolve, reject) => {
+
+    try {
+
+      const tipo =
+        String(tipoMoneda || "CUP")
+        .trim()
+        .toUpperCase();
+
+      if (
+        !["CUP", "MLC", "USD"]
+        .includes(tipo)
+      ) {
+
+        return reject(
+          new Error("Tipo inválido")
+        );
+      }
+
+      const uid =
+        await autenticarOdoo();
+
+      const urlLimpia =
+        String(ODOO_URL || "")
+        .replace(/\/$/, "");
+
+      const models =
+        xmlrpc.createSecureClient({
+          url: `${urlLimpia}/xmlrpc/2/object`
+        });
+
+      let referenciasBusqueda = [];
+
+      if (tipo === "CUP") {
+
+        referenciasBusqueda = [
+          "TASA_CUP_BAJA",
+          "TASA_CUP_MEDIA",
+          "TASA_CUP_ALTA"
+        ];
+
+      } else if (tipo === "MLC") {
+
+        referenciasBusqueda = [
+          "TASA_MLC"
+        ];
+
+      } else if (tipo === "USD") {
+
+        referenciasBusqueda = [
+          "TASA_USD"
+        ];
+      }
+
+      const timeout = setTimeout(() => {
+
+        reject(
+          new Error("Timeout Odoo")
+        );
+
+      }, 15000);
+
+      models.methodCall(
+        "execute_kw",
+        [
+          ODOO_DB,
+          uid,
+          ODOO_API_KEY,
+          "product.product",
+          "search_read",
+          [[
+            [
+              "default_code",
+              "in",
+              referenciasBusqueda
+            ]
+          ]],
+          {
+            fields: [
+              "default_code",
+              "list_price"
+            ]
+          }
+        ],
+        (err, products) => {
+
+          clearTimeout(timeout);
+
+          if (err) {
+
+            logger("error", "ODOO_QUERY_ERROR", {
+              err: err.message
+            });
+
+            return reject(err);
+          }
+
+          const tasas = {};
+
+          products.forEach((p) => {
+
+            tasas[p.default_code] =
+              p.list_price;
+          });
+
+          resolve(tasas);
+        }
+      );
+
+    } catch (e) {
+
+      reject(e);
+    }
+  });
+}
+
+// =========================
+// REGISTRAR ODOO
+// =========================
+async function registrarEnOdoo(datos) {
+
+  try {
+
+    const uid =
+      await autenticarOdoo();
+
+    const urlLimpia =
+      String(ODOO_URL || "")
+      .replace(/\/$/, "");
+
+    const models =
+      xmlrpc.createSecureClient({
+        url: `${urlLimpia}/xmlrpc/2/object`
+      });
+
+    models.methodCall(
+      "execute_kw",
+      [
+        ODOO_DB,
+        uid,
+        ODOO_API_KEY,
+        "crm.lead",
+        "create",
+        [[{
+          name: `WhatsApp: ${datos.phone}`,
+          partner_name: datos.phone,
+          description: datos.mensaje,
+          type: "opportunity"
+        }]]
+      ],
+      (err, res) => {
+
+        if (err) {
+
+          return logger("error", "ODOO_CREATE_ERROR", {
+            err: err.message
+          });
+        }
+
+        logger("info", "ODOO_LEAD_CREATED", {
+          id: res,
+          phone: datos.phone
+        });
+      }
+    );
+
+  } catch (e) {
+
+    logger("error", "ODOO_FATAL", {
+      err: e.message
+    });
+  }
+}
+
+// =========================
+// PROCESAR MENSAJE
+// =========================
+async function procesarMensaje(
+  phone,
+  textMessage
+) {
 
   try {
 
@@ -259,18 +408,15 @@ async function procesarMensaje(phone, textMessage) {
     // =========================
     if (!horarioAbierto()) {
 
-      const fueraHorario =
+      await enviarMensaje(
+        phone,
 `${obtenerSaludo()}
 
-Agora estamos fora do horário de atendimento 👌
+Agora estamos fora do horário 👌
 
-⏰ Funcionamos das 06:00 às 22:00.`;
-
-      await enviarMensaje(phone, fueraHorario);
-
-      logger("warn", "OUTSIDE_BUSINESS_HOURS", {
-        phone
-      });
+⏰ Atendimento:
+06:00 às 22:00`
+      );
 
       return;
     }
@@ -283,21 +429,22 @@ Agora estamos fora do horário de atendimento 👌
       "llave pix",
       "clave pix",
       "manda pix",
-      "enviar pix",
-      "quiero pagar",
       "pix para pagar",
+      "quiero pagar",
       "pagar",
       "pago"
     ];
 
     const quierePix =
       pixTriggers.some(g =>
-        textMessage.toLowerCase().includes(g)
+        textMessage
+        .toLowerCase()
+        .includes(g)
       );
 
     if (quierePix) {
 
-      // SOLO CÓDIGO PIX
+      // SOLO PIX
       await enviarMensaje(
         phone,
 `8becaaf5-f296-4cbc-a115-46e3d23b042a`
@@ -324,7 +471,7 @@ Banco: Nubank (260)`
     }
 
     // =========================
-    // ODOO
+    // ODOO LEAD
     // =========================
     registrarEnOdoo({
       phone,
@@ -340,12 +487,17 @@ Banco: Nubank (260)`
 
     if (
       !saludosEnviados[phone] ||
-      (ahora - saludosEnviados[phone]) > (1000 * 60 * 60 * 3)
+      (
+        agora -
+        saludosEnviados[phone]
+      ) > (1000 * 60 * 60 * 3)
     ) {
 
-      saludo = `${obtenerSaludo()}\n\n`;
+      saludo =
+        `${obtenerSaludo()}\n\n`;
 
-      saludosEnviados[phone] = ahora;
+      saludosEnviados[phone] =
+        ahora;
     }
 
     // =========================
@@ -359,36 +511,41 @@ Banco: Nubank (260)`
           {
             role: "system",
             content:
-              `Eres YordaBot.
+`Eres YordaBot.
 
-              Reglas:
-              - Responde corto.
-              - Máximo 2 líneas.
-              - Sonido humano.
-              - No markdown.
-              - Idioma del cliente.
-              - No repetir saludos.
-              - No inventar tasas.
-              - No hablar de tasas.`
+REGLAS:
+- Responde corto.
+- Máximo 2 líneas.
+- Sonido humano.
+- No markdown.
+- No inventar tasas.
+- No hablar de tasas.
+- Idioma del cliente.
+- No repetir saludos.`
           },
           {
             role: "user",
-            content: textMessage.slice(0, 1000)
+            content:
+              textMessage.slice(0, 1000)
           }
         ],
         temperature: 0.3
       },
       {
         headers: {
-          Authorization: `Bearer ${OPENAI_API_KEY}`,
-          "Content-Type": "application/json"
+          Authorization:
+            `Bearer ${OPENAI_API_KEY}`,
+          "Content-Type":
+            "application/json"
         },
         timeout: 10000
       }
     );
 
     const respuestaIA =
-      ai.data?.choices?.[0]?.message?.content?.trim();
+      ai.data?.choices?.[0]
+      ?.message?.content
+      ?.trim();
 
     if (!respuestaIA) {
 
@@ -400,7 +557,8 @@ Banco: Nubank (260)`
     }
 
     const mensajeFinal =
-      `${saludo}${respuestaIA}`.trim();
+      `${saludo}${respuestaIA}`
+      .trim();
 
     // =========================
     // ENVIAR
@@ -425,6 +583,55 @@ Banco: Nubank (260)`
 }
 
 // =========================
+// TOOL ODOO
+// =========================
+app.post(
+  "/tool/consultar-tasas",
+  async (req, res) => {
+
+    try {
+
+      const tipo =
+        String(
+          req.body?.tipo_envio || "CUP"
+        )
+        .trim()
+        .toUpperCase();
+
+      const tasas =
+        await consultarTasasOdoo(tipo);
+
+      if (!Object.keys(tasas).length) {
+
+        return res.status(404).json({
+          status: "error",
+          message:
+            "No se encontraron tasas"
+        });
+      }
+
+      return res.json({
+        status: "success",
+        tipo,
+        tasas
+      });
+
+    } catch (e) {
+
+      logger("error", "CONSULTAR_TASAS_ERROR", {
+        err: e.message
+      });
+
+      return res.status(500).json({
+        status: "error",
+        message:
+          "Error consultando Odoo"
+      });
+    }
+  }
+);
+
+// =========================
 // WEBHOOK
 // =========================
 app.post("/webhook", async (req, res) => {
@@ -433,10 +640,16 @@ app.post("/webhook", async (req, res) => {
 
     const body = req.body || {};
 
-    const phoneRaw = body.phone || "";
+    const phoneRaw =
+      body.phone || "";
+
+    const messageId =
+      body.messageId || "";
 
     const textMessage =
-      String(body.text?.message || "").trim();
+      String(
+        body.text?.message || ""
+      ).trim();
 
     const fromMe =
       body.fromMe === true ||
@@ -446,14 +659,28 @@ app.post("/webhook", async (req, res) => {
       body.isGroup === true ||
       body.isGroup === "true";
 
-    if (!phoneRaw || fromMe || isGroup || !textMessage) {
+    // =========================
+    // FILTROS
+    // =========================
+    if (
+      !phoneRaw ||
+      fromMe ||
+      isGroup ||
+      !messageId ||
+      !textMessage
+    ) {
+
       return res.sendStatus(200);
     }
 
     const phone =
-      String(phoneRaw).replace(/\D/g, "");
+      String(phoneRaw)
+      .replace(/\D/g, "");
 
-    if (phone.length < 10 || phone.length > 15) {
+    if (
+      phone.length < 10 ||
+      phone.length > 15
+    ) {
 
       logger("warn", "INVALID_PHONE", {
         phone
@@ -466,9 +693,14 @@ app.post("/webhook", async (req, res) => {
     // ANTI DUPLICADO
     // =========================
     const fingerprint =
-      `${phone}:${textMessage.toLowerCase().trim()}`;
+      `${phone}:${textMessage
+        .toLowerCase()
+        .trim()}`;
 
-    if (mensajesProcesados.has(fingerprint)) {
+    if (
+      mensajesProcesados
+      .has(fingerprint)
+    ) {
 
       logger("warn", "DUPLICATED_MESSAGE", {
         phone,
@@ -478,10 +710,16 @@ app.post("/webhook", async (req, res) => {
       return res.sendStatus(200);
     }
 
-    mensajesProcesados.add(fingerprint);
+    mensajesProcesados.add(
+      fingerprint
+    );
 
     setTimeout(() => {
-      mensajesProcesados.delete(fingerprint);
+
+      mensajesProcesados.delete(
+        fingerprint
+      );
+
     }, 1000 * 30);
 
     // =========================
@@ -531,12 +769,13 @@ app.post("/webhook", async (req, res) => {
       "oi",
       "ola",
       "olá"
-
     ];
 
     const esNegocio =
       gatillos.some(g =>
-        textMessage.toLowerCase().includes(g)
+        textMessage
+        .toLowerCase()
+        .includes(g)
       );
 
     if (!esNegocio) {
@@ -547,46 +786,60 @@ app.post("/webhook", async (req, res) => {
     // BUFFER
     // =========================
     if (!buffers[phone]) {
+
       buffers[phone] = {
         texts: [],
         timer: null
       };
     }
 
-    buffers[phone].texts.push(textMessage);
+    buffers[phone]
+    .texts
+    .push(textMessage);
 
-    clearTimeout(buffers[phone].timer);
+    clearTimeout(
+      buffers[phone].timer
+    );
 
-    buffers[phone].timer = setTimeout(async () => {
+    buffers[phone].timer =
+      setTimeout(async () => {
 
-      try {
+        try {
 
-        const fullText =
-          buffers[phone].texts.join(" ");
+          const fullText =
+            buffers[phone]
+            .texts
+            .join(" ");
 
-        delete buffers[phone];
+          delete buffers[phone];
 
-        await procesarMensaje(
-          phone,
-          fullText
-        );
+          await procesarMensaje(
+            phone,
+            fullText
+          );
 
-      } catch (e) {
+        } catch (e) {
 
-        logger("error", "BUFFER_PROCESS_ERROR", {
-          phone,
-          err: e.message
-        });
-      }
+          logger(
+            "error",
+            "BUFFER_PROCESS_ERROR",
+            {
+              phone,
+              err: e.message
+            }
+          );
+        }
 
-    }, 2000);
+      }, 2000);
 
     return res.sendStatus(200);
 
   } catch (e) {
 
     logger("error", "WEBHOOK_ERROR", {
-      message: e.message
+      message: e.message,
+      status: e.response?.status,
+      response: e.response?.data
     });
 
     return res.sendStatus(200);
@@ -597,38 +850,59 @@ app.post("/webhook", async (req, res) => {
 // HEALTHCHECK
 // =========================
 app.get("/", (req, res) => {
-  res.send("YordaBot Online");
+
+  res.send(
+    "✅ YordaBot Railway Online"
+  );
 });
 
 // =========================
-// START
+// START SERVER
 // =========================
 const server = app.listen(
   PORT,
   "0.0.0.0",
   () => {
+
     console.log(
       `✅ Servidor activo en puerto ${PORT}`
     );
   }
 );
 
+// =========================
+// TIMEOUTS
+// =========================
 server.keepAliveTimeout = 65000;
 server.headersTimeout = 66000;
 
 // =========================
 // ANTI CRASH
 // =========================
-process.on("unhandledRejection", (err) => {
+process.on(
+  "unhandledRejection",
+  (err) => {
 
-  logger("error", "UNHANDLED_REJECTION", {
-    err: err?.message
-  });
-});
+    logger(
+      "error",
+      "UNHANDLED_REJECTION",
+      {
+        err: err?.message
+      }
+    );
+  }
+);
 
-process.on("uncaughtException", (err) => {
+process.on(
+  "uncaughtException",
+  (err) => {
 
-  logger("error", "UNCAUGHT_EXCEPTION", {
-    err: err?.message
-  });
-});
+    logger(
+      "error",
+      "UNCAUGHT_EXCEPTION",
+      {
+        err: err?.message
+      }
+    );
+  }
+);
