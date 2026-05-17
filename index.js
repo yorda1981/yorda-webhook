@@ -8,12 +8,12 @@ app.use(express.json());
 const PORT = process.env.PORT || 8080;
 
 /* =========================
-   VARIABLES (Configura no Railway)
+   VARIABLES DE ENTORNO
 ========================= */
 const { 
   OPENAI_API_KEY, 
   ZAPI_INSTANCE, 
-  ZAPI_TOKEN,
+  ZAPI_TOKEN, 
   ODOO_URL, 
   ODOO_DB, 
   ODOO_USER, 
@@ -23,24 +23,28 @@ const {
 const TASA_CUP = parseFloat(process.env.TASA_CUP) || 115;
 
 /* =========================
-   CEREBRO ODOO (XML-RPC)
+   CEREBRO ODOO (CON PROTECCIÓN)
 ========================= */
 function registrarEnOdoo(datos) {
   try {
+    // Limpiar URL para evitar errores de formato
     const urlLimpia = (ODOO_URL || "").replace(/\/$/, "");
-    if (!urlLimpia) return console.log("⚠️ ODOO_URL não configurada.");
+    if (!urlLimpia || !ODOO_DB || !ODOO_API_KEY) {
+      return console.log("⚠️ Faltan variables de Odoo. Lead no creado.");
+    }
 
     const common = xmlrpc.createSecureClient(`${urlLimpia}/xmlrpc/2/common`);
     const models = xmlrpc.createSecureClient(`${urlLimpia}/xmlrpc/2/object`);
 
+    // Autenticación asíncrona para no bloquear el servidor
     common.methodCall('authenticate', [ODOO_DB, ODOO_USER, ODOO_API_KEY, {}], (err, uid) => {
-      if (err) return console.log("❌ Erro Auth Odoo:", err.message);
-      if (!uid) return console.log("❌ Credenciais Odoo incorretas.");
+      if (err) return console.log("❌ Error conexión Odoo:", err.message);
+      if (!uid) return console.log("❌ Auth Odoo falló: Revisa usuario/API Key");
 
       const lead = {
         name: `WhatsApp: ${datos.phone} (${datos.monto || 'Consulta'})`,
         partner_name: datos.phone,
-        description: `Mensagem: ${datos.mensaje}`,
+        description: `Mensaje: ${datos.mensaje}`,
         type: 'opportunity',
         priority: '2',
       };
@@ -49,12 +53,12 @@ function registrarEnOdoo(datos) {
         ODOO_DB, uid, ODOO_API_KEY,
         'crm.lead', 'create', [lead]
       ], (err, result) => {
-        if (err) console.log("❌ Erro ao criar Lead no Odoo:", err.message);
-        else console.log("✅ Oportunidade criada no Odoo ID:", result);
+        if (err) console.log("❌ Error creando Lead en Odoo:", err.message);
+        else console.log("✅ Oportunidad creada en Odoo ID:", result);
       });
     });
   } catch (error) {
-    console.log("⚠️ Erro crítico na ligação ao Odoo:", error.message);
+    console.log("⚠️ Error crítico Odoo:", error.message);
   }
 }
 
@@ -62,25 +66,25 @@ function registrarEnOdoo(datos) {
    WEBHOOK PRINCIPAL
 ========================= */
 const mensajesProcesados = new Set();
+const GATILHOS = ["remesa", "tasa", "envio", "recarga", "cup", "brl", "real", "pix", "precio"];
 
 app.post("/webhook", async (req, res) => {
   const { phone, text, fromMe, isGroup, messageId } = req.body;
   const mensajeOriginal = text?.message || "";
 
-  // 1. Validações de entrada
+  // 1. Validaciones básicas
   if (!phone || isGroup || fromMe || mensajesProcesados.has(messageId)) {
     return res.sendStatus(200);
   }
 
   const textoLimpo = mensajeOriginal.toLowerCase();
-  const gatillos = ["remesa", "tasa", "envio", "recarga", "cup", "brl", "real", "pix"];
-  const esNegocio = gatillos.some(g => textoLimpo.includes(g));
+  const esNegocio = GATILHOS.some(g => textoLimpo.includes(g));
 
   if (esNegocio) {
     mensajesProcesados.add(messageId);
-    console.log(`💼 Negócio detectado: ${phone}`);
+    console.log(`💼 Negocio detectado: ${phone}`);
 
-    // 2. Criar no Odoo (em background)
+    // 2. Extraer monto y crear en Odoo (en segundo plano)
     const monto = mensajeOriginal.match(/\b\d+\b/)?.[0] || "0";
     registrarEnOdoo({
       phone,
@@ -88,12 +92,12 @@ app.post("/webhook", async (req, res) => {
       monto
     });
 
-    // 3. Resposta com IA e Z-API
+    // 3. Respuesta con IA y Z-API
     try {
       const ai = await axios.post("https://api.openai.com/v1/chat/completions", {
         model: "gpt-4o-mini",
         messages: [
-          { role: "system", content: `És o YordaBot. Taxa: ${TASA_CUP} CUP por 1 BRL. Responde curto e profissional em 2 linhas.` },
+          { role: "system", content: `Eres YordaBot. Tasa: ${TASA_CUP} CUP por 1 BRL. Responde corto y profesional en 2 líneas.` },
           { role: "user", content: mensajeOriginal }
         ]
       }, { 
@@ -110,20 +114,20 @@ app.post("/webhook", async (req, res) => {
         checkContact: false 
       }, { timeout: 15000 });
 
-      console.log(`✅ Respondido a ${phone}`);
+      console.log(`✅ Respondido con éxito a ${phone}`);
     } catch (e) {
-      console.log("❌ Erro no fluxo IA/WhatsApp:", e.message);
+      console.log("❌ Error en flujo IA/WhatsApp:", e.message);
     }
   }
 
-  // Limpeza de memória
+  // Limpiar memoria de IDs cada 500 mensajes
   if (mensajesProcesados.size > 500) mensajesProcesados.clear();
   
   res.sendStatus(200);
 });
 
-app.get("/", (req, res) => res.send("🚀 YordaBot Odoo Online"));
+app.get("/", (req, res) => res.send("🚀 YordaBot Odoo CRM Online"));
 
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`✅ Servidor ativo na porta ${PORT}`);
+  console.log(`✅ Servidor activo en puerto ${PORT}`);
 });
