@@ -47,17 +47,26 @@ const GATILHOS = ["remesa", "envio", "tasa", "real", "brl", "cup", "pix", "recar
    FUNCIONES DE APOYO
 ========================= */
 async function enviarWhatsApp(phone, message) {
+  if (!message) return;
+
+  // Limpiar el teléfono para asegurar que Z-API lo acepte (solo números)
+  const cleanPhone = String(phone).replace(/\D/g, "");
+
   try {
     await axios({
       method: 'post',
       url: `https://api.z-api.io/instances/${ZAPI_INSTANCE}/token/${ZAPI_TOKEN}/send-text`,
-      data: { phone, message },
-      timeout: 20000, // 20 segundos de espera para evitar cortes de red
+      data: { 
+        phone: cleanPhone, 
+        message: message 
+      },
+      timeout: 15000,
       headers: { 'Content-Type': 'application/json' }
     });
-    console.log(`✅ Respondido a ${phone}`);
+    console.log(`✅ Respondido con éxito a ${cleanPhone}`);
   } catch (e) {
-    console.log(`❌ Error al enviar a Z-API: ${e.message}`);
+    console.log(`❌ Error Z-API (400): Revisa si el número ${cleanPhone} es válido o si la instancia tiene saldo/permisos.`);
+    // console.log(e.response?.data); // Descomenta esta línea solo si necesitas ver el detalle técnico del error
   }
 }
 
@@ -68,28 +77,27 @@ async function obtenerRespuestaIA(mensajeUsuario, datosEstado) {
       messages: [
         { 
           role: "system", 
-          content: `Eres YordaBot, asistente de remesas profesional. Tasa: ${TASA_CUP} CUP por 1 BRL. Responde muy corto (máx 2 líneas). Si detectas un monto en BRL, confirma cuánto es en CUP.` 
+          content: `Eres YordaBot. Tasa: ${TASA_CUP} CUP/1 BRL. Responde en 1 o 2 líneas máximo. Muy amable.` 
         },
-        { role: "user", content: `Mensaje: ${mensajeUsuario}. Datos actuales: ${JSON.stringify(datosEstado)}` }
+        { role: "user", content: `Mensaje: ${mensajeUsuario}. Datos: ${JSON.stringify(datosEstado)}` }
       ]
     }, { 
       headers: { Authorization: `Bearer ${OPENAI_API_KEY}` },
-      timeout: 15000 
+      timeout: 10000 
     });
     return res.data.choices[0].message.content;
   } catch (e) {
-    return "Dime 👍";
+    return "Hola, dime cómo puedo ayudarte con tu remesa. 👌";
   }
 }
 
 /* =========================
-   WEBHOOK PRINCIPAL
+   WEBHOOK
 ========================= */
 app.post("/webhook", async (req, res) => {
   const { phone, text, fromMe, isGroup, messageId } = req.body;
   const mensajeOriginal = text?.message || "";
 
-  // 1. Validaciones de entrada
   if (!phone || isGroup || fromMe || mensajesProcesados.has(messageId)) {
     return res.sendStatus(200);
   }
@@ -97,14 +105,13 @@ app.post("/webhook", async (req, res) => {
   const textoLimpo = mensajeOriginal.toLowerCase();
   const esNegocio = GATILHOS.some(g => textoLimpo.includes(g));
 
-  // 2. Filtro de Privacidad
   if (!esNegocio && !estadoCliente[phone]) return res.sendStatus(200);
 
   mensajesProcesados.add(messageId);
-  if (!estadoCliente[phone]) estadoCliente[phone] = { montoBRL: 0, destino: "" };
+  if (!estadoCliente[phone]) estadoCliente[phone] = { montoBRL: 0 };
   let est = estadoCliente[phone];
 
-  // 3. Procesar datos financieros
+  // Captura de datos
   const matchMonto = mensajeOriginal.match(/\b\d{1,5}\b/);
   if (matchMonto) {
     est.montoBRL = parseInt(matchMonto[0]);
@@ -112,14 +119,10 @@ app.post("/webhook", async (req, res) => {
     est.lucro = est.montoBRL * COMISION_PCT;
   }
 
-  const numeros = mensajeOriginal.replace(/\D/g, "");
-  if (numeros.length >= 8) est.destino = numeros;
-
-  // 4. Obtener Respuesta e Enviar
   const respuesta = await obtenerRespuestaIA(mensajeOriginal, est);
   await enviarWhatsApp(phone, respuesta);
 
-  // 5. Guardar en Google Sheets (Dashboard Profesional)
+  // Registro en Sheets
   if (sheets && est.montoBRL > 0) {
     sheets.spreadsheets.values.append({
       spreadsheetId: SPREADSHEET_ID,
@@ -132,23 +135,17 @@ app.post("/webhook", async (req, res) => {
           textoLimpo.includes("recarga") ? "Recarga" : "Remesa", 
           est.montoBRL, 
           est.montoCUP || 0, 
-          est.destino || "", 
+          "", 
           "🟠 Pendiente", 
           est.lucro || 0,
-          "" // Columna para notas manuales
+          ""
         ]] 
       }
-    }).catch(e => console.log("⚠️ No se pudo guardar la fila en Sheets"));
+    }).catch(() => {});
   }
-
-  // Limpiar memoria de mensajes procesados cada hora para no saturar
-  if (mensajesProcesados.size > 500) mensajesProcesados.clear();
 
   res.sendStatus(200);
 });
 
-app.get("/", (req, res) => res.send("🚀 YordaBot CRM Profesional Online"));
-
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`✅ Servidor activo en puerto ${PORT}`);
-});
+app.get("/", (req, res) => res.send("YordaBot Activo"));
+app.listen(PORT, "0.0.0.0", () => console.log(`✅ Servidor activo en puerto ${PORT}`));
