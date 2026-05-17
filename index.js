@@ -16,17 +16,15 @@ const {
 const TASA_CUP = parseFloat(process.env.TASA_CUP) || 115;
 const mensajesProcesados = new Set();
 
-// FUNCIÓN ODOO (No bloqueante)
-function crearOdoo(datos) {
+// FUNCIÓN ODOO (XML-RPC)
+function registrarEnOdoo(datos) {
   try {
     const urlLimpia = (ODOO_URL || "").replace(/\/$/, "");
-    if (!urlLimpia || !ODOO_DB) return;
-
     const common = xmlrpc.createSecureClient(`${urlLimpia}/xmlrpc/2/common`);
     const models = xmlrpc.createSecureClient(`${urlLimpia}/xmlrpc/2/object`);
 
     common.methodCall('authenticate', [ODOO_DB, ODOO_USER, ODOO_API_KEY, {}], (err, uid) => {
-      if (err || !uid) return console.log("⚠️ Odoo Auth falló, pero el bot sigue.");
+      if (err || !uid) return console.log("❌ Error Auth Odoo");
 
       models.methodCall('execute_kw', [
         ODOO_DB, uid, ODOO_API_KEY,
@@ -34,78 +32,68 @@ function crearOdoo(datos) {
           name: `WA: ${datos.phone} (${datos.monto || 'Consulta'})`,
           partner_name: datos.phone,
           description: datos.mensaje,
-          type: 'opportunity',
-          priority: '2'
+          type: 'opportunity'
         }]
-      ], (err) => {
-        if (!err) console.log("✅ Odoo: Lead creado.");
+      ], (err, result) => {
+        if (!err) console.log(`✅ Oportunidad en Odoo creada ID: ${result}`);
       });
     });
-  } catch (e) { console.log("⚠️ Error Odoo."); }
+  } catch (e) { console.log("⚠️ Error Odoo"); }
 }
 
 /* =========================
    WEBHOOK PRINCIPAL
 ========================== */
 app.post("/webhook", async (req, res) => {
-  const body = req.body;
-  const phone = body.phone;
-  const textoOriginal = body.text?.message || "";
-  const fromMe = body.fromMe;
+  const { phone, text, fromMe, isGroup, messageId } = req.body;
+  const msgOriginal = text?.message || "";
 
-  // 1. Validaciones de entrada
-  if (!phone || body.isGroup || fromMe) return res.sendStatus(200);
+  if (!phone || isGroup || fromMe || mensajesProcesados.has(messageId)) {
+    return res.sendStatus(200);
+  }
 
-  // Evitar duplicados
-  if (mensajesProcesados.has(body.messageId)) return res.sendStatus(200);
-  mensajesProcesados.add(body.messageId);
-
-  console.log(`📩 Mensaje de ${phone}: ${textoOriginal}`);
-
-  // 2. Gatillos (Añadido saludos para que siempre responda)
-  const gatillos = ["remesa", "tasa", "envio", "recarga", "precio", "cuanto", "hola", "buenos", "buenas", "info"];
-  const esNegocio = gatillos.some(g => textoOriginal.toLowerCase().includes(g));
+  const textoLimpo = msgOriginal.toLowerCase();
+  const gatillos = ["remesa", "tasa", "envio", "recarga", "precio", "cuanto", "hola", "pix"];
+  const esNegocio = gatillos.some(g => textoLimpo.includes(g));
 
   if (esNegocio) {
-    // Intentar Odoo en segundo plano
-    const montoMatch = textoOriginal.match(/\b\d+\b/);
-    crearOdoo({ phone, mensaje: textoOriginal, monto: montoMatch ? montoMatch[0] : null });
+    mensajesProcesados.add(messageId);
+    console.log(`💼 Negocio detectado de ${phone}`);
+
+    // 1. Odoo (en segundo plano)
+    const monto = msgOriginal.match(/\b\d+\b/)?.[0] || "0";
+    registrarEnOdoo({ phone, mensaje: msgOriginal, monto });
 
     try {
-      // 3. IA - Respuesta
+      // 2. Respuesta IA
       const ai = await axios.post("https://api.openai.com/v1/chat/completions", {
         model: "gpt-4o-mini",
         messages: [
-          { role: "system", content: `Eres YordaBot. Tasa: ${TASA_CUP} CUP por 1 BRL. Responde muy corto (máx 2 líneas).` },
-          { role: "user", content: textoOriginal }
+          { role: "system", content: `Eres YordaBot. Tasa: ${TASA_CUP} CUP por 1 BRL. Responde corto (2 líneas).` },
+          { role: "user", content: msgOriginal }
         ]
       }, { headers: { Authorization: `Bearer ${OPENAI_API_KEY}` }, timeout: 10000 });
 
       const respuestaIA = ai.data.choices[0].message.content;
 
-      // 4. Enviar WhatsApp vía Z-API
+      // 3. Enviar WhatsApp (LIMPIO de Client-Token para evitar error 400)
       await axios.post(`https://api.z-api.io/instances/${ZAPI_INSTANCE}/token/${ZAPI_TOKEN}/send-text`, 
       { 
         phone: String(phone).replace(/\D/g, ""), 
-        message: respuestaIA, 
+        message: respuestaIA,
         checkContact: false 
-      }, { timeout: 12000 });
+      }, { timeout: 15000 });
 
       console.log(`✅ Respondido a ${phone}`);
 
     } catch (e) {
-      console.log(`❌ Error procesando: ${e.message}`);
-      // Respuesta de cortesía si OpenAI o Z-API fallan
-      await axios.post(`https://api.z-api.io/instances/${ZAPI_INSTANCE}/token/${ZAPI_TOKEN}/send-text`, 
-      { phone, message: "Hola, he recibido tu mensaje. En breve Yordanys te atenderá personalmente. 👌" })
-      .catch(() => {});
+      console.log(`❌ Error Z-API (400): ${e.message}`);
     }
   }
 
-  // Limpiar memoria cada 500 mensajes
   if (mensajesProcesados.size > 500) mensajesProcesados.clear();
   res.sendStatus(200);
 });
 
 app.get("/", (req, res) => res.send("🚀 YordaBot Online"));
-app.listen(PORT, "0.0.0.0", () => console.log(`✅ Servidor escuchando en puerto ${PORT}`));
+app.listen(PORT, "0.0.0.0", () => console.log(`✅ Servidor activo en puerto ${PORT}`));
