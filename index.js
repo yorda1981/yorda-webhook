@@ -26,54 +26,22 @@ const {
 } = process.env;
 
 // =========================
-// VALIDACIÓN ENV
-// =========================
-const required = [
-  "OPENAI_API_KEY",
-  "ZAPI_INSTANCE",
-  "ZAPI_TOKEN",
-  "ZAPI_CLIENT_TOKEN",
-  "ODOO_URL",
-  "ODOO_DB",
-  "ODOO_USER",
-  "ODOO_API_KEY"
-];
-
-for (const key of required) {
-
-  if (!process.env[key]) {
-
-    console.log(`❌ ENV faltante: ${key}`);
-    process.exit(1);
-  }
-}
-
-// =========================
-// CONFIG
-// =========================
-const HORA_APERTURA = 6;
-const HORA_CIERRE = 22;
-
-// =========================
 // MEMORIA
 // =========================
 const mensajesProcesados = new Set();
+
 const buffers = {};
+
 const saludosEnviados = {};
 
 // THREADS PERSISTENTES
 const threads = {};
 
+// NUEVO:
+// CONTEXTO DE CONVERSACIÓN
+const conversaAtiva = {};
+
 let cachedUid = null;
-
-// =========================
-// LIMPIEZA RAM
-// =========================
-setInterval(() => {
-
-  mensajesProcesados.clear();
-
-}, 1000 * 60 * 30);
 
 // =========================
 // LOGGER
@@ -87,7 +55,7 @@ function logger(level, event, meta = {}) {
 }
 
 // =========================
-// HORARIO
+// HORARIO BRASIL
 // =========================
 function obtenerHoraBrasil() {
 
@@ -115,16 +83,6 @@ function obtenerSaludo() {
   return "Boa noite 👋";
 }
 
-function horarioAbierto() {
-
-  const hora = obtenerHoraBrasil();
-
-  return (
-    hora >= HORA_APERTURA &&
-    hora < HORA_CIERRE
-  );
-}
-
 // =========================
 // ENVIAR MENSAJE
 // =========================
@@ -132,7 +90,8 @@ async function enviarMensaje(phone, message) {
 
   await axios({
     method: "post",
-    url: `https://api.z-api.io/instances/${ZAPI_INSTANCE}/token/${ZAPI_TOKEN}/send-text`,
+    url:
+`https://api.z-api.io/instances/${ZAPI_INSTANCE}/token/${ZAPI_TOKEN}/send-text`,
     headers: {
       "Client-Token": ZAPI_CLIENT_TOKEN,
       "Content-Type": "application/json"
@@ -141,8 +100,7 @@ async function enviarMensaje(phone, message) {
       phone,
       message,
       checkContact: false
-    },
-    timeout: 15000
+    }
   });
 }
 
@@ -153,69 +111,61 @@ async function autenticarOdoo() {
 
   return new Promise((resolve, reject) => {
 
-    try {
-
-      if (cachedUid) {
-        return resolve(cachedUid);
-      }
-
-      const urlLimpia =
-        String(ODOO_URL || "")
-        .replace(/\/$/, "");
-
-      const common =
-        xmlrpc.createSecureClient({
-          url: `${urlLimpia}/xmlrpc/2/common`
-        });
-
-      common.methodCall(
-        "authenticate",
-        [
-          ODOO_DB,
-          ODOO_USER,
-          ODOO_API_KEY,
-          {}
-        ],
-        (err, uid) => {
-
-          if (err) {
-            return reject(err);
-          }
-
-          cachedUid = uid;
-
-          logger("info", "ODOO_AUTH_SUCCESS", {
-            uid
-          });
-
-          resolve(uid);
-        }
-      );
-
-    } catch (e) {
-
-      reject(e);
+    if (cachedUid) {
+      return resolve(cachedUid);
     }
+
+    const common =
+      xmlrpc.createSecureClient({
+        url:
+`${ODOO_URL}/xmlrpc/2/common`
+      });
+
+    common.methodCall(
+      "authenticate",
+      [
+        ODOO_DB,
+        ODOO_USER,
+        ODOO_API_KEY,
+        {}
+      ],
+      (err, uid) => {
+
+        if (err) {
+          return reject(err);
+        }
+
+        cachedUid = uid;
+
+        logger(
+          "info",
+          "ODOO_AUTH_SUCCESS",
+          { uid }
+        );
+
+        resolve(uid);
+      }
+    );
   });
 }
 
 // =========================
-// REGISTRAR ODOO
+// CREAR LEAD ODOO
 // =========================
-async function registrarEnOdoo(datos) {
+async function registrarEnOdoo({
+  phone,
+  mensaje
+}) {
 
   try {
 
     const uid =
       await autenticarOdoo();
 
-    const urlLimpia =
-      String(ODOO_URL || "")
-      .replace(/\/$/, "");
-
     const models =
       xmlrpc.createSecureClient({
-        url: `${urlLimpia}/xmlrpc/2/object`
+        url:
+`${ODOO_URL}/xmlrpc/2/object`
       });
 
     models.methodCall(
@@ -227,29 +177,37 @@ async function registrarEnOdoo(datos) {
         "crm.lead",
         "create",
         [[{
-          name: `WhatsApp: ${datos.phone}`,
-          partner_name: datos.phone,
-          description: datos.mensaje,
-          type: "opportunity"
+          name:
+`WhatsApp ${phone}`,
+          partner_name: phone,
+          description: mensaje
         }]]
       ],
-      (err, res) => {
+      (err, result) => {
 
         if (!err) {
 
-          logger("info", "ODOO_LEAD_CREATED", {
-            id: res,
-            phone: datos.phone
-          });
+          logger(
+            "info",
+            "ODOO_LEAD_CREATED",
+            {
+              id: result,
+              phone
+            }
+          );
         }
       }
     );
 
   } catch (e) {
 
-    logger("error", "ODOO_FATAL", {
-      err: e.message
-    });
+    logger(
+      "error",
+      "ODOO_ERROR",
+      {
+        message: e.message
+      }
+    );
   }
 }
 
@@ -263,31 +221,17 @@ async function procesarMensaje(
 
   try {
 
-    logger("info", "BUSINESS_DETECTED", {
-      phone,
-      message: textMessage
-    });
-
-    // =========================
-    // HORARIO
-    // =========================
-    if (!horarioAbierto()) {
-
-      await enviarMensaje(
+    logger(
+      "info",
+      "BUSINESS_DETECTED",
+      {
         phone,
-`${obtenerSaludo()}
-
-Agora estamos fora do horário 👌
-
-⏰ Atendimento:
-06:00 às 22:00`
-      );
-
-      return;
-    }
+        message: textMessage
+      }
+    );
 
     // =========================
-    // ODOO
+    // REGISTRAR ODOO
     // =========================
     registrarEnOdoo({
       phone,
@@ -295,7 +239,7 @@ Agora estamos fora do horário 👌
     });
 
     // =========================
-    // SALUDO
+    // SALUDO ÚNICO
     // =========================
     let saludo = "";
 
@@ -310,44 +254,57 @@ Agora estamos fora do horário 👌
     ) {
 
       saludo =
-        `${obtenerSaludo()}\n\n`;
+`${obtenerSaludo()}
+
+`;
 
       saludosEnviados[phone] =
         ahora;
     }
 
     // =========================
-    // OPENAI ASSISTANT
-    // =========================
-
     // THREAD PERSISTENTE
-    let threadId = threads[phone];
+    // =========================
+    let threadId =
+      threads[phone];
 
     if (!threadId) {
 
-      const thread = await axios.post(
-        "https://api.openai.com/v1/threads",
-        {},
-        {
-          headers: {
-            Authorization: `Bearer ${OPENAI_API_KEY}`,
-            "Content-Type": "application/json",
-            "OpenAI-Beta": "assistants=v2"
+      const thread =
+        await axios.post(
+          "https://api.openai.com/v1/threads",
+          {},
+          {
+            headers: {
+              Authorization:
+`Bearer ${OPENAI_API_KEY}`,
+              "Content-Type":
+"application/json",
+              "OpenAI-Beta":
+"assistants=v2"
+            }
           }
+        );
+
+      threadId =
+        thread.data.id;
+
+      threads[phone] =
+        threadId;
+
+      logger(
+        "info",
+        "THREAD_CREATED",
+        {
+          phone,
+          threadId
         }
       );
-
-      threadId = thread.data.id;
-
-      threads[phone] = threadId;
-
-      logger("info", "THREAD_CREATED", {
-        phone,
-        threadId
-      });
     }
 
+    // =========================
     // AGREGAR MENSAJE
+    // =========================
     await axios.post(
       `https://api.openai.com/v1/threads/${threadId}/messages`,
       {
@@ -356,32 +313,44 @@ Agora estamos fora do horário 👌
       },
       {
         headers: {
-          Authorization: `Bearer ${OPENAI_API_KEY}`,
-          "Content-Type": "application/json",
-          "OpenAI-Beta": "assistants=v2"
+          Authorization:
+`Bearer ${OPENAI_API_KEY}`,
+          "Content-Type":
+"application/json",
+          "OpenAI-Beta":
+"assistants=v2"
         }
       }
     );
 
+    // =========================
     // EJECUTAR ASSISTANT
-    const run = await axios.post(
-      `https://api.openai.com/v1/threads/${threadId}/runs`,
-      {
-        assistant_id:
-          "asst_0iCMGSSNWcXP7H6Eo1yEM536"
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${OPENAI_API_KEY}`,
-          "Content-Type": "application/json",
-          "OpenAI-Beta": "assistants=v2"
+    // =========================
+    const run =
+      await axios.post(
+        `https://api.openai.com/v1/threads/${threadId}/runs`,
+        {
+          assistant_id:
+"asst_0iCMGSSNWcXP7H6Eo1yEM536"
+        },
+        {
+          headers: {
+            Authorization:
+`Bearer ${OPENAI_API_KEY}`,
+            "Content-Type":
+"application/json",
+            "OpenAI-Beta":
+"assistants=v2"
+          }
         }
-      }
-    );
+      );
 
-    const runId = run.data.id;
+    const runId =
+      run.data.id;
 
+    // =========================
     // ESPERAR RESPUESTA
+    // =========================
     let completed = false;
 
     while (!completed) {
@@ -390,19 +359,27 @@ Agora estamos fora do horário 👌
         setTimeout(r, 1500)
       );
 
-      const check = await axios.get(
-        `https://api.openai.com/v1/threads/${threadId}/runs/${runId}`,
-        {
-          headers: {
-            Authorization: `Bearer ${OPENAI_API_KEY}`,
-            "OpenAI-Beta": "assistants=v2"
+      const check =
+        await axios.get(
+          `https://api.openai.com/v1/threads/${threadId}/runs/${runId}`,
+          {
+            headers: {
+              Authorization:
+`Bearer ${OPENAI_API_KEY}`,
+              "OpenAI-Beta":
+"assistants=v2"
+            }
           }
-        }
-      );
+        );
 
-      const status = check.data.status;
+      const status =
+        check.data.status;
 
-      if (status === "completed") {
+      if (
+        status ===
+        "completed"
+      ) {
+
         completed = true;
       }
 
@@ -418,16 +395,21 @@ Agora estamos fora do horário 👌
       }
     }
 
+    // =========================
     // LEER RESPUESTA
-    const messages = await axios.get(
-      `https://api.openai.com/v1/threads/${threadId}/messages`,
-      {
-        headers: {
-          Authorization: `Bearer ${OPENAI_API_KEY}`,
-          "OpenAI-Beta": "assistants=v2"
+    // =========================
+    const messages =
+      await axios.get(
+        `https://api.openai.com/v1/threads/${threadId}/messages`,
+        {
+          headers: {
+            Authorization:
+`Bearer ${OPENAI_API_KEY}`,
+            "OpenAI-Beta":
+"assistants=v2"
+          }
         }
-      }
-    );
+      );
 
     const respuestaIA =
       messages.data.data[0]
@@ -436,216 +418,267 @@ Agora estamos fora do horário 👌
       ?.trim();
 
     if (!respuestaIA) {
-
-      logger("warn", "EMPTY_AI_RESPONSE", {
-        phone
-      });
-
       return;
     }
 
     const mensajeFinal =
-      `${saludo}${respuestaIA}`
-      .trim();
+`${saludo}${respuestaIA}`.trim();
 
     await enviarMensaje(
       phone,
       mensajeFinal
     );
 
-    logger("info", "MESSAGE_SENT", {
-      phone
-    });
+    logger(
+      "info",
+      "MESSAGE_SENT",
+      { phone }
+    );
 
   } catch (e) {
 
-    logger("error", "PROCESS_MESSAGE_ERROR", {
-      message: e.message,
-      status: e.response?.status,
-      response: e.response?.data
-    });
+    logger(
+      "error",
+      "PROCESS_MESSAGE_ERROR",
+      {
+        message: e.message,
+        status:
+e.response?.status,
+        response:
+e.response?.data
+      }
+    );
   }
 }
 
 // =========================
 // WEBHOOK
 // =========================
-app.post("/webhook", async (req, res) => {
+app.post(
+  "/webhook",
+  async (req, res) => {
 
-  try {
+    try {
 
-    const body = req.body || {};
+      const body =
+        req.body || {};
 
-    const phoneRaw =
-      body.phone || "";
+      const phoneRaw =
+        body.phone || "";
 
-    const messageId =
-      body.messageId || "";
+      const messageId =
+        body.messageId || "";
 
-    const textMessage =
-      String(
-        body.text?.message || ""
-      ).trim();
+      const textMessage =
+        String(
+          body.text?.message || ""
+        ).trim();
 
-    const fromMe =
-      body.fromMe === true ||
-      body.fromMe === "true";
+      const fromMe =
+        body.fromMe === true ||
+        body.fromMe === "true";
 
-    const isGroup =
-      body.isGroup === true ||
-      body.isGroup === "true";
+      const isGroup =
+        body.isGroup === true ||
+        body.isGroup === "true";
 
-    if (
-      !phoneRaw ||
-      fromMe ||
-      isGroup ||
-      !messageId ||
-      !textMessage
-    ) {
+      if (
+        !phoneRaw ||
+        fromMe ||
+        isGroup ||
+        !messageId ||
+        !textMessage
+      ) {
 
-      return res.sendStatus(200);
-    }
+        return res.sendStatus(200);
+      }
 
-    const phone =
-      String(phoneRaw)
-      .replace(/\D/g, "");
+      const phone =
+        String(phoneRaw)
+        .replace(/\D/g, "");
 
-    // =========================
-    // ANTI DUPLICADO
-    // =========================
-    const fingerprint =
-      `${phone}:${textMessage
-        .toLowerCase()
-        .trim()}`;
+      // =========================
+      // ANTI DUPLICADO
+      // =========================
+      const fingerprint =
+`${phone}:${textMessage
+.toLowerCase()
+.trim()}`;
 
-    if (
-      mensajesProcesados
-      .has(fingerprint)
-    ) {
+      if (
+        mensajesProcesados.has(
+          fingerprint
+        )
+      ) {
 
-      return res.sendStatus(200);
-    }
+        return res.sendStatus(200);
+      }
 
-    mensajesProcesados.add(
-      fingerprint
-    );
-
-    setTimeout(() => {
-
-      mensajesProcesados.delete(
+      mensajesProcesados.add(
         fingerprint
       );
 
-    }, 1000 * 30);
+      setTimeout(() => {
 
-    // =========================
-    // GATILLOS
-    // =========================
-    const gatillos = [
+        mensajesProcesados.delete(
+          fingerprint
+        );
 
-      "remesa",
-      "envio",
-      "enviar",
-      "transferencia",
-      "mandar",
-      "dinero",
-      "giro",
-      "cambio",
+      }, 1000 * 30);
 
-      "cup",
-      "usd",
-      "mlc",
-      "brl",
-      "reales",
+      // =========================
+      // GATILLOS
+      // =========================
+      const gatillos = [
 
-      "pix",
-      "pagar",
-      "pago",
+        "remesa",
+        "envio",
+        "enviar",
+        "transferencia",
+        "mandar",
+        "dinero",
+        "giro",
+        "cambio",
 
-      "recarga",
-      "saldo",
-      "etecsa",
+        "cup",
+        "usd",
+        "mlc",
+        "brl",
+        "reales",
 
-      "hola",
-      "buenas",
-      "bom dia",
-      "boa tarde",
-      "boa noite",
-      "oi"
-    ];
+        "pix",
+        "pagar",
+        "pago",
 
-    const esNegocio =
-      gatillos.some(g =>
-        textMessage
-        .toLowerCase()
-        .includes(g)
+        "recarga",
+        "saldo",
+        "etecsa",
+
+        "hola",
+        "buenas",
+        "bom dia",
+        "boa tarde",
+        "boa noite",
+        "oi"
+      ];
+
+      const esNegocio =
+        gatillos.some(g =>
+          textMessage
+          .toLowerCase()
+          .includes(g)
+        );
+
+      // =========================
+      // ACTIVAR CONTEXTO
+      // =========================
+      if (esNegocio) {
+
+        conversaAtiva[phone] = {
+          ativa: true,
+          ultimaInteracao:
+            Date.now()
+        };
+      }
+
+      const conversaExiste =
+        conversaAtiva[phone] &&
+        (
+          Date.now() -
+          conversaAtiva[phone]
+            .ultimaInteracao
+        ) < (1000 * 60 * 30);
+
+      // =========================
+      // IGNORAR SOLO SI
+      // NO HAY CONTEXTO
+      // =========================
+      if (
+        !esNegocio &&
+        !conversaExiste
+      ) {
+
+        return res.sendStatus(200);
+      }
+
+      // =========================
+      // ACTUALIZAR CONTEXTO
+      // =========================
+      if (
+        conversaAtiva[phone]
+      ) {
+
+        conversaAtiva[phone]
+          .ultimaInteracao =
+            Date.now();
+      }
+
+      // =========================
+      // BUFFER
+      // =========================
+      if (!buffers[phone]) {
+
+        buffers[phone] = {
+          texts: [],
+          timer: null
+        };
+      }
+
+      buffers[phone]
+        .texts
+        .push(textMessage);
+
+      clearTimeout(
+        buffers[phone].timer
       );
 
-    if (!esNegocio) {
+      buffers[phone].timer =
+        setTimeout(async () => {
+
+          try {
+
+            const fullText =
+              buffers[phone]
+              .texts
+              .join(" ");
+
+            delete buffers[phone];
+
+            await procesarMensaje(
+              phone,
+              fullText
+            );
+
+          } catch (e) {
+
+            logger(
+              "error",
+              "BUFFER_PROCESS_ERROR",
+              {
+                phone,
+                err: e.message
+              }
+            );
+          }
+
+        }, 2000);
+
+      return res.sendStatus(200);
+
+    } catch (e) {
+
+      logger(
+        "error",
+        "WEBHOOK_ERROR",
+        {
+          message: e.message
+        }
+      );
+
       return res.sendStatus(200);
     }
-
-    // =========================
-    // BUFFER
-    // =========================
-    if (!buffers[phone]) {
-
-      buffers[phone] = {
-        texts: [],
-        timer: null
-      };
-    }
-
-    buffers[phone]
-      .texts
-      .push(textMessage);
-
-    clearTimeout(
-      buffers[phone].timer
-    );
-
-    buffers[phone].timer =
-      setTimeout(async () => {
-
-        try {
-
-          const fullText =
-            buffers[phone]
-            .texts
-            .join(" ");
-
-          delete buffers[phone];
-
-          await procesarMensaje(
-            phone,
-            fullText
-          );
-
-        } catch (e) {
-
-          logger(
-            "error",
-            "BUFFER_PROCESS_ERROR",
-            {
-              phone,
-              err: e.message
-            }
-          );
-        }
-
-      }, 2000);
-
-    return res.sendStatus(200);
-
-  } catch (e) {
-
-    logger("error", "WEBHOOK_ERROR", {
-      message: e.message
-    });
-
-    return res.sendStatus(200);
   }
-});
+);
 
 // =========================
 // HEALTHCHECK
@@ -653,23 +686,20 @@ app.post("/webhook", async (req, res) => {
 app.get("/", (req, res) => {
 
   res.send(
-    "✅ YordaBot Railway Online"
+    "✅ YordaBot Online"
   );
 });
 
 // =========================
 // START SERVER
 // =========================
-const server = app.listen(
+app.listen(
   PORT,
   "0.0.0.0",
   () => {
 
     console.log(
-      `✅ Servidor activo en puerto ${PORT}`
+`✅ Servidor activo en puerto ${PORT}`
     );
   }
 );
-
-server.keepAliveTimeout = 65000;
-server.headersTimeout = 66000;
