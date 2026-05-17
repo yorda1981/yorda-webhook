@@ -7,19 +7,17 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 8080;
 
-/* =========================
-   VARIABLES DE ENTORNO
-========================= */
+// VARIABLES DE ENTORNO
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const ZAPI_INSTANCE = String(process.env.ZAPI_INSTANCE || "").trim();
-const ZAPI_TOKEN = String(process.env.ZAPI_TOKEN || "").trim();
-const ZAPI_CLIENT_TOKEN = String(process.env.ZAPI_CLIENT_TOKEN || "").trim();
+const ZAPI_INSTANCE = process.env.ZAPI_INSTANCE;
+const ZAPI_TOKEN = process.env.ZAPI_TOKEN;
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 const GOOGLE_JSON = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
 
-/* =========================
-   CONFIGURACIÓN GOOGLE SHEETS
-========================= */
+// CONFIGURACIÓN DE NEGOCIO (Cámbialo según tu preferencia)
+const TASA_CUP = 115; // Cuánto das por cada 1 Real
+const COMISION = 0.05; // Tu ganancia (5%)
+
 let sheets;
 try {
   const auth = new google.auth.GoogleAuth({
@@ -27,121 +25,91 @@ try {
     scopes: ["https://www.googleapis.com/auth/spreadsheets"],
   });
   sheets = google.sheets({ version: "v4", auth });
-  console.log("✅ Conexión con Google Sheets lista para Dashboard");
-} catch (e) {
-  console.log("❌ Error en Google Sheets:", e.message);
-}
+} catch (e) { console.log("Error Sheets"); }
 
-async function salvarEnGoogleSheets(datos) {
+let estadoCliente = {};
+const GATILHOS = ["remesa", "envio", "tasa", "real", "brl", "cup", "pix", "recarga", "precio"];
+
+async function salvarEnGoogleSheets(d) {
   if (!sheets) return;
   try {
     await sheets.spreadsheets.values.append({
       spreadsheetId: SPREADSHEET_ID,
-      range: "Hoja 1!A:I", 
+      range: "Hoja 1!A:I",
       valueInputOption: "USER_ENTERED",
       resource: {
         values: [[
           new Date().toLocaleString("es-ES", { timeZone: "America/Sao_Paulo" }),
-          datos.phone,
-          datos.operacion || "Consulta",
-          datos.monto || 0,
-          datos.destino || "",
-          datos.municipio || "",
+          d.phone,
+          d.tipo || "Remesa",
+          d.montoBRL || 0,
+          d.montoCUP || 0,
+          d.destino || "",
           "🟠 Pendiente",
-          datos.tasa || 115, // Tasa base
-          "" // El lucro se calcula con fórmula en Excel
+          d.lucro || 0,
+          d.municipio || ""
         ]],
       },
     });
-  } catch (err) {
-    console.log("❌ Error guardando datos:", err.message);
-  }
+  } catch (err) { console.log("Error escribiendo en Sheets"); }
 }
 
-/* =========================
-   MEMORIA Y FILTROS DISCRETOS
-========================= */
-const pausaHumana = {};
-const conversaAtiva = {};
-const estadoCliente = {};
-let mensajesProcesados = new Set();
-
-const GATILHOS = ["remesa", "envio", "enviar", "transferencia", "cambio", "tasa", "real", "brl", "cup", "pix", "mlc", "recarga", "precio", "cuanto", "tarjeta"];
-const MUNICIPIOS_LISTA = ["habana", "centro habana", "habana vieja", "cerro", "boyeros", "arroyo naranjo", "marianao", "playa"];
-
-/* =========================
-   APIS EXTERNAS
-========================= */
-async function enviarMensaje(phone, texto) {
+async function responderIA(msg, est) {
   try {
-    await axios.post(`https://api.z-api.io/instances/${ZAPI_INSTANCE}/token/${ZAPI_TOKEN}/send-text`, 
-    { phone, message: texto }, 
-    { headers: { "Client-Token": ZAPI_CLIENT_TOKEN } });
-  } catch (error) { console.log("❌ Error Z-API"); }
-}
-
-async function responderIA(mensagem, estado) {
-  try {
-    const response = await axios.post("https://api.openai.com/v1/chat/completions", {
+    const res = await axios.post("https://api.openai.com/v1/chat/completions", {
       model: "gpt-4o-mini",
       messages: [
-        { role: "system", content: "Eres YordaBot, asistente de remesas profesional. Responde en máximo 2 líneas. Sé amable pero directo." },
-        { role: "user", content: `Contexto: ${JSON.stringify(estado)}. Mensaje: ${mensagem}` }
+        { role: "system", content: `Eres YordaBot. Ayudas con remesas. Tasa: ${TASA_CUP}. Responde corto. Si el cliente dio un monto, confírmale cuánto recibirá en Cuba.` },
+        { role: "user", content: `Cliente: ${msg}. Estado actual: ${JSON.stringify(est)}` }
       ]
     }, { headers: { Authorization: `Bearer ${OPENAI_API_KEY}` } });
-    return response.data.choices[0].message.content;
-  } catch (error) { return "Dime 👍"; }
+    return res.data.choices[0].message.content;
+  } catch (e) { return "Dime 👍"; }
 }
 
-/* =========================
-   WEBHOOK (LÓGICA DE NEGOCIO)
-========================= */
 app.post("/webhook", async (req, res) => {
   const body = req.body;
-  const phone = String(body.phone || "");
-  const texto = body?.text?.message || "";
-  const msgId = body.messageId;
+  const phone = body.phone;
+  const texto = body.text?.message || "";
 
-  if (!phone || body.isGroup || body.fromMe || mensajesProcesados.has(msgId)) return res.sendStatus(200);
-  
-  mensajesProcesados.add(msgId);
+  if (!phone || body.isGroup || body.fromMe) return res.sendStatus(200);
+
   const textoLimpo = texto.toLowerCase();
-
-  // Filtro de Privacidad: Solo negocio
   const esNegocio = GATILHOS.some(g => textoLimpo.includes(g));
-  const enConversa = conversaAtiva[phone] && Date.now() < conversaAtiva[phone];
 
-  if (!esNegocio && !enConversa) return res.sendStatus(200);
+  if (!esNegocio && !estadoCliente[phone]) return res.sendStatus(200);
 
-  // Activación de memoria de negocio
-  conversaAtiva[phone] = Date.now() + (10 * 60 * 1000);
-  if (!estadoCliente[phone]) estadoCliente[phone] = { operacion: "remesa", monto: null, destino: null, municipio: null };
-  let estado = estadoCliente[phone];
+  // CONECTANDO EL CEREBRO: Procesamiento de datos
+  if (!estadoCliente[phone]) estadoCliente[phone] = { montoBRL: 0 };
+  let est = estadoCliente[phone];
 
-  // Captura automática de datos para los gráficos
-  const matchMonto = texto.match(/\b\d{1,5}\b/);
-  if (matchMonto && !estado.monto) estado.monto = matchMonto[0];
+  // Extraer monto y calcular
+  const match = texto.match(/\b\d{1,5}\b/);
+  if (match) {
+    est.montoBRL = parseInt(match[0]);
+    est.montoCUP = est.montoBRL * TASA_CUP;
+    est.lucro = est.montoBRL * COMISION;
+  }
 
-  const numeros = texto.replace(/\D/g, "");
-  if (numeros.length === 16 || (numeros.length >= 8 && numeros.length <= 11)) estado.destino = numeros;
+  // Extraer destino (tarjeta o cel)
+  const num = texto.replace(/\D/g, "");
+  if (num.length >= 8) est.destino = num;
 
-  for (const m of MUNICIPIOS_LISTA) { if (textoLimpo.includes(m)) estado.municipio = m; }
-
-  // Respuesta y Registro
-  const respuesta = await responderIA(texto, estado);
-  await enviarMensaje(phone, respuesta);
+  const respuesta = await responderIA(texto, est);
+  
+  await axios.post(`https://api.z-api.io/instances/${ZAPI_INSTANCE}/token/${ZAPI_TOKEN}/send-text`, 
+  { phone, message: respuesta });
 
   await salvarEnGoogleSheets({
     phone,
-    operacion: estado.operacion,
-    monto: estado.monto,
-    destino: estado.destino,
-    municipio: estado.municipio,
-    tasa: 115
+    tipo: textoLimpo.includes("recarga") ? "Recarga" : "Remesa",
+    montoBRL: est.montoBRL,
+    montoCUP: est.montoCUP,
+    destino: est.destino,
+    lucro: est.lucro
   });
 
   res.sendStatus(200);
 });
 
-app.get("/", (req, res) => res.send("🚀 CRM YordaBot Activo"));
-app.listen(PORT, "0.0.0.0", () => console.log(`Online en puerto ${PORT}`));
+app.listen(PORT, "0.0.0.0", () => console.log("Cerebro conectado"));
