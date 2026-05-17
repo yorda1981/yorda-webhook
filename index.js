@@ -7,123 +7,101 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 8080;
 
-/* =========================
-   VARIABLES DE ENTORNO
-========================= */
+// VARIABLES
 const { 
-  OPENAI_API_KEY, 
-  ZAPI_INSTANCE, 
-  ZAPI_TOKEN, 
-  ODOO_URL, 
-  ODOO_DB, 
-  ODOO_USER, 
-  ODOO_API_KEY 
+  OPENAI_API_KEY, ZAPI_INSTANCE, ZAPI_TOKEN,
+  ODOO_URL, ODOO_DB, ODOO_USER, ODOO_API_KEY 
 } = process.env;
 
 const TASA_CUP = parseFloat(process.env.TASA_CUP) || 115;
+const mensajesProcesados = new Set();
 
-/* =========================
-   CEREBRO ODOO (XML-RPC)
-========================= */
-function registrarEnOdoo(datos) {
+// FUNCIÓN PARA ODOO
+function crearOdoo(datos) {
   try {
-    const urlLimpia = (ODOO_URL || "").replace(/\/$/, "");
-    if (!urlLimpia || !ODOO_DB) return console.log("⚠️ Variables de Odoo incompletas.");
-
-    const common = xmlrpc.createSecureClient(`${urlLimpia}/xmlrpc/2/common`);
-    const models = xmlrpc.createSecureClient(`${urlLimpia}/xmlrpc/2/object`);
-
+    const url = (ODOO_URL || "").replace(/\/$/, "");
+    if (!url || !ODOO_DB) return;
+    const common = xmlrpc.createSecureClient(`${url}/xmlrpc/2/common`);
+    const models = xmlrpc.createSecureClient(`${url}/xmlrpc/2/object`);
     common.methodCall('authenticate', [ODOO_DB, ODOO_USER, ODOO_API_KEY, {}], (err, uid) => {
-      if (err) return console.log("❌ Error Conexión Odoo:", err.message);
-      if (!uid) return console.log("❌ Auth Odoo falló: Revisa credenciales.");
-
-      const lead = {
-        name: `WhatsApp: ${datos.phone} (${datos.monto || 'Consulta'})`,
-        partner_name: datos.phone,
-        description: `Mensaje: ${datos.mensaje}`,
-        type: 'opportunity',
-        priority: '2',
-      };
-
-      models.methodCall('execute_kw', [
-        ODOO_DB, uid, ODOO_API_KEY,
-        'crm.lead', 'create', [lead]
-      ], (err, result) => {
-        if (err) console.log("❌ Error creando Lead en Odoo:", err.message);
-        else console.log("✅ Oportunidad creada en Odoo ID:", result);
-      });
+      if (uid) {
+        models.methodCall('execute_kw', [ODOO_DB, uid, ODOO_API_KEY, 'crm.lead', 'create', [{
+          name: `WA: ${datos.phone}`, partner_name: datos.phone, description: datos.msg, type: 'opportunity'
+        }]], () => console.log("📊 Odoo: Oportunidad creada con éxito."));
+      }
     });
-  } catch (error) {
-    console.log("⚠️ Error crítico en función Odoo:", error.message);
-  }
+  } catch (e) { console.log("⚠️ Odoo: Fallo de conexión."); }
 }
 
 /* =========================
-   WEBHOOK PRINCIPAL
-========================= */
-const mensajesProcesados = new Set();
-const GATILHOS = ["remesa", "tasa", "envio", "recarga", "cup", "brl", "real", "pix", "precio"];
-
+   WEBHOOK CON LOGS ACTIVOS
+========================== */
 app.post("/webhook", async (req, res) => {
-  const { phone, text, fromMe, isGroup, messageId } = req.body;
-  const mensajeOriginal = text?.message || "";
+  const body = req.body;
+  
+  // LOG DE ENTRADA: Si ves esto en Railway, la conexión con Z-API es correcta.
+  console.log("-----------------------------------------");
+  console.log("📩 EVENTO RECIBIDO DESDE Z-API");
 
-  // 1. Evitar bucles y grupos
-  if (!phone || isGroup || fromMe || mensajesProcesados.has(messageId)) {
+  const phone = body.phone;
+  const msg = body.text?.message || "";
+  const fromMe = body.fromMe;
+
+  if (!phone || body.isGroup || fromMe) {
+    console.log("⏩ Mensaje ignorado (Grupo o enviado por el bot).");
     return res.sendStatus(200);
   }
 
-  const textoLimpo = mensajeOriginal.toLowerCase();
-  const esNegocio = GATILHOS.some(g => textoLimpo.includes(g));
+  console.log(`👤 Cliente: ${phone}`);
+  console.log(`💬 Mensaje: "${msg}"`);
+
+  if (mensajesProcesados.has(body.messageId)) {
+    return res.sendStatus(200);
+  }
+  mensajesProcesados.add(body.messageId);
+
+  // FILTRO DE NEGOCIO (Gatillos)
+  const gatillos = ["remesa", "tasa", "envio", "recarga", "precio", "cuanto", "hola", "pix"];
+  const esNegocio = gatillos.some(g => msg.toLowerCase().includes(g));
 
   if (esNegocio) {
-    mensajesProcesados.add(messageId);
-    console.log(`💼 Negocio detectado de ${phone}`);
+    console.log("💼 Negocio detectado. Procesando...");
+    
+    // Sincronizar con Odoo
+    crearOdoo({ phone, msg });
 
-    // 2. Crear en Odoo (sin esperar respuesta para no trabar el bot)
-    const monto = mensajeOriginal.match(/\b\d+\b/)?.[0] || "0";
-    registrarEnOdoo({
-      phone,
-      mensaje: mensajeOriginal,
-      monto
-    });
-
-    // 3. Respuesta con IA y Z-API
     try {
+      // IA
       const ai = await axios.post("https://api.openai.com/v1/chat/completions", {
         model: "gpt-4o-mini",
         messages: [
-          { role: "system", content: `Eres YordaBot. Tasa: ${TASA_CUP} CUP por 1 BRL. Responde corto y profesional.` },
-          { role: "user", content: mensajeOriginal }
+          { role: "system", content: `Eres YordaBot. Tasa: ${TASA_CUP} CUP por 1 BRL. Responde muy corto.` },
+          { role: "user", content: msg }
         ]
-      }, { 
-        headers: { Authorization: `Bearer ${OPENAI_API_KEY}` },
-        timeout: 12000 
-      });
+      }, { headers: { Authorization: `Bearer ${OPENAI_API_KEY}` }, timeout: 8000 });
 
       const respuestaIA = ai.data.choices[0].message.content;
+      console.log(`🤖 IA: "${respuestaIA}"`);
 
+      // WhatsApp
       await axios.post(`https://api.z-api.io/instances/${ZAPI_INSTANCE}/token/${ZAPI_TOKEN}/send-text`, 
-      { 
-        phone: String(phone).replace(/\D/g, ""), 
-        message: respuestaIA, 
-        checkContact: false 
-      }, { timeout: 15000 });
+      { phone, message: respuestaIA, checkContact: false }, 
+      { timeout: 10000 });
 
-      console.log(`✅ Respondido con éxito a ${phone}`);
+      console.log("✅ Respuesta enviada satisfactoriamente.");
     } catch (e) {
-      console.log("❌ Error en flujo IA/WhatsApp:", e.message);
+      console.log(`❌ Error: ${e.message}`);
+      // Respuesta de respaldo
+      await axios.post(`https://api.z-api.io/instances/${ZAPI_INSTANCE}/token/${ZAPI_TOKEN}/send-text`, 
+      { phone, message: "Hola, he recibido tu mensaje. En breve Yordanys te atenderá. 👌", checkContact: false })
+      .catch(() => console.log("❌ Error crítico: Z-API no responde."));
     }
+  } else {
+    console.log("⏩ Mensaje personal. El bot no intervendrá.");
   }
 
-  // Limpiar memoria de IDs cada 500 mensajes
-  if (mensajesProcesados.size > 500) mensajesProcesados.clear();
-  
   res.sendStatus(200);
 });
 
-app.get("/", (req, res) => res.send("🚀 YordaBot Online y Conectado a Odoo"));
-
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`✅ Servidor activo en puerto ${PORT}`);
-});
+app.get("/", (req, res) => res.send("YordaBot ONLINE 🚀"));
+app.listen(PORT, "0.0.0.0", () => console.log(`✅ Servidor escuchando en puerto ${PORT}`));
