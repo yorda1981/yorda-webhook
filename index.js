@@ -1,39 +1,32 @@
 const express = require("express");
 const axios = require("axios");
 
-axios.defaults.timeout = 25000;
+// --- 1. FAIL-FAST & CONFIG ---
+const requiredEnv = ["OPENAI_API_KEY", "ZAPI_INSTANCE", "ZAPI_TOKEN", "ZAPI_CLIENT_TOKEN"];
+requiredEnv.forEach(key => { if (!process.env[key]) process.exit(1); });
 
-// --- BLINDAJE CONTRA CRASHES ---
-process.on("unhandledRejection", (err) => console.log("❌ REJECTION:", err));
-process.on("uncaughtException", (err) => console.log("❌ EXCEPTION:", err));
+const logger = (level, event, dados = {}) => {
+  console.log(JSON.stringify({ level, event, timestamp: new Date().toISOString(), ...dados }));
+};
 
 const app = express();
-app.disable("x-powered-by");
 app.set("trust proxy", true);
-
-app.use(express.json({ limit: "10mb" }));
-app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+app.disable("x-powered-by");
+app.use(express.json({ limit: "5mb" }));
 
 const PORT = process.env.PORT || 8080;
-
-/* =========================
-   VARIABLES DE ENTORNO
-========================= */
 const { OPENAI_API_KEY, ZAPI_INSTANCE, ZAPI_TOKEN, ZAPI_CLIENT_TOKEN, WEBHOOK_SECRET } = process.env;
 
 /* =========================
-   MEMORIA VOLÁTIL BLINDADA
+   MEMORIA Y COLAS (HARDENED)
 ========================= */
-const pausaHumana = {}, conversaAtiva = {}, estadoCliente = {}, locks = {}, flood = {};
+const estadoCliente = {}; 
+const queues = {}; 
+const flood = {}; 
+const buffers = {}; 
 
-const PAUSA_HUMANA_MS   = 30 * 60 * 1000;
-const CONVERSA_ATIVA_MS = 5 * 60 * 1000;
-const TTL_ESTADO_RAM    = 24 * 60 * 60 * 1000;
-const LOCK_TTL_MS       = 3000; 
-
-const GATILHOS = ["remesa", "envio", "enviar", "transferencia", "transferir", "cambio", "tasa", "taxa", "tasas", "taxas", "real", "reales", "brl", "cup", "usd", "dolar", "pix", "mlc", "recarga", "saldo", "etecsa", "dinero", "dinheiro", "deposito", "cartao", "habana", "efectivo", "entrega"];
-const SAUDACOES = ["hola", "oi", "ola", "buenas", "bom dia", "boa tarde", "boa noche", "buen dia"];
-const IGNORAR_IA = ["ok", "si", "dale", "👍", "gracias", "listo", "entendido", "bueno", "vale"];
+const STOP_WORDS = ["ok", "gracias", "listo", "enviado", "ya pague", "hecho", "👍", "vale", "dale"];
+const SAUDACOES = ["hola", "buenas", "buen dia", "oi", "ola", "tasa", "precio"];
 
 const PIX_CHAVE = "8becaaf5-f296-4cbc-a115-46e3d23b042a";
 const PIX_NOME  = "YORDANYS RAFAEL SOSA REYES\nNubank";
@@ -41,11 +34,12 @@ const PIX_NOME  = "YORDANYS RAFAEL SOSA REYES\nNubank";
 /* =========================
    UTILIDADES
 ========================= */
+const normalize = (t) => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^\w\s]/g, "").trim();
 const escapeRegex = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const contemPalavra = (t, p) => new RegExp(`(^|\\s)${escapeRegex(p)}(\\s|$)`, "iu").test(t);
 
 const resetEstado = (phone) => {
-  estadoCliente[phone] = { operacion: null, etapa: "inicio", moeda: null, monto: null, municipio: null, tarjeta: null, numero: null, aguardando: null, pixEnviado: false, ultimoContato: Date.now() };
+  estadoCliente[phone] = { operacion: null, etapa: "inicio", monto: null, numero: null, aguardando: null, pixEnviado: false, ultimoContato: Date.now() };
 };
 
 const getEstado = (phone) => {
@@ -54,158 +48,185 @@ const getEstado = (phone) => {
   return estadoCliente[phone];
 };
 
+// Garbage Collector Pro (Limpieza de Colas y RAM)
 setInterval(() => {
   const agora = Date.now();
-  Object.keys(estadoCliente).forEach(p => { if (agora - estadoCliente[p].ultimoContato > TTL_ESTADO_RAM) delete estadoCliente[p]; });
-  Object.keys(conversaAtiva).forEach(p => { if (agora > conversaAtiva[p]) delete conversaAtiva[p]; });
-  Object.keys(pausaHumana).forEach(p => { if (agora > pausaHumana[p]) delete pausaHumana[p]; });
-  Object.keys(flood).forEach(p => { if (agora - flood[p] > 60000) delete flood[p]; }); 
-  Object.keys(locks).forEach(p => { if (agora - locks[p] > 30000) delete locks[p]; });
-}, 60 * 1000);
+  Object.keys(estadoCliente).forEach(p => { if (agora - estadoCliente[p].ultimoContato > 86400000) delete estadoCliente[p]; });
+  Object.keys(queues).forEach(p => { if (!queues[p].processing && agora - queues[p].last > 60000) delete queues[p]; });
+  Object.keys(flood).forEach(p => { if (agora - flood[p] > 60000) delete flood[p]; });
+  Object.keys(buffers).forEach(p => { if (agora - buffers[p].last > 30000) delete buffers[p]; });
+}, 60000);
 
 /* =========================
-   MENSAJERÍA E IA (HUMANIZADA)
+   SISTEMA DE COMUNICACIÓN
 ========================= */
-async function enviarMensaje(phone, message) {
-  try {
-    await axios.post(`https://api.z-api.io/instances/${ZAPI_INSTANCE}/token/${ZAPI_TOKEN}/send-text`, { phone, message }, { headers: { "Client-Token": ZAPI_CLIENT_TOKEN } });
-  } catch (e) { console.error("❌ ERROR Z-API:", e.message); }
-}
-
-async function responderIA(mensagem, estado) {
-  try {
-    const res = await axios.post("https://api.openai.com/v1/chat/completions", {
-      model: "gpt-4o-mini",
-      messages: [
-        { role: "system", content: "Eres YordaBot. Gestor de remesas. Habla como un humano: directo, usa emojis 👌, máximo 12 palabras. NUNCA digas 'etapa de inicio' o 'especifica'." },
-        { role: "user", content: `MSJ: ${mensagem}` }
-      ],
-      temperature: 0.5
-    }, { headers: { Authorization: `Bearer ${OPENAI_API_KEY}` } });
-    return res.data.choices?.[0]?.message?.content?.trim() || "Dime 👌";
-  } catch (e) { return "Dime 👌"; }
-}
-
-const verificarSecret = (req, res, next) => {
-  if (!WEBHOOK_SECRET) return next();
-  const token = req.query.token || req.headers["x-webhook-secret"];
-  if (token === WEBHOOK_SECRET) return next();
-  return res.sendStatus(401);
-};
-
-/* =========================
-   WEBHOOK (PERFECCIONADO)
-========================= */
-app.post("/webhook", verificarSecret, async (req, res) => {
-  const body = req.body;
-  const phone = body.phone;
-  if (!phone) return res.sendStatus(200);
-
-  if (flood[phone] && (Date.now() - flood[phone] < 1200)) return res.sendStatus(200);
-  flood[phone] = Date.now();
-
-  const isGroup = body.isGroup === true || body.isGroup === "true";
-  const status = String(body.status || "").toUpperCase();
-  const fromMe = body.fromMe === true || body.fromMe === "true";
-
-  if (isGroup || fromMe || String(phone).includes("-group") || String(phone).includes("@lid") || (status && status !== "RECEIVED")) {
-    return res.sendStatus(200);
+async function enviarMensaje(phone, message, retries = 2) {
+  for (let i = 0; i <= retries; i++) {
+    try {
+      await axios.post(`https://api.z-api.io/instances/${ZAPI_INSTANCE}/token/${ZAPI_TOKEN}/send-text`, 
+        { phone, message }, { timeout: 15000, headers: { "Client-Token": ZAPI_CLIENT_TOKEN } });
+      return;
+    } catch (e) {
+      if (i === retries) logger("error", "ERR_ZAPI", { phone, error: e.message });
+      else await new Promise(r => setTimeout(r, 1000));
+    }
   }
+}
 
-  if (locks[phone] && (Date.now() - locks[phone] < LOCK_TTL_MS)) return res.sendStatus(200);
-  locks[phone] = Date.now();
+/* =========================
+   PROCESAMIENTO SERIAL (v1.12)
+========================= */
+async function processarIntencao(phone, textoCompleto, tieneMedia, esAudio) {
+  const start = Date.now();
+  let estado = getEstado(phone);
+  const textoSeguro = String(textoCompleto || "").slice(0, 1200); 
+  const textoLimpo = normalize(textoSeguro);
 
   try {
-    const textoOriginal = String(body?.text?.message || "");
-    const textoLimpo = textoOriginal
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .toLowerCase()
-      .replace(/[^\w\s]/g, "")
-      .trim();
-
-    const tipoZAPI = String(body.type || "").toLowerCase();
-    const tieneMedia = !!(body.image || body.video || body.audio || body.document || tipoZAPI.includes("image") || tipoZAPI.includes("video") || tipoZAPI.includes("audio") || tipoZAPI.includes("document"));
-
-    if (pausaHumana[phone] && Date.now() < pausaHumana[phone]) return res.sendStatus(200);
-    if (!textoOriginal && !tieneMedia) return res.sendStatus(200);
-
-    if (conversaAtiva[phone] && Date.now() > conversaAtiva[phone]) {
-      delete conversaAtiva[phone];
-      resetEstado(phone);
+    if (esAudio) {
+        return await enviarMensaje(phone, "No puedo procesar audios 👌\n\nEscríbeme:\n- Monto\n- Destino\n- Operación");
     }
 
-    const esComercial = GATILHOS.some(g => contemPalavra(textoLimpo, g));
-    if (esComercial) conversaAtiva[phone] = Date.now() + CONVERSA_ATIVA_MS;
+    if (!estado.operacion && !tieneMedia) {
+        if (SAUDACOES.some(s => textoLimpo.includes(s))) {
+            return await enviarMensaje(phone, "Hola 👌 ¿En qué puedo ayudarte?");
+        }
+    }
 
-    if (!esComercial && !(conversaAtiva[phone] && Date.now() < conversaAtiva[phone])) {
-      if (SAUDACOES.some(s => contemPalavra(textoLimpo, s))) {
-        await enviarMensaje(phone, "Hola 👌 ¿Qué necesitas?");
+    if (["cancelar", "nuevo", "reiniciar", "cambiar"].some(w => textoLimpo.includes(w))) {
+      resetEstado(phone);
+      return await enviarMensaje(phone, "Listo 👌 Operación cancelada.");
+    }
+
+    if (estado.aguardando === "comprovante") {
+      if (tieneMedia) {
+        await enviarMensaje(phone, "Perfecto 👌 Recibimos el comprobante.");
+        return resetEstado(phone);
       }
-      return res.sendStatus(200);
+      return; 
     }
 
-    let estado = getEstado(phone);
-    if (contemPalavra(textoLimpo, "recarga")) estado.operacion = "recarga";
+    const nuevaOp = ["recarga", "saldo"].some(g => contemPalavra(textoLimpo, g)) ? "recarga" :
+                    ["remesa", "envio", "enviar", "transferir"].some(g => contemPalavra(textoLimpo, g)) ? "remesa" : null;
 
-    const matchMonto = textoOriginal.match(/\b\d{1,6}([.,]\d{1,2})?\b/);
-    if (matchMonto && (estado.etapa === "esperando_monto" || ["real", "reales", "cup", "usd", "brl"].some(m => textoLimpo.includes(m)))) {
-      estado.monto = matchMonto[0];
-    }
-
-    const soloD = textoOriginal.replace(/\D/g, "");
-    if (estado.etapa === "esperando_tarjeta" && /^\d{16}$/.test(soloD)) estado.tarjeta = soloD;
-    if (estado.etapa === "esperando_numero" && /^\d{8,11}$/.test(soloD)) estado.numero = soloD;
-
-    // --- CORRECCIÓN UX: CIERRE DE OPERACIÓN (Fix #3) ---
-    if (
-      estado.aguardando === "comprovante" && 
-      (tieneMedia || textoLimpo.includes("envie") || textoLimpo.includes("transferi") || textoLimpo.includes("comprobante") || textoLimpo.includes("pix"))
-    ) {
-      await enviarMensaje(phone, "Perfecto 👌 Procesaremos tu operación en breve.");
+    if (nuevaOp && nuevaOp !== estado.operacion) {
       resetEstado(phone);
-      delete conversaAtiva[phone];
-      return res.sendStatus(200);
+      estado = getEstado(phone);
+      estado.operacion = nuevaOp;
     }
 
-    if (estado.operacion === "recarga") {
+    const soloD = textoSeguro.replace(/\D/g, "");
+    if (estado.etapa === "esperando_numero" && /^\d{8,16}$/.test(soloD)) estado.numero = soloD;
+    
+    const matchMonto = textoSeguro.match(/\b\d{1,5}([.,]\d{1,2})?\b/);
+    if (matchMonto && (estado.etapa === "esperando_monto" || (estado.operacion && !estado.monto))) {
+      if (matchMonto[0] !== estado.numero) estado.monto = matchMonto[0];
+    }
+
+    if (estado.operacion) {
       if (!estado.monto) {
         estado.etapa = "esperando_monto";
-        await enviarMensaje(phone, "¿De cuánto es la recarga? 👌");
-        return res.sendStatus(200);
+        return await enviarMensaje(phone, `¿De cuánto es la ${estado.operacion}? 👌`);
       }
       if (!estado.numero) {
         estado.etapa = "esperando_numero";
-        await enviarMensaje(phone, "Dime el número a recargar 👌");
-        return res.sendStatus(200);
+        return await enviarMensaje(phone, estado.operacion === "recarga" ? "Dime el número 👌" : "Dime la tarjeta o cuenta 👌");
       }
       if (!estado.pixEnviado) {
         estado.pixEnviado = true;
         estado.aguardando = "comprovante";
-        await enviarMensaje(phone, `*Llave PIX:* \n${PIX_CHAVE}\n\n*Beneficiario:* \n${PIX_NOME}\n\nEnvíame el comprobante al terminar 👌`);
-        return res.sendStatus(200);
+        return await enviarMensaje(phone, `*Total:* ${estado.monto}\n*Destino:* ${estado.numero}\n\n*Llave PIX:* \n${PIX_CHAVE}\n\nEnvíame el comprobante 👌`);
       }
+      return; 
     }
 
-    // --- CORRECCIÓN UX: IGNORAR INTELIGENTE ---
-    if (estado.pixEnviado && !tieneMedia && IGNORAR_IA.includes(textoLimpo)) {
-      return res.sendStatus(200);
-    }
+    if (STOP_WORDS.some(w => textoLimpo.includes(w))) return;
 
-    const respuestaIA = await responderIA(textoOriginal, estado);
-    await enviarMensaje(phone, respuestaIA);
-    res.sendStatus(200);
+    // --- FIX #2: TIMEOUT ESPECÍFICO IA (12s) ---
+    const aiRes = await axios.post("https://api.openai.com/v1/chat/completions", {
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: "Eres YordaBot. Gestor de remesas. Corto y humano. Máximo 15 palabras. Usa emojis 👌." },
+        { role: "user", content: textoSeguro }
+      ],
+      temperature: 0.3
+    }, { headers: { Authorization: `Bearer ${OPENAI_API_KEY}` }, timeout: 12000 });
 
-  } catch (error) {
-    console.error("❌ WEBHOOK ERROR:", error.message);
-    if (!res.headersSent) res.sendStatus(500);
-  } finally {
-    delete locks[phone];
+    await enviarMensaje(phone, aiRes.data.choices[0].message.content.trim());
+    logger("info", "PROC_SUCCESS", { phone, duration: Date.now() - start });
+
+  } catch (e) { logger("error", "PROC_ERR", { phone, err: e.message }); }
+}
+
+/* =========================
+   WEBHOOK (GESTIÓN DE COLAS)
+========================= */
+app.post("/webhook", async (req, res) => {
+  if (WEBHOOK_SECRET && (req.query.token || req.headers["x-webhook-secret"]) !== WEBHOOK_SECRET) return res.sendStatus(401);
+
+  const body = req.body;
+  const phone = body.phone;
+  const status = String(body.status || "").toUpperCase();
+  const fromMe = body.fromMe === true || body.fromMe === "true";
+
+  if (status && status !== "RECEIVED") return res.sendStatus(200);
+  if (!phone || fromMe || body.isGroup || String(body.chatLid).includes("@lid")) return res.sendStatus(200);
+
+  const agora = Date.now();
+  if (flood[phone] && (agora - flood[phone] < 1000)) return res.sendStatus(200);
+  flood[phone] = agora;
+
+  if (!buffers[phone]) buffers[phone] = { texts: [], hasMedia: false, esAudio: false, timer: null, last: agora };
+
+  const msgText = body?.text?.message || "";
+  if (msgText) {
+      buffers[phone].texts.push(msgText);
+      if (buffers[phone].texts.length > 15) buffers[phone].texts.shift();
   }
+
+  const tipo = String(body.type || "").toLowerCase();
+  if (tipo.includes("image") || tipo.includes("document") || body.image || body.document) buffers[phone].hasMedia = true;
+  if (tipo.includes("audio") || tipo.includes("ptt")) buffers[phone].esAudio = true;
+
+  buffers[phone].last = agora;
+  if (buffers[phone].timer) clearTimeout(buffers[phone].timer);
+
+  buffers[phone].timer = setTimeout(async () => {
+    const fullText = buffers[phone].texts.join(" ");
+    const media = buffers[phone].hasMedia;
+    const audio = buffers[phone].esAudio;
+    delete buffers[phone];
+
+    if (!queues[phone]) queues[phone] = { tasks: [], processing: false, last: Date.now() };
+    
+    // --- FIX #3: LÍMITE DE COLA (Anti-Spam) ---
+    if (queues[phone].tasks.length > 25) {
+        queues[phone].tasks.shift(); 
+    }
+    queues[phone].tasks.push({ fullText, media, audio });
+    queues[phone].last = Date.now();
+
+    if (!queues[phone].processing) {
+        queues[phone].processing = true;
+        // --- FIX #1: TRY/FINALLY EN LA FILA (Evita bloqueo permanente) ---
+        try {
+            while (queues[phone].tasks.length > 0) {
+                const task = queues[phone].tasks.shift();
+                await processarIntencao(phone, task.fullText, task.media, task.audio);
+            }
+        } catch (e) {
+            logger("error", "QUEUE_CRASH", { phone, err: e.message });
+        } finally {
+            queues[phone].processing = false;
+        }
+    }
+  }, 1500);
+
+  res.sendStatus(200);
 });
 
-app.get("/", (req, res) => res.send("YordaBot ONLINE: UX Humanizado"));
+app.get("/", (req, res) => res.send("YordaBot v1.12 - Hardened Queue"));
 
-const server = app.listen(PORT, "0.0.0.0", () => console.log(`🚀 Puerto ${PORT} - UX Ready`));
+const server = app.listen(PORT, "0.0.0.0", () => logger("info", "SERVER_START", { port: PORT }));
 server.keepAliveTimeout = 65000;
 server.headersTimeout = 66000;
