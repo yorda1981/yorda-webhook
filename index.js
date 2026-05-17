@@ -33,7 +33,7 @@ try {
   sheets = google.sheets({ version: "v4", auth });
   console.log("✅ Cerebro de Sheets Conectado");
 } catch (e) { 
-  console.log("⚠️ Error en Sheets, pero el bot seguirá funcionando"); 
+  console.log("⚠️ Error en Sheets"); 
 }
 
 /* =========================
@@ -49,8 +49,8 @@ const GATILHOS = ["remesa", "envio", "tasa", "real", "brl", "cup", "pix", "recar
 async function enviarWhatsApp(phone, message) {
   if (!message) return;
 
-  // Limpiar el teléfono para asegurar que Z-API lo acepte (solo números)
-  const cleanPhone = String(phone).replace(/\D/g, "");
+  // Limpeza profunda do número para o formato Z-API
+  let cleanPhone = String(phone).replace(/\D/g, "");
 
   try {
     await axios({
@@ -58,15 +58,16 @@ async function enviarWhatsApp(phone, message) {
       url: `https://api.z-api.io/instances/${ZAPI_INSTANCE}/token/${ZAPI_TOKEN}/send-text`,
       data: { 
         phone: cleanPhone, 
-        message: message 
+        message: message,
+        delayMessage: 1,
+        checkContact: false // Ignora a validação prévia de contacto para evitar erro 400
       },
       timeout: 15000,
       headers: { 'Content-Type': 'application/json' }
     });
-    console.log(`✅ Respondido con éxito a ${cleanPhone}`);
+    console.log(`✅ Respondido com sucesso a ${cleanPhone}`);
   } catch (e) {
-    console.log(`❌ Error Z-API (400): Revisa si el número ${cleanPhone} es válido o si la instancia tiene saldo/permisos.`);
-    // console.log(e.response?.data); // Descomenta esta línea solo si necesitas ver el detalle técnico del error
+    console.log(`❌ Erro Z-API (400) em ${cleanPhone}: ${e.response?.data?.message || e.message}`);
   }
 }
 
@@ -77,9 +78,9 @@ async function obtenerRespuestaIA(mensajeUsuario, datosEstado) {
       messages: [
         { 
           role: "system", 
-          content: `Eres YordaBot. Tasa: ${TASA_CUP} CUP/1 BRL. Responde en 1 o 2 líneas máximo. Muy amable.` 
+          content: `És o YordaBot, assistente de remessas profissional. Taxa: ${TASA_CUP} CUP por 1 BRL. Responde muito curto (máx 2 linhas).` 
         },
-        { role: "user", content: `Mensaje: ${mensajeUsuario}. Datos: ${JSON.stringify(datosEstado)}` }
+        { role: "user", content: `Mensagem: ${mensajeUsuario}. Dados atuais: ${JSON.stringify(datosEstado)}` }
       ]
     }, { 
       headers: { Authorization: `Bearer ${OPENAI_API_KEY}` },
@@ -87,12 +88,12 @@ async function obtenerRespuestaIA(mensajeUsuario, datosEstado) {
     });
     return res.data.choices[0].message.content;
   } catch (e) {
-    return "Hola, dime cómo puedo ayudarte con tu remesa. 👌";
+    return "Olá! Como posso ajudar com a tua remessa? 👌";
   }
 }
 
 /* =========================
-   WEBHOOK
+   WEBHOOK PRINCIPAL
 ========================= */
 app.post("/webhook", async (req, res) => {
   const { phone, text, fromMe, isGroup, messageId } = req.body;
@@ -111,7 +112,7 @@ app.post("/webhook", async (req, res) => {
   if (!estadoCliente[phone]) estadoCliente[phone] = { montoBRL: 0 };
   let est = estadoCliente[phone];
 
-  // Captura de datos
+  // Processar dados financeiros
   const matchMonto = mensajeOriginal.match(/\b\d{1,5}\b/);
   if (matchMonto) {
     est.montoBRL = parseInt(matchMonto[0]);
@@ -122,7 +123,7 @@ app.post("/webhook", async (req, res) => {
   const respuesta = await obtenerRespuestaIA(mensajeOriginal, est);
   await enviarWhatsApp(phone, respuesta);
 
-  // Registro en Sheets
+  // Guardar no Google Sheets
   if (sheets && est.montoBRL > 0) {
     sheets.spreadsheets.values.append({
       spreadsheetId: SPREADSHEET_ID,
@@ -130,7 +131,7 @@ app.post("/webhook", async (req, res) => {
       valueInputOption: "USER_ENTERED",
       resource: { 
         values: [[
-          new Date().toLocaleString("es-ES"), 
+          new Date().toLocaleString("pt-BR"), 
           phone, 
           textoLimpo.includes("recarga") ? "Recarga" : "Remesa", 
           est.montoBRL, 
@@ -147,5 +148,8 @@ app.post("/webhook", async (req, res) => {
   res.sendStatus(200);
 });
 
-app.get("/", (req, res) => res.send("YordaBot Activo"));
-app.listen(PORT, "0.0.0.0", () => console.log(`✅ Servidor activo en puerto ${PORT}`));
+app.get("/", (req, res) => res.send("🚀 YordaBot CRM Ativo"));
+
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`✅ Servidor ativo na porta ${PORT}`);
+});
