@@ -4,7 +4,6 @@ const axios = require("axios");
 const app = express();
 app.use(express.json());
 
-// El puerto debe ser dinámico para Railway
 const PORT = process.env.PORT || 8080;
 
 /* =========================
@@ -31,7 +30,6 @@ const PIX_NOME = "YORDANYS RAFAEL SOSA REYES\nNubank";
 
 const GATILHOS = ["remesa", "envio", "enviar", "transferencia", "cambio", "tasa", "real", "brl", "cup", "pix", "mlc", "recarga", "etecsa"];
 const SAUDACOES = ["hola", "oi", "ola", "buenas", "buen dia", "bom dia"];
-const MUNICIPIOS = ["habana", "centro habana", "habana vieja", "cerro", "boyeros", "arroyo naranjo", "marianao"];
 
 /* =========================
    HELPERS
@@ -55,7 +53,7 @@ function getEstado(phone) {
 }
 
 function contemPalavra(texto, palavra) {
-  return new RegExp("(^|\\s)" + palavra + "(\\s|$)", "i").test(texto);
+  return new RegExp("(^|\\s)" + palabra + "(\\s|$)", "i").test(texto);
 }
 
 /* =========================
@@ -65,10 +63,14 @@ async function enviarMensaje(phone, texto) {
   try {
     const url = `https://api.z-api.io/instances/${ZAPI_INSTANCE}/token/${ZAPI_TOKEN}/send-text`;
     await axios.post(url, { phone, message: texto }, {
-      headers: { "Client-Token": ZAPI_CLIENT_TOKEN, "Content-Type": "application/json" }
+      headers: { 
+        "Client-Token": ZAPI_CLIENT_TOKEN, 
+        "Content-Type": "application/json" 
+      }
     });
+    console.log(`✅ Mensaje enviado a ${phone}`);
   } catch (error) {
-    console.log("ERRO ZAPI:", error.response?.data || error.message);
+    console.log("❌ ERRO ZAPI:", error.response?.data || error.message);
   }
 }
 
@@ -80,12 +82,12 @@ async function responderIA(mensagem, estado) {
     const response = await axios.post(
       "https://api.openai.com/v1/chat/completions",
       {
-        model: "gpt-4o-mini", // Nombre corregido
+        model: "gpt-4o-mini",
         messages: [
           {
             role: "system",
-            content: `Eres YordaBot, asistente de remesas. Contexto: ${JSON.stringify(estado)}. 
-            Reglas: Responde muy corto (máx 2 líneas), natural, evita sonar como robot.`
+            content: `Eres YordaBot, asistente de remesas de Yordanys. Contexto actual del cliente: ${JSON.stringify(estado)}. 
+            REGLAS: Responde muy corto (máximo 2 líneas), natural, en el idioma del cliente y no parezcas un robot.`
           },
           { role: "user", content: mensagem }
         ],
@@ -100,7 +102,7 @@ async function responderIA(mensagem, estado) {
     );
     return response.data.choices[0].message.content || "Dime 👍";
   } catch (error) {
-    console.log("ERRO OPENAI:", error.response?.data || error.message);
+    console.log("❌ ERRO OPENAI:", error.response?.data || error.message);
     return "Dime 👍";
   }
 }
@@ -113,35 +115,33 @@ app.post("/webhook", async (req, res) => {
   const phone = String(body.phone || "");
   const texto = body?.text?.message || "";
 
-  // 1. Validaciones básicas e ignorar grupos/pings
-  if (!phone || body.isGroup || body.fromMe && body.fromApi) return res.sendStatus(200);
+  // Ignorar grupos y mensajes propios de la API
+  if (!phone || body.isGroup || (body.fromMe && body.fromApi)) {
+    return res.sendStatus(200);
+  }
 
-  // 2. Pausa Humana (Si tú escribes desde el cel, el bot se calla)
+  // Pausa Humana: Si tú escribes manualmente, el bot se calla 30 min
   if (body.fromMe) {
     pausaHumana[phone] = Date.now() + PAUSA_HUMANA_MS;
     return res.sendStatus(200);
   }
 
-  if (pausaHumana[phone] && Date.now() < pausaHumana[phone]) return res.sendStatus(200);
+  if (pausaHumana[phone] && Date.now() < pausaHumana[phone]) {
+    console.log(`🤫 Bot pausado para ${phone}`);
+    return res.sendStatus(200);
+  }
 
   const textoLimpo = texto.toLowerCase();
-
-  // 3. Lógica de Negocio / Estados
   let estado = getEstado(phone);
 
-  // Extraer datos (Lógica simplificada)
-  if (textoLimpo.includes("transferencia")) estado.operacion = "transferencia";
-  if (textoLimpo.includes("recarga")) estado.operacion = "recarga";
-
-  // 4. Decidir Respuesta
-  // Si es una palabra clave comercial, activamos IA o flujo
+  // Lógica de detección de intención
   const esComercial = GATILHOS.some(g => contemPalavra(textoLimpo, g));
-  
-  if (esComercial || (conversaAtiva[phone] && Date.now() < conversaAtiva[phone])) {
-    conversaAtiva[phone] = Date.now() + CONVERSA_ATIVA_MS;
+  const esSaudacao = SAUDACOES.some(s => contemPalavra(textoLimpo, s));
 
-    // Aquí podrías insertar tu lógica de "esperando_monto", etc.
-    // Por ahora, usamos la IA corregida para fluidez:
+  if (esComercial || esSaudacao || (conversaAtiva[phone] && Date.now() < conversaAtiva[phone])) {
+    conversaAtiva[phone] = Date.now() + CONVERSA_ATIVA_MS;
+    
+    // Procesar con IA
     const respuestaIA = await responderIA(texto, estado);
     await enviarMensaje(phone, respuestaIA);
   }
@@ -150,9 +150,12 @@ app.post("/webhook", async (req, res) => {
 });
 
 /* =========================
-   HEALTH & START
+   HEALTH CHECK & START
 ========================= */
-app.get("/", (req, res) => res.send("🚀 YordaBot ONLINE ✅"));
+app.get("/", (req, res) => {
+  res.send("🚀 YordaBot está vivo y operando ✅");
+});
 
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Serv
+  console.log(`🚀 Servidor activo en puerto ${PORT}`);
+});
