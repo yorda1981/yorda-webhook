@@ -1,7 +1,6 @@
 const express = require("express");
 const axios = require("axios");
 
-// --- CONFIGURACIÓN GLOBAL ---
 axios.defaults.timeout = 25000;
 
 // --- BLINDAJE CONTRA CRASHES ---
@@ -32,7 +31,6 @@ const CONVERSA_ATIVA_MS = 5 * 60 * 1000;
 const TTL_ESTADO_RAM    = 24 * 60 * 60 * 1000;
 const LOCK_TTL_MS       = 3000; 
 
-// Gatillos limpios y sin duplicados
 const GATILHOS = ["remesa", "envio", "enviar", "transferencia", "transferir", "cambio", "tasa", "taxa", "tasas", "taxas", "real", "reales", "brl", "cup", "usd", "dolar", "pix", "mlc", "recarga", "saldo", "etecsa", "dinero", "dinheiro", "deposito", "cartao", "habana", "efectivo", "entrega"];
 const SAUDACOES = ["hola", "oi", "ola", "buenas", "bom dia", "boa tarde", "boa noche", "buen dia"];
 const IGNORAR_IA = ["ok", "si", "dale", "👍", "gracias", "listo", "entendido", "bueno", "vale"];
@@ -41,7 +39,7 @@ const PIX_CHAVE = "8becaaf5-f296-4cbc-a115-46e3d23b042a";
 const PIX_NOME  = "YORDANYS RAFAEL SOSA REYES\nNubank";
 
 /* =========================
-   MOTOR DE ESTADOS Y LIMPIEZA
+   UTILIDADES
 ========================= */
 const escapeRegex = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const contemPalavra = (t, p) => new RegExp(`(^|\\s)${escapeRegex(p)}(\\s|$)`, "iu").test(t);
@@ -56,7 +54,6 @@ const getEstado = (phone) => {
   return estadoCliente[phone];
 };
 
-// Garbage Collector Pro
 setInterval(() => {
   const agora = Date.now();
   Object.keys(estadoCliente).forEach(p => { if (agora - estadoCliente[p].ultimoContato > TTL_ESTADO_RAM) delete estadoCliente[p]; });
@@ -67,7 +64,7 @@ setInterval(() => {
 }, 60 * 1000);
 
 /* =========================
-   MENSAJERÍA E IA
+   MENSAJERÍA E IA (HUMANIZADA)
 ========================= */
 async function enviarMensaje(phone, message) {
   try {
@@ -80,28 +77,24 @@ async function responderIA(mensagem, estado) {
     const res = await axios.post("https://api.openai.com/v1/chat/completions", {
       model: "gpt-4o-mini",
       messages: [
-        { role: "system", content: "Eres YordaBot. Asistente de remesas. Corto y natural." },
-        { role: "user", content: `ESTADO: ${JSON.stringify(estado)}\nMSJ: ${mensagem}` }
+        { role: "system", content: "Eres YordaBot. Gestor de remesas. Habla como un humano: directo, usa emojis 👌, máximo 12 palabras. NUNCA digas 'etapa de inicio' o 'especifica'." },
+        { role: "user", content: `MSJ: ${mensagem}` }
       ],
-      temperature: 0.3
+      temperature: 0.5
     }, { headers: { Authorization: `Bearer ${OPENAI_API_KEY}` } });
-    return res.data.choices?.[0]?.message?.content?.trim() || "Dime 👍";
-  } catch (e) { return "Dime 👍"; }
+    return res.data.choices?.[0]?.message?.content?.trim() || "Dime 👌";
+  } catch (e) { return "Dime 👌"; }
 }
 
-/* =========================
-   MIDDLEWARE DE SEGURIDAD (Fix #2)
-========================= */
 const verificarSecret = (req, res, next) => {
   if (!WEBHOOK_SECRET) return next();
   const token = req.query.token || req.headers["x-webhook-secret"];
   if (token === WEBHOOK_SECRET) return next();
-  console.log("⚠️ Intento de acceso no autorizado bloqueado.");
   return res.sendStatus(401);
 };
 
 /* =========================
-   WEBHOOK PRINCIPAL
+   WEBHOOK (PERFECCIONADO)
 ========================= */
 app.post("/webhook", verificarSecret, async (req, res) => {
   const body = req.body;
@@ -132,11 +125,7 @@ app.post("/webhook", verificarSecret, async (req, res) => {
       .trim();
 
     const tipoZAPI = String(body.type || "").toLowerCase();
-    const tieneMedia = !!(
-      body.image || body.video || body.audio || body.document ||
-      tipoZAPI.includes("image") || tipoZAPI.includes("video") || 
-      tipoZAPI.includes("audio") || tipoZAPI.includes("document")
-    );
+    const tieneMedia = !!(body.image || body.video || body.audio || body.document || tipoZAPI.includes("image") || tipoZAPI.includes("video") || tipoZAPI.includes("audio") || tipoZAPI.includes("document"));
 
     if (pausaHumana[phone] && Date.now() < pausaHumana[phone]) return res.sendStatus(200);
     if (!textoOriginal && !tieneMedia) return res.sendStatus(200);
@@ -151,7 +140,7 @@ app.post("/webhook", verificarSecret, async (req, res) => {
 
     if (!esComercial && !(conversaAtiva[phone] && Date.now() < conversaAtiva[phone])) {
       if (SAUDACOES.some(s => contemPalavra(textoLimpo, s))) {
-        await enviarMensaje(phone, "Hola 👋 ¿Cómo puedo ayudarte?");
+        await enviarMensaje(phone, "Hola 👌 ¿Qué necesitas?");
       }
       return res.sendStatus(200);
     }
@@ -168,8 +157,12 @@ app.post("/webhook", verificarSecret, async (req, res) => {
     if (estado.etapa === "esperando_tarjeta" && /^\d{16}$/.test(soloD)) estado.tarjeta = soloD;
     if (estado.etapa === "esperando_numero" && /^\d{8,11}$/.test(soloD)) estado.numero = soloD;
 
-    if (estado.aguardando === "comprovante" && tieneMedia) {
-      await enviarMensaje(phone, "Comprobante recibido 👌 Procesaremos tu operación en breve.");
+    // --- CORRECCIÓN UX: CIERRE DE OPERACIÓN (Fix #3) ---
+    if (
+      estado.aguardando === "comprovante" && 
+      (tieneMedia || textoLimpo.includes("envie") || textoLimpo.includes("transferi") || textoLimpo.includes("comprobante") || textoLimpo.includes("pix"))
+    ) {
+      await enviarMensaje(phone, "Perfecto 👌 Procesaremos tu operación en breve.");
       resetEstado(phone);
       delete conversaAtiva[phone];
       return res.sendStatus(200);
@@ -178,7 +171,7 @@ app.post("/webhook", verificarSecret, async (req, res) => {
     if (estado.operacion === "recarga") {
       if (!estado.monto) {
         estado.etapa = "esperando_monto";
-        await enviarMensaje(phone, "¿De cuánto quieres la recarga?");
+        await enviarMensaje(phone, "¿De cuánto es la recarga? 👌");
         return res.sendStatus(200);
       }
       if (!estado.numero) {
@@ -189,19 +182,21 @@ app.post("/webhook", verificarSecret, async (req, res) => {
       if (!estado.pixEnviado) {
         estado.pixEnviado = true;
         estado.aguardando = "comprovante";
-        await enviarMensaje(phone, `*Llave PIX:* \n${PIX_CHAVE}\n\n*Beneficiario:* \n${PIX_NOME}`);
+        await enviarMensaje(phone, `*Llave PIX:* \n${PIX_CHAVE}\n\n*Beneficiario:* \n${PIX_NOME}\n\nEnvíame el comprobante al terminar 👌`);
         return res.sendStatus(200);
       }
     }
 
-    if (estado.pixEnviado || IGNORAR_IA.includes(textoLimpo)) return res.sendStatus(200);
+    // --- CORRECCIÓN UX: IGNORAR INTELIGENTE ---
+    if (estado.pixEnviado && !tieneMedia && IGNORAR_IA.includes(textoLimpo)) {
+      return res.sendStatus(200);
+    }
 
     const respuestaIA = await responderIA(textoOriginal, estado);
     await enviarMensaje(phone, respuestaIA);
     res.sendStatus(200);
 
   } catch (error) {
-    // Catch con log real (Fix #3)
     console.error("❌ WEBHOOK ERROR:", error.message);
     if (!res.headersSent) res.sendStatus(500);
   } finally {
@@ -209,8 +204,8 @@ app.post("/webhook", verificarSecret, async (req, res) => {
   }
 });
 
-app.get("/", (req, res) => res.send("YordaBot ONLINE: Edición Industrial Final"));
+app.get("/", (req, res) => res.send("YordaBot ONLINE: UX Humanizado"));
 
-const server = app.listen(PORT, "0.0.0.0", () => console.log(`🚀 Microservicio serio en puerto ${PORT}`));
+const server = app.listen(PORT, "0.0.0.0", () => console.log(`🚀 Puerto ${PORT} - UX Ready`));
 server.keepAliveTimeout = 65000;
 server.headersTimeout = 66000;
