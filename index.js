@@ -61,6 +61,9 @@ const mensajesProcesados = new Set();
 const buffers = {};
 const saludosEnviados = {};
 
+// THREADS PERSISTENTES
+const threads = {};
+
 let cachedUid = null;
 
 // =========================
@@ -180,6 +183,10 @@ async function autenticarOdoo() {
           }
 
           cachedUid = uid;
+
+          logger("info", "ODOO_AUTH_SUCCESS", {
+            uid
+          });
 
           resolve(uid);
         }
@@ -313,22 +320,34 @@ Agora estamos fora do horário 👌
     // OPENAI ASSISTANT
     // =========================
 
-    // 1. Crear thread
-    const thread = await axios.post(
-      "https://api.openai.com/v1/threads",
-      {},
-      {
-        headers: {
-          Authorization: `Bearer ${OPENAI_API_KEY}`,
-          "Content-Type": "application/json",
-          "OpenAI-Beta": "assistants=v2"
+    // THREAD PERSISTENTE
+    let threadId = threads[phone];
+
+    if (!threadId) {
+
+      const thread = await axios.post(
+        "https://api.openai.com/v1/threads",
+        {},
+        {
+          headers: {
+            Authorization: `Bearer ${OPENAI_API_KEY}`,
+            "Content-Type": "application/json",
+            "OpenAI-Beta": "assistants=v2"
+          }
         }
-      }
-    );
+      );
 
-    const threadId = thread.data.id;
+      threadId = thread.data.id;
 
-    // 2. Agregar mensaje
+      threads[phone] = threadId;
+
+      logger("info", "THREAD_CREATED", {
+        phone,
+        threadId
+      });
+    }
+
+    // AGREGAR MENSAJE
     await axios.post(
       `https://api.openai.com/v1/threads/${threadId}/messages`,
       {
@@ -344,7 +363,7 @@ Agora estamos fora do horário 👌
       }
     );
 
-    // 3. Ejecutar assistant
+    // EJECUTAR ASSISTANT
     const run = await axios.post(
       `https://api.openai.com/v1/threads/${threadId}/runs`,
       {
@@ -362,7 +381,7 @@ Agora estamos fora do horário 👌
 
     const runId = run.data.id;
 
-    // 4. Esperar respuesta
+    // ESPERAR RESPUESTA
     let completed = false;
 
     while (!completed) {
@@ -399,7 +418,7 @@ Agora estamos fora do horário 👌
       }
     }
 
-    // 5. Leer mensajes
+    // LEER RESPUESTA
     const messages = await axios.get(
       `https://api.openai.com/v1/threads/${threadId}/messages`,
       {
