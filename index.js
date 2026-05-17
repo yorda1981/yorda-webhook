@@ -27,7 +27,7 @@ try {
     scopes: ["https://www.googleapis.com/auth/spreadsheets"],
   });
   sheets = google.sheets({ version: "v4", auth });
-  console.log("✅ Conexión con Google Sheets configurada");
+  console.log("✅ Conexión con Google Sheets establecida");
 } catch (e) {
   console.log("❌ Error en Google Sheets:", e.message);
 }
@@ -57,18 +57,17 @@ async function salvarEnGoogleSheets(datos) {
 }
 
 /* =========================
-   MEMORIA RAM (ESTADOS)
+   MEMORIA RAM Y FILTROS
 ========================= */
 const pausaHumana = {};
 const conversaAtiva = {};
 const estadoCliente = {};
 
 const PAUSA_HUMANA_MS = 30 * 60 * 1000;
-const CONVERSA_ATIVA_MS = 5 * 60 * 1000;
+const CONVERSA_ATIVA_MS = 10 * 60 * 1000; // 10 min de memoria
 
-const GATILHOS = ["remesa", "envio", "enviar", "transferencia", "cambio", "tasa", "real", "brl", "cup", "pix", "mlc", "recarga", "etecsa"];
-const SAUDACOES = ["hola", "oi", "ola", "buenas", "buen dia", "bom dia"];
-const MUNICIPIOS_LISTA = ["habana", "centro habana", "habana vieja", "cerro", "boyeros", "arroyo naranjo", "marianao"];
+const GATILHOS = ["remesa", "envio", "enviar", "transferencia", "cambio", "tasa", "real", "brl", "cup", "pix", "mlc", "recarga", "etecsa", "tarjeta", "cuanto esta", "precio"];
+const MUNICIPIOS_LISTA = ["habana", "centro habana", "habana vieja", "cerro", "boyeros", "arroyo naranjo", "marianao", "playa", "guanabacoa"];
 
 /* =========================
    HELPERS
@@ -86,9 +85,6 @@ function contemPalavra(texto, palabra) {
   return new RegExp("(^|\\s)" + palabraEscapada + "(\\s|$)", "i").test(texto);
 }
 
-/* =========================
-   APIS EXTERNAS
-========================= */
 async function enviarMensaje(phone, texto) {
   try {
     const url = `https://api.z-api.io/instances/${ZAPI_INSTANCE}/token/${ZAPI_TOKEN}/send-text`;
@@ -105,7 +101,7 @@ async function responderIA(mensagem, estado) {
     const response = await axios.post("https://api.openai.com/v1/chat/completions", {
       model: "gpt-4o-mini",
       messages: [
-        { role: "system", content: `Eres YordaBot, asistente de remesas. Contexto: ${JSON.stringify(estado)}. Responde muy corto (máx 2 líneas).` },
+        { role: "system", content: `Eres YordaBot, asistente de remesas de Yordanys. Responde muy corto (máx 2 líneas). Contexto: ${JSON.stringify(estado)}` },
         { role: "user", content: mensagem }
       ]
     }, {
@@ -118,7 +114,7 @@ async function responderIA(mensagem, estado) {
 }
 
 /* =========================
-   WEBHOOK
+   WEBHOOK (LOGICA DISCRETA)
 ========================= */
 app.post("/webhook", async (req, res) => {
   const body = req.body;
@@ -127,6 +123,7 @@ app.post("/webhook", async (req, res) => {
 
   if (!phone || body.isGroup || (body.fromMe && body.fromApi)) return res.sendStatus(200);
 
+  // Si tú respondes manualmente, el bot se calla por 30 minutos
   if (body.fromMe) {
     pausaHumana[phone] = Date.now() + PAUSA_HUMANA_MS;
     return res.sendStatus(200);
@@ -135,48 +132,50 @@ app.post("/webhook", async (req, res) => {
   if (pausaHumana[phone] && Date.now() < pausaHumana[phone]) return res.sendStatus(200);
 
   const textoLimpo = texto.toLowerCase();
+  
+  // FILTRO DE DISCRECIÓN: ¿Es mensaje de negocio o personal?
+  const tieneGatillo = GATILHOS.some(g => contemPalavra(textoLimpo, g));
+  const enConversaNegocio = conversaAtiva[phone] && Date.now() < conversaAtiva[phone];
+
+  // Si no menciona negocio y no estamos en medio de una venta, NO RESPONDER
+  if (!tieneGatillo && !enConversaNegocio) {
+    return res.sendStatus(200); 
+  }
+
+  // Si detecta negocio, activamos memoria por 10 minutos
+  conversaAtiva[phone] = Date.now() + CONVERSA_ATIVA_MS;
   let estado = getEstado(phone);
 
-  // EXTRAER DATOS AUTOMÁTICAMENTE
-  // Buscar montos (números de 1 a 5 dígitos)
+  // Extracción de datos inteligente
   const matchMonto = texto.match(/\b\d{1,5}\b/);
   if (matchMonto && !estado.monto) estado.monto = matchMonto[0];
 
-  // Buscar Tarjetas (16 dígitos) o Celulares (8-10 dígitos)
   const numeros = texto.replace(/\D/g, "");
   if (numeros.length === 16) estado.destino = numeros;
   else if (numeros.length >= 8 && numeros.length <= 11) estado.destino = numeros;
 
-  // Buscar Municipio
   for (const m of MUNICIPIOS_LISTA) {
     if (textoLimpo.includes(m)) estado.municipio = m;
   }
 
-  const esComercial = GATILHOS.some(g => contemPalavra(textoLimpo, g));
-  const esSaudacao = SAUDACOES.some(s => contemPalavra(textoLimpo, s));
+  if (textoLimpo.includes("remesa")) estado.operacion = "remesa";
+  if (textoLimpo.includes("recarga")) estado.operacion = "recarga";
 
-  if (esComercial || esSaudacao || (conversaAtiva[phone] && Date.now() < conversaAtiva[phone])) {
-    conversaAtiva[phone] = Date.now() + CONVERSA_ATIVA_MS;
-    
-    if (textoLimpo.includes("remesa")) estado.operacion = "remesa";
-    if (textoLimpo.includes("recarga")) estado.operacion = "recarga";
+  // Responder y Guardar
+  const respuesta = await responderIA(texto, estado);
+  await enviarMensaje(phone, respuesta);
 
-    const respuesta = await responderIA(texto, estado);
-    await enviarMensaje(phone, respuesta);
-
-    // GUARDAR EN GOOGLE SHEETS DE FORMA ORGANIZADA
-    await salvarEnGoogleSheets({
-      phone,
-      operacion: estado.operacion,
-      monto: estado.monto,
-      destino: estado.destino,
-      municipio: estado.municipio
-    });
-  }
+  await salvarEnGoogleSheets({
+    phone,
+    operacion: estado.operacion,
+    monto: estado.monto,
+    destino: estado.destino,
+    municipio: estado.municipio
+  });
 
   res.sendStatus(200);
 });
 
-app.get("/", (req, res) => res.send("🚀 YordaBot CRM Online ✅"));
+app.get("/", (req, res) => res.send("🚀 YordaBot CRM Discreto Online ✅"));
 
-app.listen(PORT, "0.0.0.0", () => console.log(`Servidor en puerto ${PORT}`));
+app.listen(PORT, "0.0.0.0", () => console.log(`Servidor activo en puerto ${PORT}`));
