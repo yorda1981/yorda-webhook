@@ -176,131 +176,12 @@ async function autenticarOdoo() {
         (err, uid) => {
 
           if (err) {
-
-            logger("error", "ODOO_AUTH_ERROR", {
-              err: err.message
-            });
-
             return reject(err);
-          }
-
-          if (!uid) {
-
-            return reject(
-              new Error("UID inválido")
-            );
           }
 
           cachedUid = uid;
 
-          logger("info", "ODOO_AUTH_SUCCESS", {
-            uid
-          });
-
           resolve(uid);
-        }
-      );
-
-    } catch (e) {
-
-      reject(e);
-    }
-  });
-}
-
-// =========================
-// CONSULTAR TASAS ODOO
-// =========================
-async function consultarTasasOdoo(
-  tipoMoneda = "CUP"
-) {
-
-  return new Promise(async (resolve, reject) => {
-
-    try {
-
-      const tipo =
-        String(tipoMoneda || "CUP")
-        .trim()
-        .toUpperCase();
-
-      const uid =
-        await autenticarOdoo();
-
-      const urlLimpia =
-        String(ODOO_URL || "")
-        .replace(/\/$/, "");
-
-      const models =
-        xmlrpc.createSecureClient({
-          url: `${urlLimpia}/xmlrpc/2/object`
-        });
-
-      let referenciasBusqueda = [];
-
-      if (tipo === "CUP") {
-
-        referenciasBusqueda = [
-          "TASA_CUP_BAJA",
-          "TASA_CUP_MEDIA",
-          "TASA_CUP_ALTA"
-        ];
-
-      } else if (tipo === "MLC") {
-
-        referenciasBusqueda = [
-          "TASA_MLC"
-        ];
-
-      } else if (tipo === "USD") {
-
-        referenciasBusqueda = [
-          "TASA_USD"
-        ];
-      }
-
-      models.methodCall(
-        "execute_kw",
-        [
-          ODOO_DB,
-          uid,
-          ODOO_API_KEY,
-          "product.product",
-          "search_read",
-          [[
-            [
-              "default_code",
-              "in",
-              referenciasBusqueda
-            ]
-          ]],
-          {
-            fields: [
-              "default_code",
-              "list_price"
-            ]
-          }
-        ],
-        (err, products) => {
-
-          if (err) {
-
-            logger("error", "ODOO_QUERY_ERROR", {
-              err: err.message
-            });
-
-            return reject(err);
-          }
-
-          const tasas = {};
-
-          products.forEach((p) => {
-
-            tasas[p.default_code] =
-              p.list_price;
-          });
-
-          resolve(tasas);
         }
       );
 
@@ -347,17 +228,13 @@ async function registrarEnOdoo(datos) {
       ],
       (err, res) => {
 
-        if (err) {
+        if (!err) {
 
-          return logger("error", "ODOO_CREATE_ERROR", {
-            err: err.message
+          logger("info", "ODOO_LEAD_CREATED", {
+            id: res,
+            phone: datos.phone
           });
         }
-
-        logger("info", "ODOO_LEAD_CREATED", {
-          id: res,
-          phone: datos.phone
-        });
       }
     );
 
@@ -433,34 +310,110 @@ Agora estamos fora do horário 👌
     }
 
     // =========================
-    // OPENAI WORKFLOW
+    // OPENAI ASSISTANT
     // =========================
-    const ai = await axios.post(
-      "https://api.openai.com/v1/responses",
+
+    // 1. Crear thread
+    const thread = await axios.post(
+      "https://api.openai.com/v1/threads",
+      {},
       {
-        model: "gpt-4o-mini",
+        headers: {
+          Authorization: `Bearer ${OPENAI_API_KEY}`,
+          "Content-Type": "application/json",
+          "OpenAI-Beta": "assistants=v2"
+        }
+      }
+    );
 
-        workflow: {
-          id: "wf_68f65c9bd8648190a572e1272e6ae1880cf508aff8bcf40e"
-        },
+    const threadId = thread.data.id;
 
-        input: textMessage
+    // 2. Agregar mensaje
+    await axios.post(
+      `https://api.openai.com/v1/threads/${threadId}/messages`,
+      {
+        role: "user",
+        content: textMessage
       },
       {
         headers: {
-          Authorization:
-            `Bearer ${OPENAI_API_KEY}`,
-          "Content-Type":
-            "application/json"
-        },
-        timeout: 20000
+          Authorization: `Bearer ${OPENAI_API_KEY}`,
+          "Content-Type": "application/json",
+          "OpenAI-Beta": "assistants=v2"
+        }
+      }
+    );
+
+    // 3. Ejecutar assistant
+    const run = await axios.post(
+      `https://api.openai.com/v1/threads/${threadId}/runs`,
+      {
+        assistant_id:
+          "asst_0iCMGSSNWcXP7H6Eo1yEM536"
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${OPENAI_API_KEY}`,
+          "Content-Type": "application/json",
+          "OpenAI-Beta": "assistants=v2"
+        }
+      }
+    );
+
+    const runId = run.data.id;
+
+    // 4. Esperar respuesta
+    let completed = false;
+
+    while (!completed) {
+
+      await new Promise(r =>
+        setTimeout(r, 1500)
+      );
+
+      const check = await axios.get(
+        `https://api.openai.com/v1/threads/${threadId}/runs/${runId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${OPENAI_API_KEY}`,
+            "OpenAI-Beta": "assistants=v2"
+          }
+        }
+      );
+
+      const status = check.data.status;
+
+      if (status === "completed") {
+        completed = true;
+      }
+
+      if (
+        status === "failed" ||
+        status === "cancelled" ||
+        status === "expired"
+      ) {
+
+        throw new Error(
+          `Assistant failed: ${status}`
+        );
+      }
+    }
+
+    // 5. Leer mensajes
+    const messages = await axios.get(
+      `https://api.openai.com/v1/threads/${threadId}/messages`,
+      {
+        headers: {
+          Authorization: `Bearer ${OPENAI_API_KEY}`,
+          "OpenAI-Beta": "assistants=v2"
+        }
       }
     );
 
     const respuestaIA =
-      ai.data?.output?.[0]
+      messages.data.data[0]
       ?.content?.[0]
-      ?.text
+      ?.text?.value
       ?.trim();
 
     if (!respuestaIA) {
@@ -494,55 +447,6 @@ Agora estamos fora do horário 👌
     });
   }
 }
-
-// =========================
-// TOOL ODOO
-// =========================
-app.post(
-  "/tool/consultar-tasas",
-  async (req, res) => {
-
-    try {
-
-      const tipo =
-        String(
-          req.body?.tipo_envio || "CUP"
-        )
-        .trim()
-        .toUpperCase();
-
-      const tasas =
-        await consultarTasasOdoo(tipo);
-
-      if (!Object.keys(tasas).length) {
-
-        return res.status(404).json({
-          status: "error",
-          message:
-            "No se encontraron tasas"
-        });
-      }
-
-      return res.json({
-        status: "success",
-        tipo,
-        tasas
-      });
-
-    } catch (e) {
-
-      logger("error", "CONSULTAR_TASAS_ERROR", {
-        err: e.message
-      });
-
-      return res.status(500).json({
-        status: "error",
-        message:
-          "Error consultando Odoo"
-      });
-    }
-  }
-);
 
 // =========================
 // WEBHOOK
@@ -600,11 +504,6 @@ app.post("/webhook", async (req, res) => {
       .has(fingerprint)
     ) {
 
-      logger("warn", "DUPLICATED_MESSAGE", {
-        phone,
-        text: textMessage
-      });
-
       return res.sendStatus(200);
     }
 
@@ -639,27 +538,21 @@ app.post("/webhook", async (req, res) => {
       "mlc",
       "brl",
       "reales",
-      "dolar",
-      "dólar",
 
       "pix",
       "pagar",
       "pago",
-      "llave pix",
 
       "recarga",
       "saldo",
       "etecsa",
-      "nauta",
 
       "hola",
       "buenas",
       "bom dia",
       "boa tarde",
       "boa noite",
-      "oi",
-      "ola",
-      "olá"
+      "oi"
     ];
 
     const esNegocio =
@@ -728,9 +621,7 @@ app.post("/webhook", async (req, res) => {
   } catch (e) {
 
     logger("error", "WEBHOOK_ERROR", {
-      message: e.message,
-      status: e.response?.status,
-      response: e.response?.data
+      message: e.message
     });
 
     return res.sendStatus(200);
@@ -761,39 +652,5 @@ const server = app.listen(
   }
 );
 
-// =========================
-// TIMEOUTS
-// =========================
 server.keepAliveTimeout = 65000;
 server.headersTimeout = 66000;
-
-// =========================
-// ANTI CRASH
-// =========================
-process.on(
-  "unhandledRejection",
-  (err) => {
-
-    logger(
-      "error",
-      "UNHANDLED_REJECTION",
-      {
-        err: err?.message
-      }
-    );
-  }
-);
-
-process.on(
-  "uncaughtException",
-  (err) => {
-
-    logger(
-      "error",
-      "UNCAUGHT_EXCEPTION",
-      {
-        err: err?.message
-      }
-    );
-  }
-);
