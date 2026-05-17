@@ -11,26 +11,16 @@ const PORT = process.env.PORT || 8080;
    VARIABLES
 ========================= */
 
-const OPENAI_API_KEY =
-  process.env.OPENAI_API_KEY;
-
-const ZAPI_INSTANCE =
-  String(process.env.ZAPI_INSTANCE || "").trim();
-
-const ZAPI_TOKEN =
-  String(process.env.ZAPI_TOKEN || "").trim();
-
-const ZAPI_CLIENT_TOKEN =
-  String(process.env.ZAPI_CLIENT_TOKEN || "").trim();
-
-const WEBHOOK_SECRET =
-  process.env.WEBHOOK_SECRET;
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const ZAPI_INSTANCE  = process.env.ZAPI_INSTANCE;
+const ZAPI_TOKEN     = process.env.ZAPI_TOKEN;
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 
 /* =========================
    MEMORIA RAM
 ========================= */
 
-const pausaHumana = {};
+const pausaHumana   = {};
 const conversaAtiva = {};
 const estadoCliente = {};
 
@@ -38,11 +28,8 @@ const estadoCliente = {};
    CONSTANTES
 ========================= */
 
-const PAUSA_HUMANA_MS =
-  30 * 60 * 1000;
-
-const CONVERSA_ATIVA_MS =
-  5 * 60 * 1000;
+const PAUSA_HUMANA_MS   = 30 * 60 * 1000;
+const CONVERSA_ATIVA_MS = 5 * 60 * 1000;
 
 const PIX_CHAVE =
   "8becaaf5-f296-4cbc-a115-46e3d23b042a";
@@ -51,26 +38,18 @@ const PIX_NOME =
   "YORDANYS RAFAEL SOSA REYES\nNubank";
 
 const GATILHOS = [
-  "remesa",
-  "remesas",
-  "envio",
-  "enviar",
+  "remesa", "remesas",
+  "envio", "enviar",
   "transferencia",
   "transferência",
   "transferir",
-  "cambio",
-  "câmbio",
-  "tasa",
-  "taxa",
-  "tasas",
-  "taxas",
-  "real",
-  "reales",
-  "brl",
-  "cup",
+  "cambio", "câmbio",
+  "tasa", "taxa",
+  "tasas", "taxas",
+  "real", "reales",
+  "brl", "cup",
   "usd",
-  "dolar",
-  "dólar",
+  "dolar", "dólar",
   "pix",
   "mlc",
   "recarga",
@@ -117,55 +96,44 @@ const MUNICIPIOS = [
 ========================= */
 
 function resetEstado(phone) {
-
   estadoCliente[phone] = {
-
     operacion: null,
     etapa: "inicio",
+    moeda: null,
     monto: null,
     municipio: null,
     tarjeta: null,
     numero: null,
     aguardando: null,
     pixEnviado: false
-
   };
-
 }
 
 function getEstado(phone) {
-
   if (!estadoCliente[phone]) {
     resetEstado(phone);
   }
 
   return estadoCliente[phone];
-
 }
 
 function escapeRegex(str) {
-
   return str.replace(
     /[.*+?^${}()|[\]\\]/g,
     "\\$&"
   );
-
 }
 
 function contemPalavra(texto, palavra) {
-
-  const segura =
-    escapeRegex(palavra);
+  const segura = escapeRegex(palavra);
 
   return new RegExp(
     "(^|\\s)" + segura + "(\\s|$)",
     "i"
   ).test(texto);
-
 }
 
 function saudacaoPorHora(hora) {
-
   if (hora >= 6 && hora < 12) {
     return "Buen día 👋 ¿Cómo puedo ayudarte?";
   }
@@ -175,7 +143,6 @@ function saudacaoPorHora(hora) {
   }
 
   return "Buenas noches 👋 ¿Cómo puedo ayudarte?";
-
 }
 
 /* =========================
@@ -187,33 +154,30 @@ setInterval(() => {
   const agora = Date.now();
 
   for (const phone in conversaAtiva) {
-
     if (agora > conversaAtiva[phone]) {
       delete conversaAtiva[phone];
     }
-
   }
 
   for (const phone in pausaHumana) {
-
     if (agora > pausaHumana[phone]) {
       delete pausaHumana[phone];
     }
-
   }
 
   for (const phone in estadoCliente) {
-
     if (
       !conversaAtiva[phone] &&
       !pausaHumana[phone]
     ) {
-
       delete estadoCliente[phone];
-
     }
-
   }
+
+  console.log(
+    "RAM LIMPIA:",
+    Object.keys(estadoCliente).length
+  );
 
 }, 10 * 60 * 1000);
 
@@ -226,35 +190,22 @@ async function enviarMensaje(phone, texto) {
   try {
 
     const url =
-      `https://api.z-api.io/instances/${ZAPI_INSTANCE}/token/${ZAPI_TOKEN}/send-text`;
+      `https://api.z-api.io/instances/${String(ZAPI_INSTANCE).trim()}/token/${String(ZAPI_TOKEN).trim()}/send-text`;
 
     const response = await axios.post(
-
       url,
-
       {
         phone,
         message: texto
       },
-
       {
         headers: {
-
-          "Client-Token":
-            ZAPI_CLIENT_TOKEN,
-
-          "Content-Type":
-            "application/json"
-
+          "Content-Type": "application/json"
         }
       }
-
     );
 
-    console.log(
-      "ENVIADO:",
-      response.data
-    );
+    console.log("ENVIADO:", response.data);
 
   } catch (error) {
 
@@ -276,11 +227,8 @@ async function responderIA(mensagem, estado) {
   try {
 
     const response = await axios.post(
-
       "https://api.openai.com/v1/responses",
-
       {
-
         model: "gpt-4.1-mini",
 
         input:
@@ -299,25 +247,21 @@ REGLAS:
 - Responder corto
 - Máximo 2 líneas
 - Sonar natural
-- Hablar idioma cliente
-- No sonar IA`
-
+- No sonar como IA
+- Hablar en idioma del cliente
+- No repetir preguntas
+- No pedir datos ya informados`
       },
 
       {
-
         headers: {
-
           Authorization:
             "Bearer " + OPENAI_API_KEY,
 
           "Content-Type":
             "application/json"
-
         }
-
       }
-
     );
 
     const textoIA =
@@ -337,6 +281,98 @@ REGLAS:
     return "Dime 👍";
 
   }
+
+}
+
+/* =========================
+   DETECTORES
+========================= */
+
+function detectarOperacion(texto) {
+
+  if (
+    texto.includes("recarga") ||
+    texto.includes("etecsa")
+  ) {
+    return "recarga";
+  }
+
+  if (
+    texto.includes("transferencia") ||
+    texto.includes("transferir")
+  ) {
+    return "transferencia";
+  }
+
+  if (
+    texto.includes("entrega") ||
+    texto.includes("habana") ||
+    texto.includes("efectivo")
+  ) {
+    return "entrega";
+  }
+
+  return null;
+}
+
+function detectarMonto(texto, estado) {
+
+  const match =
+    texto.match(/\b\d{1,6}([.,]\d{1,2})?\b/);
+
+  if (match) {
+    estado.monto = match[0];
+  }
+
+}
+
+function detectarTarjeta(texto, estado) {
+
+  const numeros =
+    texto.replace(/\D/g, "");
+
+  if (/^\d{16}$/.test(numeros)) {
+    estado.tarjeta = numeros;
+  }
+
+}
+
+function detectarNumero(texto, estado) {
+
+  const numeros =
+    texto.replace(/\D/g, "");
+
+  if (/^\d{8,11}$/.test(numeros)) {
+    estado.numero = numeros;
+  }
+
+}
+
+function detectarMunicipio(texto, estado) {
+
+  for (const m of MUNICIPIOS) {
+
+    if (texto.includes(m)) {
+      estado.municipio = m;
+      return;
+    }
+
+  }
+
+}
+
+/* =========================
+   PIX
+========================= */
+
+async function enviarPix(phone, estado) {
+
+  estado.etapa = "esperando_comprovante";
+  estado.pixEnviado = true;
+  estado.aguardando = "comprovante";
+
+  await enviarMensaje(phone, PIX_CHAVE);
+  await enviarMensaje(phone, PIX_NOME);
 
 }
 
@@ -364,9 +400,7 @@ function verificarAutorizacao(
     headerSecret === WEBHOOK_SECRET ||
     queryToken === WEBHOOK_SECRET
   ) {
-
     return next();
-
   }
 
   console.log(
@@ -392,75 +426,44 @@ app.post(
 
       const body = req.body;
 
-      const phone =
-        String(body.phone || "");
-
-      /* =========================
-         IGNORAR GRUPOS
-      ========================== */
-
-      if (
-        body.isGroup === true ||
-        body.isNewsletter === true ||
-        body.isEdit === true ||
-        phone.includes("-group")
-      ) {
-
-        console.log(
-          "IGNORANDO GRUPO"
-        );
-
-        return res.sendStatus(200);
-
-      }
-
-      /* =========================
-         ANTI LOOP
-      ========================== */
-
       if (
         body.fromApi === true &&
         body.fromMe === true
       ) {
-
         return res.sendStatus(200);
-
       }
 
-      /* =========================
-         PAUSA HUMANA
-      ========================== */
+      if (body.fromMe === true) {
 
-      if (
-        body.fromMe === true &&
-        !phone.includes("-group")
-      ) {
-
-        pausaHumana[phone] =
+        pausaHumana[body.phone] =
           Date.now() + PAUSA_HUMANA_MS;
 
         console.log(
           "PAUSA HUMANA:",
-          phone
+          body.phone
         );
 
         return res.sendStatus(200);
+      }
 
+      if (
+        body.isGroup === true ||
+        body.isNewsletter === true ||
+        body.isEdit === true
+      ) {
+        return res.sendStatus(200);
       }
 
       const texto =
         body?.text?.message || "";
 
+      const phone = body.phone;
+
       if (!texto || !phone) {
         return res.sendStatus(200);
       }
 
-      /* =========================
-         HORA
-      ========================== */
-
       const hora = Number(
-
         new Date().toLocaleString(
           "en-US",
           {
@@ -469,44 +472,30 @@ app.post(
             hour12: false
           }
         )
-
       );
 
       if (hora >= 22 || hora < 6) {
         return res.sendStatus(200);
       }
 
-      /* =========================
-         BOT PAUSADO
-      ========================== */
-
       if (
         pausaHumana[phone] &&
         Date.now() < pausaHumana[phone]
       ) {
-
         console.log(
           "BOT PAUSADO:",
           phone
         );
 
         return res.sendStatus(200);
-
       }
 
-      console.log(
-        "MENSAGEM:",
-        texto
-      );
+      console.log("MENSAGEM:", texto);
 
       const textoLimpo =
         texto
           .toLowerCase()
           .replace(/[^\w\s]/gi, " ");
-
-      /* =========================
-         HUMANO
-      ========================== */
 
       if (
         textoLimpo.includes("yordanys") ||
@@ -526,29 +515,19 @@ app.post(
 
       }
 
-      /* =========================
-         COMERCIAL
-      ========================== */
-
       const esComercial =
         GATILHOS.some(g =>
           contemPalavra(textoLimpo, g)
         );
 
       if (esComercial) {
-
         conversaAtiva[phone] =
           Date.now() + CONVERSA_ATIVA_MS;
-
       }
 
       const conversaEmAndamento =
         conversaAtiva[phone] &&
         Date.now() < conversaAtiva[phone];
-
-      /* =========================
-         SAUDAÇÃO
-      ========================== */
 
       const esSaudacao =
         SAUDACOES.some(s =>
@@ -574,134 +553,39 @@ app.post(
         !esComercial &&
         !conversaEmAndamento
       ) {
-
         return res.sendStatus(200);
-
       }
 
-      /* =========================
-         ESTADO
-      ========================== */
+      let estado = getEstado(phone);
 
-      let estado =
-        getEstado(phone);
-
-      /* =========================
-         OPERACION
-      ========================== */
+      const operacion =
+        detectarOperacion(textoLimpo);
 
       if (
-        textoLimpo.includes("transferencia") ||
-        textoLimpo.includes("transferir")
+        operacion &&
+        operacion !== estado.operacion
       ) {
 
-        estado.operacion =
-          "transferencia";
+        resetEstado(phone);
+
+        estadoCliente[phone].operacion =
+          operacion;
+
+        estado =
+          estadoCliente[phone];
 
       }
 
-      if (
-        textoLimpo.includes("entrega") ||
-        textoLimpo.includes("habana")
-      ) {
-
-        estado.operacion =
-          "entrega";
-
-      }
-
-      if (
-        textoLimpo.includes("recarga") ||
-        textoLimpo.includes("etecsa")
-      ) {
-
-        estado.operacion =
-          "recarga";
-
-      }
-
-      /* =========================
-         MONTO
-      ========================== */
-
-      const matchMonto =
-        texto.match(/\b\d{1,6}\b/);
-
-      if (
-        matchMonto &&
-        estado.etapa ===
-          "esperando_monto"
-      ) {
-
-        estado.monto =
-          matchMonto[0];
-
-      }
-
-      /* =========================
-         TARJETA
-      ========================== */
-
-      const numeros =
-        texto.replace(/\D/g, "");
-
-      if (
-        estado.etapa ===
-          "esperando_tarjeta" &&
-
-        /^\d{16}$/.test(numeros)
-      ) {
-
-        estado.tarjeta =
-          numeros;
-
-      }
-
-      /* =========================
-         NUMERO
-      ========================== */
-
-      if (
-        estado.etapa ===
-          "esperando_numero" &&
-
-        /^\d{8,11}$/.test(numeros)
-      ) {
-
-        estado.numero =
-          numeros;
-
-      }
-
-      /* =========================
-         MUNICIPIO
-      ========================== */
-
-      if (
-        estado.etapa ===
-          "esperando_municipio"
-      ) {
-
-        for (const m of MUNICIPIOS) {
-
-          if (
-            textoLimpo.includes(m)
-          ) {
-
-            estado.municipio = m;
-
-          }
-
-        }
-
-      }
+      detectarMonto(texto, estado);
+      detectarTarjeta(texto, estado);
+      detectarNumero(texto, estado);
+      detectarMunicipio(textoLimpo, estado);
 
       /* =========================
          COMPROVANTE
       ========================== */
 
       if (
-
         estado.aguardando ===
           "comprovante" &&
 
@@ -713,7 +597,6 @@ app.post(
           textoLimpo.includes("enviado") ||
           textoLimpo.includes("comprovante")
         )
-
       ) {
 
         await enviarMensaje(
@@ -738,10 +621,7 @@ app.post(
          TRANSFERENCIA
       ========================== */
 
-      if (
-        estado.operacion ===
-          "transferencia"
-      ) {
+      if (estado.operacion === "transferencia") {
 
         if (!estado.monto) {
 
@@ -754,7 +634,6 @@ app.post(
           );
 
           return res.sendStatus(200);
-
         }
 
         if (!estado.tarjeta) {
@@ -768,6 +647,16 @@ app.post(
           );
 
           return res.sendStatus(200);
+        }
+
+        if (!estado.pixEnviado) {
+
+          await enviarPix(
+            phone,
+            estado
+          );
+
+          return res.sendStatus(200);
 
         }
 
@@ -777,10 +666,7 @@ app.post(
          ENTREGA
       ========================== */
 
-      if (
-        estado.operacion ===
-          "entrega"
-      ) {
+      if (estado.operacion === "entrega") {
 
         if (!estado.monto) {
 
@@ -793,7 +679,6 @@ app.post(
           );
 
           return res.sendStatus(200);
-
         }
 
         if (!estado.municipio) {
@@ -807,6 +692,16 @@ app.post(
           );
 
           return res.sendStatus(200);
+        }
+
+        if (!estado.pixEnviado) {
+
+          await enviarPix(
+            phone,
+            estado
+          );
+
+          return res.sendStatus(200);
 
         }
 
@@ -816,10 +711,7 @@ app.post(
          RECARGA
       ========================== */
 
-      if (
-        estado.operacion ===
-          "recarga"
-      ) {
+      if (estado.operacion === "recarga") {
 
         if (!estado.monto) {
 
@@ -832,7 +724,6 @@ app.post(
           );
 
           return res.sendStatus(200);
-
         }
 
         if (!estado.numero) {
@@ -846,44 +737,23 @@ app.post(
           );
 
           return res.sendStatus(200);
+        }
+
+        if (!estado.pixEnviado) {
+
+          await enviarPix(
+            phone,
+            estado
+          );
+
+          return res.sendStatus(200);
 
         }
 
       }
 
       /* =========================
-         PIX
-      ========================== */
-
-      if (
-        estado.operacion &&
-        !estado.pixEnviado
-      ) {
-
-        estado.pixEnviado = true;
-
-        estado.aguardando =
-          "comprovante";
-
-        estado.etapa =
-          "esperando_comprovante";
-
-        await enviarMensaje(
-          phone,
-          PIX_CHAVE
-        );
-
-        await enviarMensaje(
-          phone,
-          PIX_NOME
-        );
-
-        return res.sendStatus(200);
-
-      }
-
-      /* =========================
-         OPENAI
+         OPENAI FALLBACK
       ========================== */
 
       const respostaIA =
@@ -919,9 +789,7 @@ app.post(
 ========================= */
 
 app.get("/", (req, res) => {
-
   res.send("YordaBot ONLINE");
-
 });
 
 /* =========================
@@ -929,9 +797,7 @@ app.get("/", (req, res) => {
 ========================= */
 
 app.listen(PORT, () => {
-
   console.log(
     "Servidor ONLINE puerto " + PORT
   );
-
 });
