@@ -1,12 +1,15 @@
 {
   "name": "yorda-webhook",
   "version": "1.0.0",
+  "description": "Webhook para YordaBot",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "axios": "^1.6.8",
-    "express": "^4.18.2"
+    "express": "^4.18.2",
+    "axios": "^1.6.2",
+    "googleapis": "^126.0.0",
+    "openai": "^4.20.1"
   }
 }
