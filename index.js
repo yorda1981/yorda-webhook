@@ -1,177 +1,131 @@
-const express = require("express");
-const axios = require("axios");
-
-// --- 1. FAIL-FAST & CONFIG ---
-const requiredEnv = ["ZAPI_INSTANCE", "ZAPI_TOKEN", "ZAPI_CLIENT_TOKEN", "AGENTE_URL"];
-requiredEnv.forEach(key => { if (!process.env[key]) process.exit(1); });
-
-const logger = (level, event, dados = {}) => {
-  console.log(JSON.stringify({ level, event, timestamp: new Date().toISOString(), ...dados }));
-};
+const express = require('express');
+const axios = require('axios');
+const { google } = require('googleapis');
+const { OpenAI } = require('openai');
 
 const app = express();
-app.set("trust proxy", true);
-app.disable("x-powered-by");
-app.use(express.json({ limit: "5mb" }));
+app.use(express.json());
 
-const PORT = process.env.PORT || 8080;
-const { ZAPI_INSTANCE, ZAPI_TOKEN, ZAPI_CLIENT_TOKEN, WEBHOOK_SECRET, AGENTE_URL } = process.env;
+// --- CONFIGURACIÓN DE VARIABLES ---
+const ZAPI_URL = process.env.ZAPI_URL;
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const SPREADSHEET_ID = process.env.SPREADSHEET_ID || '1aNCBl-vEgOOfuA8o0EetDJoOaaAPxffkfePc4Rg0wXQ';
 
-/* =========================
-   MEMORIA Y COLAS (PROXY)
-========================= */
-const estadoCliente = {}; 
-const queues = {}; 
-const flood = {}; 
-const buffers = {}; 
+const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
-const resetEstado = (phone) => {
-  estadoCliente[phone] = { operacion: null, etapa: "inicio", monto: null, numero: null, aguardando: null, pixEnviado: false, ultimoContato: Date.now() };
-};
-
-const getEstado = (phone) => {
-  if (!estadoCliente[phone]) resetEstado(phone);
-  estadoCliente[phone].ultimoContato = Date.now();
-  return estadoCliente[phone];
-};
-
-// Garbage Collector (Higiene de RAM)
-setInterval(() => {
-  const agora = Date.now();
-  Object.keys(estadoCliente).forEach(p => { if (agora - estadoCliente[p].ultimoContato > 86400000) delete estadoCliente[p]; });
-  Object.keys(queues).forEach(p => { if (!queues[p].processing && agora - queues[p].last > 60000) delete queues[p]; });
-  Object.keys(flood).forEach(p => { if (agora - flood[p] > 60000) delete flood[p]; });
-  Object.keys(buffers).forEach(p => { if (agora - buffers[p].last > 30000) delete buffers[p]; });
-}, 60000);
-
-/* =========================
-   SISTEMA DE COMUNICACIÓN
-========================= */
-async function enviarMensaje(phone, message, retries = 2) {
-  for (let i = 0; i <= retries; i++) {
-    try {
-      await axios.post(`https://api.z-api.io/instances/${ZAPI_INSTANCE}/token/${ZAPI_TOKEN}/send-text`, 
-        { phone, message }, { timeout: 15000, headers: { "Client-Token": ZAPI_CLIENT_TOKEN } });
-      return;
-    } catch (e) {
-      if (i === retries) logger("error", "ERR_ZAPI", { phone, error: e.message });
-      else await new Promise(r => setTimeout(r, 1000));
-    }
-  }
-}
-
-/* =========================
-   PROCESAMIENTO PROXY (v2.0)
-========================= */
-async function procesarHaciaAgente(phone, textoCompleto, tieneMedia, esAudio) {
-  const start = Date.now();
-  const estadoActual = getEstado(phone);
-  const textoSeguro = String(textoCompleto || "").slice(0, 1500); 
-
-  try {
-    // --- LLAMADA AL AGENTE EXTERNO (El Cerebro) ---
-    const agenteRes = await axios.post(AGENTE_URL, {
-      phone,
-      texto: textoSeguro,
-      estado: estadoActual,
-      media: tieneMedia,
-      audio: esAudio,
-      timestamp: Date.now()
-    }, { timeout: 20000 });
-
-    const { reply, state, internalLog } = agenteRes.data;
-
-    // 1. Sincronización de Estado (Si el Agente lo solicita)
-    if (state) {
-      estadoCliente[phone] = {
-        ...estadoActual,
-        ...state,
-        ultimoContato: Date.now()
-      };
-    }
-
-    // 2. Ejecución de Respuesta
-    if (reply) {
-      await enviarMensaje(phone, reply);
-    }
-
-    if (internalLog) logger("info", "AGENT_INTERNAL_LOG", { phone, ...internalLog });
-    logger("info", "PROC_SUCCESS", { phone, duration: Date.now() - start });
-
-  } catch (e) {
-    logger("error", "AGENT_COMM_ERR", { phone, err: e.message });
-    // Opcional: Notificar al usuario que hay una demora técnica
-  }
-}
-
-/* =========================
-   WEBHOOK (GESTIÓN DE COLAS)
-========================= */
-app.post("/webhook", async (req, res) => {
-  // Seguridad de Webhook
-  if (WEBHOOK_SECRET && (req.query.token || req.headers["x-webhook-secret"]) !== WEBHOOK_SECRET) return res.sendStatus(401);
-
-  const body = req.body;
-  const phone = body.phone;
-  const status = String(body.status || "").toUpperCase();
-  const fromMe = body.fromMe === true || body.fromMe === "true";
-
-  if (status && status !== "RECEIVED") return res.sendStatus(200);
-  if (!phone || fromMe || body.isGroup || String(body.chatLid).includes("@lid")) return res.sendStatus(200);
-
-  // Flood Control
-  const agora = Date.now();
-  if (flood[phone] && (agora - flood[phone] < 1000)) return res.sendStatus(200);
-  flood[phone] = agora;
-
-  // Buffer / Debounce
-  if (!buffers[phone]) buffers[phone] = { texts: [], hasMedia: false, esAudio: false, timer: null, last: agora };
-
-  const msgText = body?.text?.message || "";
-  if (msgText) {
-      buffers[phone].texts.push(msgText);
-      if (buffers[phone].texts.length > 20) buffers[phone].texts.shift();
-  }
-
-  const tipo = String(body.type || "").toLowerCase();
-  if (tipo.includes("image") || tipo.includes("document") || body.image || body.document) buffers[phone].hasMedia = true;
-  if (tipo.includes("audio") || tipo.includes("ptt")) buffers[phone].esAudio = true;
-
-  buffers[phone].last = agora;
-  if (buffers[phone].timer) clearTimeout(buffers[phone].timer);
-
-  buffers[phone].timer = setTimeout(async () => {
-    const fullText = buffers[phone].texts.join(" ");
-    const media = buffers[phone].hasMedia;
-    const audio = buffers[phone].esAudio;
-    delete buffers[phone];
-
-    if (!queues[phone]) queues[phone] = { tasks: [], processing: false, last: Date.now() };
-    
-    if (queues[phone].tasks.length > 25) queues[phone].tasks.shift();
-    queues[phone].tasks.push({ fullText, media, audio });
-    queues[phone].last = Date.now();
-
-    if (!queues[phone].processing) {
-        queues[phone].processing = true;
-        try {
-            while (queues[phone].tasks.length > 0) {
-                const task = queues[phone].tasks.shift();
-                await procesarHaciaAgente(phone, task.fullText, task.media, task.audio);
-            }
-        } catch (e) {
-            logger("error", "QUEUE_CRASH", { phone, err: e.message });
-        } finally {
-            queues[phone].processing = false;
-        }
-    }
-  }, 1500);
-
-  res.sendStatus(200);
+// Ruta de salud para que Railway no desconecte el bot
+app.get('/', (req, res) => {
+    res.send('🚀 YordaBot está vivo y operando ✅');
 });
 
-app.get("/", (req, res) => res.send("YordaProxy v2.0 - Agent Orquestator"));
+// Configuración de Google Sheets con manejo de error de JSON
+let sheets;
+try {
+    const auth = new google.auth.GoogleAuth({
+        credentials: JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON),
+        scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+    });
+    sheets = google.sheets({ version: 'v4', auth });
+} catch (error) {
+    console.error('❌ Error crítico en el JSON de Google:', error.message);
+}
 
-const server = app.listen(PORT, "0.0.0.0", () => logger("info", "SERVER_START", { port: PORT }));
-server.keepAliveTimeout = 65000;
-server.headersTimeout = 66000;
+// --- LÓGICA DEL AGENTE v2.6 ---
+async function procesarAgente(input) {
+    const { phone, texto, estado, history, media } = input;
+    const TASA_CUP = 115;
+    
+    const VALID_STEPS = {
+        "inicio": ["esperando_monto"],
+        "esperando_monto": ["esperando_numero", "esperando_monto"],
+        "esperando_numero": ["esperando_comprobante", "esperando_numero"],
+        "esperando_comprobante": ["completado", "esperando_comprobante"],
+        "completado": ["inicio"]
+    };
+
+    if (estado.etapa === "esperando_comprobante" && media) {
+        estado.etapa = "completado";
+    }
+
+    try {
+        const response = await openai.chat.completions.create({
+            model: "gpt-4o-mini",
+            messages: [
+                { role: "system", content: `Eres YordaBot, gestor de remesas. Tasa: 1 BRL = ${TASA_CUP} CUP. Estado actual: ${JSON.stringify(estado)}. Responde siempre en JSON con: {"reply": "texto", "intent": "remesa|otro", "confidence": 0.9, "extracted": {"monto": "100", "numero": "string"}}` },
+                ...history,
+                { role: "user", content: texto }
+            ],
+            response_format: { type: "json_object" },
+            temperature: 0.1
+        });
+
+        const res = JSON.parse(response.choices[0].message.content);
+        let nextState = { ...estado };
+        
+        if (res.extracted?.monto && VALID_STEPS[estado.etapa]?.includes("esperando_numero")) {
+            nextState.monto = res.extracted.monto;
+            nextState.etapa = "esperando_numero";
+        }
+        if (res.extracted?.numero && VALID_STEPS[estado.etapa]?.includes("esperando_comprobante")) {
+            nextState.numero = res.extracted.numero;
+            nextState.etapa = "esperando_comprobante";
+        }
+
+        return { reply: res.reply, state: nextState, handoff: res.confidence < 0.5 };
+    } catch (e) {
+        return { reply: "Lo siento, ¿puedes repetir eso? 👌", state: estado };
+    }
+}
+
+// --- WEBHOOK PRINCIPAL ---
+app.post('/webhook', async (req, res) => {
+    // Railway/Z-API a veces manda pings de prueba, respondemos 200 rápido
+    res.sendStatus(200); 
+
+    const { phone, text, isMedia } = req.body;
+    if (!phone || !text) return;
+
+    try {
+        // 1. Leer de Google Sheets
+        const data = await sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: 'Hoja 1!A:H' });
+        const rows = data.data.values || [];
+        const rowIndex = rows.findIndex(r => r[0] === String(phone));
+        
+        let estado = rowIndex !== -1 ? { 
+            phone: rows[rowIndex][0], 
+            etapa: rows[rowIndex][1],
+            monto: rows[rowIndex][2],
+            numero: rows[rowIndex][4]
+        } : { etapa: 'inicio' };
+
+        // 2. Procesar respuesta
+        const result = await procesarAgente({ phone, texto: text, estado, history: [], media: isMedia });
+
+        // 3. Actualizar Google Sheets
+        const rowValue = [String(phone), result.state.etapa, result.state.monto || '', '', result.state.numero || '', 'es', Date.now(), 'false'];
+        
+        if (rowIndex === -1) {
+            await sheets.spreadsheets.values.append({
+                spreadsheetId: SPREADSHEET_ID, range: 'Hoja 1!A:H',
+                valueInputOption: 'USER_ENTERED', resource: { values: [rowValue] }
+            });
+        } else {
+            await sheets.spreadsheets.values.update({
+                spreadsheetId: SPREADSHEET_ID, range: `Hoja 1!A${rowIndex + 1}`,
+                valueInputOption: 'USER_ENTERED', resource: { values: [rowValue] }
+            });
+        }
+
+        // 4. Enviar a WhatsApp vía Z-API
+        await axios.post(ZAPI_URL, { phone, text: result.reply });
+
+    } catch (error) {
+        console.error('❌ Error procesando mensaje:', error.message);
+    }
+});
+
+// --- INICIO DEL SERVIDOR (Configuración para Railway) ---
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 YordaBot activo en puerto ${PORT}`);
+});
