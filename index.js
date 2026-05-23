@@ -419,14 +419,7 @@ async function procesarMensaje(phone, textMessage) {
       }
     );
 
-    await enviarMensaje(
-      phone,
-`Lo siento 🙏
-
-Estoy teniendo una demora momentánea.`
-    );
-  }
-}
+  
 
 // =========================
 // WEBHOOK
