@@ -351,6 +351,21 @@ async function procesarMensaje(phone, textMessage) {
         completed = true;
 
       } else if (
+        state ===
+        "requires_action"
+      ) {
+
+        logger(
+          "warn",
+          "ASSISTANT_REQUIRES_ACTION",
+          {
+            phone
+          }
+        );
+
+        return;
+
+      } else if (
 
         [
           "failed",
@@ -419,7 +434,8 @@ async function procesarMensaje(phone, textMessage) {
       }
     );
 
-  
+  }
+}
 
 // =========================
 // WEBHOOK
