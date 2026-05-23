@@ -1,3 +1,209 @@
+const stageCache = {};
+
+function obtenerStageIdPorNombre(
+  models,
+  uid,
+  nombre
+) {
+
+  return new Promise((resolve, reject) => {
+
+    if (stageCache[nombre]) {
+
+      return resolve(
+        stageCache[nombre]
+      );
+    }
+
+    models.methodCall(
+
+      "execute_kw",
+
+      [
+        ODOO_DB,
+        uid,
+        ODOO_API_KEY,
+
+        "crm.stage",
+        "search_read",
+
+        [[
+          ["name", "=", nombre]
+        ]],
+
+        {
+          fields: ["id", "name"],
+          limit: 1
+        }
+      ],
+
+      (err, res) => {
+
+        if (err) {
+          return reject(err);
+        }
+
+        if (
+          !res ||
+          !res.length
+        ) {
+
+          return resolve(null);
+        }
+
+        const id =
+          res[0].id;
+
+        stageCache[nombre] =
+          id;
+
+        resolve(id);
+      }
+    );
+  });
+}
+
+function detectarEtapa(texto) {
+
+  const t =
+    String(texto || "")
+    .toLowerCase();
+
+  // =========================
+  // PAGO CONFIRMADO
+  // =========================
+  if (
+
+    t.includes("pagué") ||
+    t.includes("pague") ||
+    t.includes("comprobante") ||
+    t.includes("listo") ||
+    t.includes("hecho")
+
+  ) {
+
+    return "Pago confirmado";
+  }
+
+  // =========================
+  // FINALIZADO
+  // =========================
+  if (
+
+    t.includes("finalizado") ||
+    t.includes("entregado")
+
+  ) {
+
+    return "Finalizado";
+  }
+
+  // =========================
+  // TASA ENVIADA
+  // =========================
+  if (
+
+    t.includes("real") ||
+    t.includes("reales") ||
+    t.includes("cup") ||
+    t.includes("usd") ||
+    t.includes("mlc") ||
+    t.includes("quiero enviar") ||
+    t.includes("cuánto") ||
+    t.includes("cuanto")
+
+  ) {
+
+    return "Tasa enviada";
+  }
+
+  return "Interesado";
+}
+
+async function moverLeadEtapa(
+  models,
+  uid,
+  leadId,
+  nombreEtapa
+) {
+
+  try {
+
+    const stageId =
+      await obtenerStageIdPorNombre(
+        models,
+        uid,
+        nombreEtapa
+      );
+
+    if (!stageId) {
+
+      return logger(
+        "warn",
+        "STAGE_NOT_FOUND",
+        {
+          nombreEtapa
+        }
+      );
+    }
+
+    models.methodCall(
+
+      "execute_kw",
+
+      [
+        ODOO_DB,
+        uid,
+        ODOO_API_KEY,
+
+        "crm.lead",
+        "write",
+
+        [
+          [leadId],
+          {
+            stage_id:
+              stageId
+          }
+        ]
+      ],
+
+      (err) => {
+
+        if (err) {
+
+          return logger(
+            "error",
+            "MOVE_STAGE_ERROR",
+            {
+              err: err.message
+            }
+          );
+        }
+
+        logger(
+          "info",
+          "LEAD_STAGE_UPDATED",
+          {
+            leadId,
+            nombreEtapa
+          }
+        );
+      }
+    );
+
+  } catch (e) {
+
+    logger(
+      "error",
+      "MOVE_STAGE_FATAL",
+      {
+        err: e.message
+      }
+    );
+  }
+}
+
 function registrarEnOdoo(datos) {
 
   try {
@@ -8,17 +214,20 @@ function registrarEnOdoo(datos) {
 
     const common =
       xmlrpc.createSecureClient({
+
         url:
 `${urlLimpia}/xmlrpc/2/common`
       });
 
     const models =
       xmlrpc.createSecureClient({
+
         url:
 `${urlLimpia}/xmlrpc/2/object`
       });
 
     common.methodCall(
+
       "authenticate",
 
       [
@@ -28,7 +237,7 @@ function registrarEnOdoo(datos) {
         {}
       ],
 
-      (err, uid) => {
+      async (err, uid) => {
 
         if (err) {
 
@@ -50,7 +259,7 @@ function registrarEnOdoo(datos) {
         }
 
         // =========================
-        // BUSCAR LEAD EXISTENTE
+        // SEARCH LEAD
         // =========================
         models.methodCall(
 
@@ -73,7 +282,7 @@ function registrarEnOdoo(datos) {
             }
           ],
 
-          (err, leads) => {
+          async (err, leads) => {
 
             if (err) {
 
@@ -86,8 +295,13 @@ function registrarEnOdoo(datos) {
               );
             }
 
+            const etapaDetectada =
+              detectarEtapa(
+                datos.mensaje
+              );
+
             // =========================
-            // SI EXISTE → UPDATE
+            // UPDATE
             // =========================
             if (
               leads &&
@@ -111,6 +325,7 @@ function registrarEnOdoo(datos) {
 
                   [
                     [leadId],
+
                     {
                       description:
 `${datos.mensaje}
@@ -122,7 +337,7 @@ ${new Date().toLocaleString()}
                   ]
                 ],
 
-                (err) => {
+                async (err) => {
 
                   if (err) {
 
@@ -143,12 +358,19 @@ ${new Date().toLocaleString()}
                       phone: datos.phone
                     }
                   );
+
+                  await moverLeadEtapa(
+                    models,
+                    uid,
+                    leadId,
+                    etapaDetectada
+                  );
                 }
               );
             }
 
             // =========================
-            // SI NO EXISTE → CREATE
+            // CREATE
             // =========================
             models.methodCall(
 
@@ -178,7 +400,7 @@ ${new Date().toLocaleString()}
                 }]]
               ],
 
-              (err, res) => {
+              async (err, res) => {
 
                 if (err) {
 
@@ -198,6 +420,13 @@ ${new Date().toLocaleString()}
                     id: res,
                     phone: datos.phone
                   }
+                );
+
+                await moverLeadEtapa(
+                  models,
+                  uid,
+                  res,
+                  etapaDetectada
                 );
               }
             );
