@@ -7,6 +7,8 @@ const rateLimit = require("express-rate-limit");
 require("dotenv").config();
 
 const app = express();
+const PORT = process.env.PORT || 8080; // Definido al inicio para evitar errores
+
 app.use(express.json({ limit: "10mb" }));
 app.set("trust proxy", 1);
 app.disable("x-powered-by");
@@ -173,68 +175,4 @@ async function procesarMensaje(phone, textMessage) {
 }
 
 // =========================
-// WEBHOOK (LÓGICA DE NEGOCIO)
-// =========================
-app.post("/webhook", async (req, res) => {
-  try {
-    const body = req.body || {};
-    const messageId = body.messageId || "";
-    if (mensajesProcesados.has(messageId)) return res.sendStatus(200);
-    mensajesProcesados.add(messageId);
-
-    const fromMe = body.fromMe === true || body.fromMe === "true";
-    const isGroup = body.isGroup === true || body.isGroup === "true";
-    const phone = String(body.phone || "").replace(/\D/g, "");
-    const textMessage = String(body.text?.message || "").trim();
-
-    if (!phone || !textMessage || isGroup) return res.sendStatus(200);
-
-    // TAKEOVER HUMANO
-    if (fromMe) {
-      humanTakeover[phone] = Date.now();
-      if (redis) await redis.set(`ctx:${phone}`, JSON.stringify({ humano: true }), "EX", 1800);
-      return res.sendStatus(200);
-    }
-
-    let ctx = null;
-    if (redis) {
-      const redisCtx = await redis.get(`ctx:${phone}`);
-      if (redisCtx) ctx = JSON.parse(redisCtx);
-    }
-
-    if (ctx?.humano || (humanTakeover[phone] && (Date.now() - humanTakeover[phone]) < 1800000)) return res.sendStatus(200);
-
-    // BUFFER & GATILLOS REFORZADOS (CORRECCIÓN 10mil pesos)
-    if (!buffers[phone]) buffers[phone] = { textos: [], timeout: null };
-    buffers[phone].textos.push(textMessage);
-    clearTimeout(buffers[phone].timeout);
-
-    buffers[phone].timeout = setTimeout(async () => {
-      try {
-        const finalMessage = buffers[phone].textos.join("\n");
-        delete buffers[phone];
-        const lower = finalMessage.toLowerCase();
-
-        // LÓGICA DE ACTIVACIÓN FLEXIBLE
-        const gatillosNegocio = ["remesa", "envio", "enviar", "mandar", "cambio", "tasa", "cuanto", "cuánto", "cup", "pesos", "mlc", "usd", "dolar", "dólar", "reales", "real", "r$", "rs", "pix", "tarjeta", "recarga", "saldo", "pago", "pagar", "pague", "pagué", "listo", "demora", "retraso"];
-        const tieneNumero = /\d+/.test(lower) || /mil\b/.test(lower) || / k\b/.test(lower);
-        const esNegocio = gatillosNegocio.some(g => lower.includes(g)) || tieneNumero;
-
-        if (!esNegocio) return;
-
-        logger("info", "MESSAGE_RECEIVED", { phone, message: finalMessage });
-        sincronizarOdoo(phone, finalMessage);
-        await procesarMensaje(phone, finalMessage);
-      } catch (e) { logger("error", "BUFFER_ERROR", { err: e.message }); }
-    }, 1500);
-
-    return res.sendStatus(200);
-  } catch (e) { res.sendStatus(200); }
-});
-
-app.get("/", (req, res) => res.send("YordaBot Online"));
-
-app.listen(PORT, "0.0.0.0", () => console.log(`✅ Servidor activo puerto ${PORT}`));
-
-process.on("unhandledRejection", err => logger("error", "UNHANDLED_REJECTION", { err: err?.message }));
-process.on("uncaughtException", err => logger("error", "UNCAUGHT_EXCEPTION", { err: err?.message }));
+// WEBHOOK
