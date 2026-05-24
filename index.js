@@ -1,13 +1,20 @@
 const express = require("express");
 const axios = require("axios");
 const xmlrpc = require("xmlrpc");
+const Redis = require("ioredis");
+const rateLimit = require("express-rate-limit");
 
 const app = express();
-
 app.disable("x-powered-by");
 app.set("trust proxy", true);
 
 app.use(express.json({ limit: "10mb" }));
+app.use(rateLimit({
+  windowMs: 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false
+}));
 
 const PORT = process.env.PORT || 8080;
 
@@ -20,992 +27,198 @@ const {
   ODOO_URL,
   ODOO_DB,
   ODOO_USER,
-  ODOO_API_KEY
+  ODOO_API_KEY,
+  REDIS_URL
 } = process.env;
 
 // =========================
-// VALIDAR ENV
+// PERSISTENCIA & CACHE REAL
 // =========================
-const required = [
-  "OPENAI_API_KEY",
-  "OPENAI_ASSISTANT_ID",
-  "ZAPI_INSTANCE",
-  "ZAPI_TOKEN",
-  "ZAPI_CLIENT_TOKEN",
-  "ODOO_URL",
-  "ODOO_DB",
-  "ODOO_USER",
-  "ODOO_API_KEY"
-];
+const redis = new Redis(REDIS_URL);
+const stageCache = {}; // SOLUCIÓN 1: Cache de Stages funcional
+const mensajesProcesados = new Set(); // SOLUCIÓN 2: Filtro de duplicados funcional
+const buffers = {};
+let cachedUid = null;
 
-for (const key of required) {
-
-  if (!process.env[key]) {
-
-    console.log(`❌ ENV faltante: ${key}`);
-    process.exit(1);
-  }
+async function getThread(phone) { return await redis.get(`thread:${phone}`); }
+async function setThread(phone, threadId) { await redis.set(`thread:${phone}`, threadId, "EX", 86400); }
+async function getContext(phone) {
+  const data = await redis.get(`ctx:${phone}`);
+  return data ? JSON.parse(data) : null;
 }
+async function setContext(phone, data) { await redis.set(`ctx:${phone}`, JSON.stringify(data), "EX", 3600); }
 
-// =========================
-// LOGGER
-// =========================
 function logger(level, event, meta = {}) {
-
-  console.log(JSON.stringify({
-    level,
-    event,
-    timestamp: new Date().toISOString(),
-    ...meta
-  }));
+  console.log(JSON.stringify({ ts: new Date().toISOString(), level, event, ...meta }));
 }
 
-// =========================
-// MEMORIA THREADS
-// =========================
-const threads = new Map();
+// Limpieza de duplicados cada 30 min
+setInterval(() => mensajesProcesados.clear(), 1000 * 60 * 30);
 
 // =========================
-// MENSAJES PROCESADOS
+// ODOO CORE & OPTIMIZACIÓN
 // =========================
-const mensajesProcesados = new Set();
+async function autenticarOdoo() {
+  if (cachedUid) return cachedUid;
+  return new Promise((resolve, reject) => {
+    const urlLimpia = String(ODOO_URL).replace(/\/$/, "");
+    const common = xmlrpc.createSecureClient({ url: `${urlLimpia}/xmlrpc/2/common` });
+    common.methodCall("authenticate", [ODOO_DB, ODOO_USER, ODOO_API_KEY, {}], (err, uid) => {
+      if (err || !uid) return reject(err || new Error("UID inválido"));
+      cachedUid = uid;
+      resolve(uid);
+    });
+  });
+}
 
-// =========================
-// HUMAN TAKEOVER
-// =========================
-const humanTakeover = {};
+async function obtenerStageId(nombre) {
+  if (stageCache[nombre]) return stageCache[nombre]; // Uso real del caché
+  
+  const uid = await autenticarOdoo();
+  const models = xmlrpc.createSecureClient({ url: `${ODOO_URL}/xmlrpc/2/object` });
+  
+  return new Promise((resolve) => {
+    models.methodCall("execute_kw", [ODOO_DB, uid, ODOO_API_KEY, "crm.stage", "search_read", [[["name", "=", nombre]]], { fields: ["id"], limit: 1 }], (err, res) => {
+      if (!err && res.length > 0) {
+        stageCache[nombre] = res[0].id;
+        resolve(res[0].id);
+      } else resolve(null);
+    });
+  });
+}
 
-// =========================
-// STAGE CACHE
-// =========================
-const stageCache = {};
-
-setInterval(() => {
-
-  mensajesProcesados.clear();
-
-}, 1000 * 60 * 30);
-
-// =========================
-// DETECTAR ETAPA
-// =========================
 function detectarEtapa(texto) {
-
-  const t =
-    String(texto || "")
-    .toLowerCase();
-
-  // =========================
-  // PAGO CONFIRMADO
-  // =========================
-  if (
-
-    t.includes("pagué") ||
-    t.includes("pague") ||
-    t.includes("comprobante") ||
-    t.includes("listo") ||
-    t.includes("hecho")
-
-  ) {
-
-    return "Pago confirmado";
-  }
-
-  // =========================
-  // FINALIZADO
-  // =========================
-  if (
-
-    t.includes("finalizado") ||
-    t.includes("entregado")
-
-  ) {
-
-    return "Finalizado";
-  }
-
-  // =========================
-  // TASA ENVIADA
-  // =========================
-  if (
-
-    t.includes("real") ||
-    t.includes("reales") ||
-    t.includes("cup") ||
-    t.includes("usd") ||
-    t.includes("mlc") ||
-    t.includes("quiero enviar") ||
-    t.includes("cuánto") ||
-    t.includes("cuanto")
-
-  ) {
-
-    return "Tasa enviada";
-  }
-
+  const t = String(texto || "").toLowerCase();
+  if (t.includes("pagué") || t.includes("pague") || t.includes("comprobante")) return "Pago confirmado";
+  if (t.includes("finalizado") || t.includes("entregado")) return "Finalizado";
+  if (t.includes("real") || t.includes("reales") || t.includes("cup") || t.includes("cuanto")) return "Tasa enviada";
   return "Interesado";
 }
 
-// =========================
-// OBTENER STAGE
-// =========================
-function obtenerStageIdPorNombre(
-  models,
-  uid,
-  nombre
-) {
-
-  return new Promise((resolve, reject) => {
-
-    if (stageCache[nombre]) {
-
-      return resolve(
-        stageCache[nombre]
-      );
-    }
-
-    models.methodCall(
-
-      "execute_kw",
-
-      [
-        ODOO_DB,
-        uid,
-        ODOO_API_KEY,
-
-        "crm.stage",
-        "search_read",
-
-        [[
-          ["name", "=", nombre]
-        ]],
-
-        {
-          fields: ["id", "name"],
-          limit: 1
-        }
-      ],
-
-      (err, res) => {
-
-        if (err) {
-          return reject(err);
-        }
-
-        if (
-          !res ||
-          !res.length
-        ) {
-
-          return resolve(null);
-        }
-
-        const id =
-          res[0].id;
-
-        stageCache[nombre] =
-          id;
-
-        resolve(id);
-      }
-    );
-  });
-}
-
-// =========================
-// MOVER ETAPA
-// =========================
-async function moverLeadEtapa(
-  models,
-  uid,
-  leadId,
-  nombreEtapa
-) {
-
+async function sincronizarOdoo(phone, mensaje) {
   try {
+    const uid = await autenticarOdoo();
+    const models = xmlrpc.createSecureClient({ url: `${ODOO_URL}/xmlrpc/2/object` });
+    const etapaNombre = detectarEtapa(mensaje);
+    const stageId = await obtenerStageId(etapaNombre);
 
-    const stageId =
-      await obtenerStageIdPorNombre(
-        models,
-        uid,
-        nombreEtapa
-      );
-
-    if (!stageId) {
-
-      return logger(
-        "warn",
-        "STAGE_NOT_FOUND",
-        {
-          nombreEtapa
-        }
-      );
-    }
-
-    models.methodCall(
-
-      "execute_kw",
-
-      [
-        ODOO_DB,
-        uid,
-        ODOO_API_KEY,
-
-        "crm.lead",
-        "write",
-
-        [
-          [leadId],
-          {
-            stage_id:
-              stageId
-          }
-        ]
-      ],
-
-      (err) => {
-
-        if (err) {
-
-          return logger(
-            "error",
-            "MOVE_STAGE_ERROR",
-            {
-              err: err.message
-            }
-          );
-        }
-
-        logger(
-          "info",
-          "LEAD_STAGE_UPDATED",
-          {
-            leadId,
-            nombreEtapa
-          }
-        );
+    models.methodCall("execute_kw", [ODOO_DB, uid, ODOO_API_KEY, "crm.lead", "search_read", [[["partner_name", "=", phone], ["type", "=", "opportunity"]]], { fields: ["id", "description"], limit: 1 }], async (err, leads) => {
+      if (!err && leads.length > 0) {
+        const lead = leads[0];
+        // SOLUCIÓN 4: Append de descripción con historial
+        const nuevaDesc = `${lead.description || ""}\n\n[${new Date().toLocaleString()}] ${mensaje}`;
+        
+        models.methodCall("execute_kw", [ODOO_DB, uid, ODOO_API_KEY, "crm.lead", "write", [[lead.id], { 
+          description: nuevaDesc,
+          stage_id: stageId || undefined 
+        }]]);
+      } else {
+        models.methodCall("execute_kw", [ODOO_DB, uid, ODOO_API_KEY, "crm.lead", "create", [[{ 
+          name: `WhatsApp: ${phone}`, 
+          partner_name: phone, 
+          description: `[${new Date().toLocaleString()}] ${mensaje}`, 
+          type: "opportunity",
+          stage_id: stageId || undefined
+        }]]]);
       }
-    );
-
-  } catch (e) {
-
-    logger(
-      "error",
-      "MOVE_STAGE_FATAL",
-      {
-        err: e.message
-      }
-    );
-  }
+    });
+  } catch (e) { logger("error", "ODOO_SYNC_ERROR", { err: e.message }); }
 }
 
 // =========================
-// ODOO
-// =========================
-function registrarEnOdoo(datos) {
-
-  try {
-
-    const urlLimpia =
-      String(ODOO_URL || "")
-      .replace(/\/$/, "");
-
-    const common =
-      xmlrpc.createSecureClient({
-
-        url:
-`${urlLimpia}/xmlrpc/2/common`
-      });
-
-    const models =
-      xmlrpc.createSecureClient({
-
-        url:
-`${urlLimpia}/xmlrpc/2/object`
-      });
-
-    common.methodCall(
-
-      "authenticate",
-
-      [
-        ODOO_DB,
-        ODOO_USER,
-        ODOO_API_KEY,
-        {}
-      ],
-
-      async (err, uid) => {
-
-        if (err) {
-
-          return logger(
-            "error",
-            "ODOO_AUTH_ERROR",
-            {
-              err: err.message
-            }
-          );
-        }
-
-        if (!uid) {
-
-          return logger(
-            "error",
-            "ODOO_UID_INVALID"
-          );
-        }
-
-        // =========================
-        // SEARCH LEAD
-        // =========================
-        models.methodCall(
-
-          "execute_kw",
-
-          [
-            ODOO_DB,
-            uid,
-            ODOO_API_KEY,
-
-            "crm.lead",
-            "search",
-
-            [[
-              ["partner_name", "=", datos.phone]
-            ]],
-
-            {
-              limit: 1
-            }
-          ],
-
-          async (err, leads) => {
-
-            if (err) {
-
-              return logger(
-                "error",
-                "ODOO_SEARCH_ERROR",
-                {
-                  err: err.message
-                }
-              );
-            }
-
-            const etapaDetectada =
-              detectarEtapa(
-                datos.mensaje
-              );
-
-            // =========================
-            // UPDATE
-            // =========================
-            if (
-              leads &&
-              leads.length > 0
-            ) {
-
-              const leadId =
-                leads[0];
-
-              return models.methodCall(
-
-                "execute_kw",
-
-                [
-                  ODOO_DB,
-                  uid,
-                  ODOO_API_KEY,
-
-                  "crm.lead",
-                  "write",
-
-                  [
-                    [leadId],
-
-                    {
-                      description:
-`${datos.mensaje}
-
-━━━━━━━━━━
-${new Date().toLocaleString()}
-`
-                    }
-                  ]
-                ],
-
-                async (err) => {
-
-                  if (err) {
-
-                    return logger(
-                      "error",
-                      "ODOO_UPDATE_ERROR",
-                      {
-                        err: err.message
-                      }
-                    );
-                  }
-
-                  logger(
-                    "info",
-                    "ODOO_LEAD_UPDATED",
-                    {
-                      id: leadId,
-                      phone: datos.phone
-                    }
-                  );
-
-                  await moverLeadEtapa(
-                    models,
-                    uid,
-                    leadId,
-                    etapaDetectada
-                  );
-                }
-              );
-            }
-
-            // =========================
-            // CREATE
-            // =========================
-            models.methodCall(
-
-              "execute_kw",
-
-              [
-                ODOO_DB,
-                uid,
-                ODOO_API_KEY,
-
-                "crm.lead",
-                "create",
-
-                [[{
-
-                  name:
-`WhatsApp: ${datos.phone}`,
-
-                  partner_name:
-                    datos.phone,
-
-                  description:
-                    datos.mensaje,
-
-                  type:
-                    "opportunity"
-                }]]
-              ],
-
-              async (err, res) => {
-
-                if (err) {
-
-                  return logger(
-                    "error",
-                    "ODOO_CREATE_ERROR",
-                    {
-                      err: err.message
-                    }
-                  );
-                }
-
-                logger(
-                  "info",
-                  "ODOO_LEAD_CREATED",
-                  {
-                    id: res,
-                    phone: datos.phone
-                  }
-                );
-
-                await moverLeadEtapa(
-                  models,
-                  uid,
-                  res,
-                  etapaDetectada
-                );
-              }
-            );
-          }
-        );
-      }
-    );
-
-  } catch (e) {
-
-    logger(
-      "error",
-      "ODOO_FATAL",
-      {
-        err: e.message
-      }
-    );
-  }
-}
-
-// =========================
-// ENVIAR Z-API
+// WHATSAPP & AGENT
 // =========================
 async function enviarMensaje(phone, message) {
-
-  await axios({
-
-    method: "post",
-
-    url:
-`https://api.z-api.io/instances/${ZAPI_INSTANCE}/token/${ZAPI_TOKEN}/send-text`,
-
-    headers: {
-
-      "Client-Token":
-        ZAPI_CLIENT_TOKEN,
-
-      "Content-Type":
-        "application/json"
-    },
-
-    data: {
-      phone,
-      message,
-      checkContact: false
-    },
-
-    timeout: 15000
-  });
+  await axios.post(`https://api.z-api.io/instances/${ZAPI_INSTANCE}/token/${ZAPI_TOKEN}/send-text`, 
+    { phone, message, checkContact: false }, { headers: { "Client-Token": ZAPI_CLIENT_TOKEN } });
 }
 
-// =========================
-// OPENAI ASSISTANT
-// =========================
 async function procesarMensaje(phone, textMessage) {
-
-  const headers = {
-
-    Authorization:
-`Bearer ${OPENAI_API_KEY}`,
-
-    "Content-Type":
-      "application/json",
-
-    "OpenAI-Beta":
-      "assistants=v2"
-  };
-
   try {
-
-    let threadId =
-      threads.get(phone);
-
-    // =========================
-    // CREAR THREAD
-    // =========================
+    const headers = { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json", "OpenAI-Beta": "assistants=v2" };
+    let threadId = await getThread(phone);
     if (!threadId) {
-
-      const thread =
-        await axios.post(
-
-        "https://api.openai.com/v1/threads",
-
-        {},
-
-        { headers }
-      );
-
-      threadId =
-        thread.data.id;
-
-      threads.set(
-        phone,
-        threadId
-      );
+      const thread = await axios.post("https://api.openai.com/v1/threads", {}, { headers });
+      threadId = thread.data.id;
+      await setThread(phone, threadId);
     }
-
-    // =========================
-    // USER MESSAGE
-    // =========================
-    await axios.post(
-
-`https://api.openai.com/v1/threads/${threadId}/messages`,
-
-      {
-        role: "user",
-        content: textMessage
-      },
-
-      { headers }
-    );
-
-    // =========================
-    // RUN
-    // =========================
-    const run =
-      await axios.post(
-
-`https://api.openai.com/v1/threads/${threadId}/runs`,
-
-      {
-        assistant_id:
-          OPENAI_ASSISTANT_ID
-      },
-
-      { headers }
-    );
-
-    const runId =
-      run.data.id;
-
-    let completed =
-      false;
-
-    const startedAt =
-      Date.now();
-
-    // =========================
-    // POLLING
-    // =========================
+    await axios.post(`https://api.openai.com/v1/threads/${threadId}/messages`, { role: "user", content: textMessage }, { headers });
+    const run = await axios.post(`https://api.openai.com/v1/threads/${threadId}/runs`, { assistant_id: OPENAI_ASSISTANT_ID }, { headers });
+    
+    const startedAt = Date.now();
+    let completed = false;
     while (!completed) {
-
-      if (
-        Date.now() -
-        startedAt >
-        45000
-      ) {
-
-        throw new Error(
-          "RUN_TIMEOUT"
-        );
-      }
-
-      await new Promise(
-        r =>
-          setTimeout(r, 1500)
-      );
-
-      const status =
-        await axios.get(
-
-`https://api.openai.com/v1/threads/${threadId}/runs/${runId}`,
-
-        { headers }
-      );
-
-      const state =
-        status.data.status;
-
-      if (
-        state ===
-        "completed"
-      ) {
-
-        completed = true;
-
-      } else if (
-        state ===
-        "requires_action"
-      ) {
-
-        logger(
-          "warn",
-          "ASSISTANT_REQUIRES_ACTION",
-          {
-            phone
-          }
-        );
-
-        return;
-
-      } else if (
-
-        [
-          "failed",
-          "cancelled",
-          "expired"
-        ].includes(state)
-
-      ) {
-
-        throw new Error(
-          `RUN_${state}`
-        );
-      }
+      if (Date.now() - startedAt > 45000) throw new Error("Timeout");
+      await new Promise(r => setTimeout(r, 1500));
+      const check = await axios.get(`https://api.openai.com/v1/threads/${threadId}/runs/${run.data.id}`, { headers });
+      if (check.data.status === "completed") completed = true;
+      if (["failed", "expired"].includes(check.data.status)) throw new Error("Run failed");
     }
-
-    // =========================
-    // LEER RESPUESTA
-    // =========================
-    const messages =
-      await axios.get(
-
-`https://api.openai.com/v1/threads/${threadId}/messages`,
-
-      { headers }
-    );
-
-    const respuesta =
-      messages.data.data[0]
-      ?.content?.[0]
-      ?.text?.value
-      ?.trim();
-
-    if (!respuesta) {
-
-      throw new Error(
-        "EMPTY_RESPONSE"
-      );
-    }
-
-    // =========================
-    // ENVIAR WHATSAPP
-    // =========================
-    await enviarMensaje(
-      phone,
-      respuesta
-    );
-
-    logger(
-      "info",
-      "MESSAGE_SENT",
-      {
-        phone
-      }
-    );
-
-  } catch (e) {
-
-    logger(
-      "error",
-      "OPENAI_ERROR",
-      {
-        phone,
-        error: e.message,
-        status: e.response?.status,
-        response: e.response?.data
-      }
-    );
-  }
+    const msgs = await axios.get(`https://api.openai.com/v1/threads/${threadId}/messages`, { headers });
+    const respuesta = msgs.data.data[0]?.content[0]?.text?.value;
+    if (respuesta) await enviarMensaje(phone, respuesta.replace(/\*/g, ''));
+  } catch (e) { logger("error", "AGENT_ERROR", { err: e.message }); }
 }
 
 // =========================
-// WEBHOOK
+// WEBHOOK (SOLUCIÓN 5: ANTI-LOOP)
 // =========================
 app.post("/webhook", async (req, res) => {
-
   try {
+    const body = req.body;
+    // SOLUCIÓN 2: Uso real de mensajesProcesados (messageId)
+    if (!body.phone || body.isGroup || !body.text?.message || !body.messageId) return res.sendStatus(200);
+    if (mensajesProcesados.has(body.messageId)) return res.sendStatus(200);
+    
+    mensajesProcesados.add(body.messageId);
 
-    const body =
-      req.body || {};
+    const phone = body.phone.replace(/\D/g, "");
+    const textMessage = body.text.message.trim();
 
-    const phoneRaw =
-      body.phone || "";
-
-    const messageId =
-      body.messageId || "";
-
-    const textMessage =
-      String(
-        body.text?.message || ""
-      ).trim();
-
-    const fromMe =
-      body.fromMe === true ||
-      body.fromMe === "true";
-
-    const isGroup =
-      body.isGroup === true ||
-      body.isGroup === "true";
-
-    const phone =
-      String(phoneRaw)
-      .replace(/\D/g, "");
-
-    // =========================
-    // HUMAN TAKEOVER
-    // =========================
-    if (fromMe) {
-
-      humanTakeover[phone] =
-        Date.now();
-
-      logger(
-        "info",
-        "HUMAN_TAKEOVER_ENABLED",
-        { phone }
-      );
-
+    if (body.fromMe) {
+      const ctx = await getContext(phone) || {};
+      ctx.humano = true;
+      ctx.ultimaInteracao = Date.now();
+      await setContext(phone, ctx);
       return res.sendStatus(200);
     }
 
-    // =========================
-    // BLOQUEAR BOT
-    // =========================
-    if (humanTakeover[phone]) {
+    const ctx = await getContext(phone) || { ativa: false, ultimaInteracao: 0, humano: false };
+    if (ctx.humano && (Date.now() - ctx.ultimaInteracao) > 1800000) ctx.humano = false;
+    if (ctx.humano) return res.sendStatus(200);
 
-      const diff =
-        Date.now() -
-        humanTakeover[phone];
+    const lower = textMessage.toLowerCase();
+    // SOLUCIÓN 3: Regex de monto seguro
+    const tieneMontoSeguro = /\b\d+\s?(real|reales|r\$|cup|usd|mlc)\b/i.test(lower);
+    const gatillos = ["remesa", "envio", "enviar", "pix", "pagar", "cambio"];
+    const esNegocio = gatillos.some(g => lower.includes(g)) || tieneMontoSeguro;
+    const conversaExiste = (Date.now() - ctx.ultimaInteracao) < 1800000;
 
-      // 30 MIN
-      if (
-        diff <
-        1000 * 60 * 30
-      ) {
+    if (!esNegocio && !conversaExiste) return res.sendStatus(200);
 
-        logger(
-          "info",
-          "BOT_BLOCKED_BY_HUMAN",
-          { phone }
-        );
+    ctx.ativa = true;
+    ctx.ultimaInteracao = Date.now();
+    await setContext(phone, ctx);
+    
+    // Sincronización optimizada
+    sincronizarOdoo(phone, textMessage);
 
-        return res.sendStatus(200);
-      }
+    if (!buffers[phone]) buffers[phone] = { texts: [], timer: null };
+    buffers[phone].texts.push(textMessage);
+    clearTimeout(buffers[phone].timer);
+    buffers[phone].timer = setTimeout(async () => {
+      const fullText = buffers[phone].texts.join(" ");
+      delete buffers[phone];
+      await procesarMensaje(phone, fullText);
+    }, 2000);
 
-      delete humanTakeover[phone];
-    }
-
-    // =========================
-    // FILTROS
-    // =========================
-    if (!phoneRaw) {
-      return res.sendStatus(200);
-    }
-
-    if (isGroup) {
-      return res.sendStatus(200);
-    }
-
-    if (!messageId) {
-      return res.sendStatus(200);
-    }
-
-    if (!textMessage) {
-      return res.sendStatus(200);
-    }
-
-    if (
-      mensajesProcesados.has(
-        messageId
-      )
-    ) {
-
-      return res.sendStatus(200);
-    }
-
-    mensajesProcesados.add(
-      messageId
-    );
-
-    setTimeout(() => {
-
-      mensajesProcesados.delete(
-        messageId
-      );
-
-    }, 1000 * 60 * 5);
-
-    logger(
-      "info",
-      "MESSAGE_RECEIVED",
-      {
-        phone,
-        message: textMessage
-      }
-    );
-
-    // =========================
-    // ODOO
-    // =========================
-    registrarEnOdoo({
-      phone,
-      mensaje: textMessage
-    });
-
-    // =========================
-    // OPENAI
-    // =========================
-    await procesarMensaje(
-      phone,
-      textMessage
-    );
-
-    return res.sendStatus(200);
-
-  } catch (e) {
-
-    logger(
-      "error",
-      "WEBHOOK_ERROR",
-      {
-        error: e.message,
-        status: e.response?.status,
-        response: e.response?.data
-      }
-    );
-
-    return res.sendStatus(200);
-  }
+    res.sendStatus(200);
+  } catch (e) { res.sendStatus(200); }
 });
 
-// =========================
-// HEALTHCHECK
-// =========================
-app.get("/", (req, res) => {
-
-  res.send(
-    "YordaBot Online"
-  );
+app.get("/", async (req, res) => {
+  try { await redis.ping(); res.json({ status: "online", redis: true }); }
+  catch { res.status(500).json({ status: "error" }); }
 });
 
-// =========================
-// START SERVER
-// =========================
-const server =
-  app.listen(
-
-  PORT,
-  "0.0.0.0",
-
-  () => {
-
-    console.log(
-`✅ Servidor activo en puerto ${PORT}`
-    );
-  }
-);
-
-server.keepAliveTimeout = 65000;
-server.headersTimeout = 66000;
-
-// =========================
-// ANTI-CRASH
-// =========================
-process.on(
-  "unhandledRejection",
-
-  (err) => {
-
-    logger(
-      "error",
-      "UNHANDLED_REJECTION",
-      {
-        err: err?.message
-      }
-    );
-  }
-);
-
-process.on(
-  "uncaughtException",
-
-  (err) => {
-
-    logger(
-      "error",
-      "UNCAUGHT_EXCEPTION",
-      {
-        err: err?.message
-      }
-    );
-  }
-);
+app.listen(PORT, "0.0.0.0", () => logger("info", `SERVER_SECURE_UP_${PORT}`));
