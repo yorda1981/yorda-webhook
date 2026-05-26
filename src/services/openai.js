@@ -26,7 +26,13 @@ const threads =
   new Map();
 
 // =====================
-// DETECTAR PRODUCTO
+// LOCKS
+// =====================
+const usuariosProcesando =
+  new Set();
+
+// =====================
+// DETECTAR TIPO
 // =====================
 function detectarTipoOperacion(
   text
@@ -35,7 +41,6 @@ function detectarTipoOperacion(
   const lower =
     text.toLowerCase();
 
-  // USD
   if (
 
     lower.includes("usd")
@@ -52,19 +57,6 @@ function detectarTipoOperacion(
 
     if (
 
-      lower.includes("clasica")
-
-      ||
-
-      lower.includes("clásica")
-
-    ) {
-
-      return "usd_clasica";
-    }
-
-    if (
-
       lower.includes("prepago")
 
     ) {
@@ -75,7 +67,6 @@ function detectarTipoOperacion(
     return "usd_clasica";
   }
 
-  // RECARGA
   if (
 
     lower.includes("saldo")
@@ -89,30 +80,24 @@ function detectarTipoOperacion(
     return "saldo_cup";
   }
 
-  // EFECTIVO
   if (
-
-    lower.includes("efectivo")
-
-    ||
 
     lower.includes("habana")
 
     ||
 
-    lower.includes("havana")
+    lower.includes("efectivo")
 
   ) {
 
     return "efectivo_habana";
   }
 
-  // DEFAULT
   return "brl_cup";
 }
 
 // =====================
-// DETECTAR MUNICIPIO
+// MUNICIPIO
 // =====================
 function detectarMunicipio(
   text
@@ -125,16 +110,8 @@ function detectarMunicipio(
     "plaza",
     "cerro",
     "diez de octubre",
-
-    "playa",
-    "marianao",
     "boyeros",
-    "san miguel",
-    "habana del este",
-    "guanabacoa",
-    "arroyo naranjo",
-    "cotorro",
-    "la lisa"
+    "guanabacoa"
   ];
 
   const lower =
@@ -154,19 +131,43 @@ async function procesarMensaje(
   textMessage
 ) {
 
-  const headers = {
+  // =====================
+  // LOCK
+  // =====================
+  if (
 
-    Authorization:
-`Bearer ${OPENAI_API_KEY}`,
+    usuariosProcesando.has(
+      phone
+    )
 
-    "Content-Type":
-      "application/json",
+  ) {
 
-    "OpenAI-Beta":
-      "assistants=v2"
-  };
+    logger(
+      "info",
+      "USER_BUSY",
+      { phone }
+    );
+
+    return;
+  }
+
+  usuariosProcesando.add(
+    phone
+  );
 
   try {
+
+    const headers = {
+
+      Authorization:
+`Bearer ${OPENAI_API_KEY}`,
+
+      "Content-Type":
+        "application/json",
+
+      "OpenAI-Beta":
+        "assistants=v2"
+    };
 
     // =====================
     // DETECTAR VALOR
@@ -219,7 +220,7 @@ OPERACIÓN CALCULADA
 Cliente envía:
 R$${resultado.valor}
 
-Tasa aplicada:
+Tasa:
 ${resultado.tasa}
 
 Cliente recibe:
@@ -233,7 +234,7 @@ ${resultado.cup} CUP
             contextoComercial +=
 `
 
-OPORTUNIDAD UPSELL
+UPSELL DISPONIBLE
 
 Si agrega:
 R$${resultado.upsell.falta}
@@ -263,14 +264,11 @@ ${resultado.upsell.nuevoTotal} CUP
 `
 OPERACIÓN USD
 
-Cliente desea cargar:
+Cliente desea:
 ${resultado.usd} USD
 
 Total:
 R$${resultado.reales}
-
-Tasa:
-1 USD = ${resultado.tasa} BRL
 `;
         }
 
@@ -284,16 +282,13 @@ Tasa:
 
           contextoComercial =
 `
-RECARGA DE SALDO
+RECARGA CUP
 
 Cliente envía:
 R$${resultado.reales}
 
-Saldo recibido:
+Recibe:
 ${resultado.cup} CUP
-
-Vigencia:
-${resultado.vigencia} días
 `;
         }
 
@@ -312,7 +307,7 @@ EFECTIVO HABANA
 Cliente envía:
 R$${resultado.valor}
 
-Cliente recibe:
+Recibe:
 ${resultado.cup} CUP
 
 Entrega:
@@ -325,12 +320,12 @@ ${resultado.municipio || "No informado"}
       }
     }
 
+    // =====================
+    // THREAD
+    // =====================
     let threadId =
       threads.get(phone);
 
-    // =====================
-    // REDIS THREAD
-    // =====================
     if (
       !threadId &&
       redis
@@ -354,6 +349,12 @@ ${resultado.municipio || "No informado"}
     // CREATE THREAD
     // =====================
     if (!threadId) {
+
+      logger(
+        "info",
+        "NEW_THREAD",
+        { phone }
+      );
 
       const thread =
         await axios.post(
@@ -379,9 +380,7 @@ ${resultado.municipio || "No informado"}
       if (redis) {
 
         await redis.set(
-
           `thread:${phone}`,
-
           threadId
         );
       }
@@ -411,6 +410,12 @@ ${textMessage}`
       }
     );
 
+    logger(
+      "info",
+      "OPENAI_MESSAGE_SENT",
+      { phone }
+    );
+
     // =====================
     // RUN
     // =====================
@@ -433,6 +438,15 @@ ${textMessage}`
 
     const runId =
       run.data.id;
+
+    logger(
+      "info",
+      "RUN_CREATED",
+      {
+        phone,
+        runId
+      }
+    );
 
     const startedAt =
       Date.now();
@@ -481,6 +495,15 @@ ${textMessage}`
       const status =
         check.data.status;
 
+      logger(
+        "info",
+        "RUN_STATUS",
+        {
+          phone,
+          status
+        }
+      );
+
       if (
         status ===
         "completed"
@@ -527,12 +550,34 @@ ${textMessage}`
 
     if (!respuesta) {
 
+      logger(
+        "error",
+        "EMPTY_RESPONSE",
+        { phone }
+      );
+
       return;
     }
+
+    logger(
+      "info",
+      "OPENAI_RESPONSE",
+      {
+        phone,
+        response:
+          respuesta
+      }
+    );
 
     await enviarMensaje(
       phone,
       respuesta
+    );
+
+    logger(
+      "info",
+      "MESSAGE_SENT",
+      { phone }
     );
 
   } catch (e) {
@@ -545,6 +590,12 @@ ${textMessage}`
         err:
           e.message
       }
+    );
+
+  } finally {
+
+    usuariosProcesando.delete(
+      phone
     );
   }
 }
