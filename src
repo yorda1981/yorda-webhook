@@ -1,8 +1,0 @@
-proyecto/
-│
-├── src/
-│   └── config/
-│
-├── index.js
-├── package.json
-├── .env
