@@ -1,6 +1,8 @@
-function calcularOperacion(
-  valor
-) {
+function calcularOperacion({
+  tipo,
+  valor,
+  municipio = null
+}) {
 
   valor =
     Number(valor);
@@ -14,59 +16,185 @@ function calcularOperacion(
   }
 
   // =====================
-  // TASAS
+  // BRL → CUP
   // =====================
-  let tasa = 100;
+  if (
+    tipo === "brl_cup"
+  ) {
 
-  if (valor >= 100) {
+    let tasa = 100;
 
-    tasa = 120;
-  }
+    if (valor >= 100) {
 
-  if (valor >= 500) {
+      tasa = 120;
+    }
 
-    tasa = 122;
-  }
+    if (valor >= 500) {
 
-  // =====================
-  // CALCULO
-  // =====================
-  const cup =
-    valor * tasa;
+      tasa = 122;
+    }
 
-  // =====================
-  // UPSELL
-  // =====================
-  let upsell = null;
+    const cup =
+      valor * tasa;
 
-  if (valor < 100) {
+    let upsell = null;
 
-    const diferencia =
-      100 - valor;
+    if (valor < 100) {
 
-    const cupMejorado =
-      100 * 120;
+      upsell = {
 
-    upsell = {
+        falta:
+          100 - valor,
 
-      falta:
-        diferencia,
+        nuevaTasa:
+          120,
 
-      nuevaTasa:
-        120,
+        nuevoTotal:
+          100 * 120
+      };
+    }
 
-      nuevoTotal:
-        cupMejorado
+    return {
+
+      tipo,
+
+      valor,
+      tasa,
+      cup,
+
+      upsell
     };
   }
 
-  return {
+  // =====================
+  // USD CLÁSICA
+  // =====================
+  if (
+    tipo === "usd_clasica"
+  ) {
 
-    valor,
-    tasa,
-    cup,
-    upsell
-  };
+    const tasa =
+      5.60;
+
+    const total =
+      valor / tasa;
+
+    return {
+
+      tipo,
+
+      reales:
+        valor,
+
+      usd:
+        total.toFixed(2),
+
+      tasa
+    };
+  }
+
+  // =====================
+  // USD PREPAGO
+  // =====================
+  if (
+    tipo === "usd_prepago"
+  ) {
+
+    const tasa =
+      5.60;
+
+    const total =
+      valor / tasa;
+
+    return {
+
+      tipo,
+
+      reales:
+        valor,
+
+      usd:
+        total.toFixed(2),
+
+      tasa
+    };
+  }
+
+  // =====================
+  // RECARGA SALDO
+  // =====================
+  if (
+    tipo === "saldo_cup"
+  ) {
+
+    const cup =
+      valor * 20;
+
+    return {
+
+      tipo,
+
+      reales:
+        valor,
+
+      cup,
+
+      vigencia:
+        365
+    };
+  }
+
+  // =====================
+  // EFECTIVO HABANA
+  // =====================
+  if (
+    tipo === "efectivo_habana"
+  ) {
+
+    const tasa =
+      102;
+
+    const cup =
+      valor * tasa;
+
+    let entrega =
+      110;
+
+    const municipios60 = [
+
+      "habana vieja",
+      "centro habana",
+      "plaza",
+      "cerro",
+      "diez de octubre"
+    ];
+
+    if (
+
+      municipio &&
+
+      municipios60.includes(
+        municipio.toLowerCase()
+      )
+
+    ) {
+
+      entrega = 60;
+    }
+
+    return {
+
+      tipo,
+
+      valor,
+      tasa,
+      cup,
+      entrega,
+      municipio
+    };
+  }
+
+  return null;
 }
 
 module.exports = {
