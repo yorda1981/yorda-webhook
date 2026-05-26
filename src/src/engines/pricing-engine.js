@@ -1,2 +1,0 @@
-// Motor comercial
-// Próxima etapa
