@@ -1,605 +1,390 @@
-const axios = require("axios");
+const express = require("express");
+const rateLimit = require("express-rate-limit");
 
+require("dotenv").config();
+
+const app = express();
+
+app.use(express.json({ limit: "10mb" }));
+
+app.set("trust proxy", 1);
+
+app.disable("x-powered-by");
+
+// =========================
+// SERVICES
+// =========================
 const redis =
-  require("./redis");
+  require("./src/services/redis");
+
+const {
+  procesarMensaje
+} = require("./src/services/openai");
 
 const logger =
-  require("../utils/logger");
+  require("./src/utils/logger");
 
 const {
-  calcularOperacion
-} = require("../engines/pricing-engine");
+  detectarIntencion
+} = require("./src/engines/intent-engine");
 
-const {
-  OPENAI_API_KEY,
-  OPENAI_ASSISTANT_ID
-} = require("../config/env");
+// =========================
+// RATE LIMIT
+// =========================
+app.use(
 
-const {
-  enviarMensaje
-} = require("./zapi");
+  rateLimit({
 
-// =====================
-// THREADS
-// =====================
-const threads =
-  new Map();
+    windowMs:
+      60 * 1000,
 
-// =====================
-// LOCKS
-// =====================
-const usuariosProcesando =
+    max: 120
+  })
+);
+
+// =========================
+// MEMORIA
+// =========================
+const mensajesProcesados =
   new Set();
 
-// =====================
-// DETECTAR TIPO
-// =====================
-function detectarTipoOperacion(
-  text
-) {
+const humanTakeover =
+  {};
 
-  const lower =
-    text.toLowerCase();
+const buffers =
+  {};
 
-  if (
+// =========================
+// LIMPIAR DUPLICADOS
+// =========================
+setInterval(() => {
 
-    lower.includes("usd")
+  mensajesProcesados.clear();
 
-    ||
+}, 1000 * 60 * 30);
 
-    lower.includes("dolar")
+// =========================
+// WEBHOOK
+// =========================
+app.post(
 
-    ||
+  "/webhook",
 
-    lower.includes("dólar")
+  async (req, res) => {
 
-  ) {
+    try {
 
-    if (
+      const body =
+        req.body || {};
 
-      lower.includes("prepago")
+      const messageId =
+        body.messageId || "";
 
-    ) {
+      // =====================
+      // DUPLICADOS
+      // =====================
+      if (
 
-      return "usd_prepago";
-    }
+        mensajesProcesados.has(
+          messageId
+        )
 
-    return "usd_clasica";
-  }
+      ) {
 
-  if (
-
-    lower.includes("saldo")
-
-    ||
-
-    lower.includes("recarga")
-
-  ) {
-
-    return "saldo_cup";
-  }
-
-  if (
-
-    lower.includes("habana")
-
-    ||
-
-    lower.includes("efectivo")
-
-  ) {
-
-    return "efectivo_habana";
-  }
-
-  return "brl_cup";
-}
-
-// =====================
-// MUNICIPIO
-// =====================
-function detectarMunicipio(
-  text
-) {
-
-  const municipios = [
-
-    "habana vieja",
-    "centro habana",
-    "plaza",
-    "cerro",
-    "diez de octubre",
-    "boyeros",
-    "guanabacoa"
-  ];
-
-  const lower =
-    text.toLowerCase();
-
-  return municipios.find(
-    m =>
-      lower.includes(m)
-  ) || null;
-}
-
-// =====================
-// PROCESAR MENSAJE
-// =====================
-async function procesarMensaje(
-  phone,
-  textMessage
-) {
-
-  // =====================
-  // LOCK
-  // =====================
-  if (
-
-    usuariosProcesando.has(
-      phone
-    )
-
-  ) {
-
-    logger(
-      "info",
-      "USER_BUSY",
-      { phone }
-    );
-
-    return;
-  }
-
-  usuariosProcesando.add(
-    phone
-  );
-
-  try {
-
-    const headers = {
-
-      Authorization:
-`Bearer ${OPENAI_API_KEY}`,
-
-      "Content-Type":
-        "application/json",
-
-      "OpenAI-Beta":
-        "assistants=v2"
-    };
-
-    // =====================
-    // DETECTAR VALOR
-    // =====================
-    const regexValor =
-      textMessage.match(/\d+/);
-
-    let contextoComercial =
-      "";
-
-    if (regexValor) {
-
-      const valor =
-        Number(
-          regexValor[0]
-        );
-
-      const tipo =
-        detectarTipoOperacion(
-          textMessage
-        );
-
-      const municipio =
-        detectarMunicipio(
-          textMessage
-        );
-
-      const resultado =
-        calcularOperacion({
-
-          tipo,
-          valor,
-          municipio
-        });
-
-      if (resultado) {
-
-        // =====================
-        // BRL → CUP
-        // =====================
-        if (
-          tipo ===
-          "brl_cup"
-        ) {
-
-          contextoComercial =
-`
-OPERACIÓN CALCULADA
-
-Cliente envía:
-R$${resultado.valor}
-
-Tasa:
-${resultado.tasa}
-
-Cliente recibe:
-${resultado.cup} CUP
-`;
-
-          if (
-            resultado.upsell
-          ) {
-
-            contextoComercial +=
-`
-
-UPSELL DISPONIBLE
-
-Si agrega:
-R$${resultado.upsell.falta}
-
-Recibe:
-${resultado.upsell.nuevoTotal} CUP
-`;
-          }
-        }
-
-        // =====================
-        // USD
-        // =====================
-        if (
-
-          tipo ===
-          "usd_clasica"
-
-          ||
-
-          tipo ===
-          "usd_prepago"
-
-        ) {
-
-          contextoComercial =
-`
-OPERACIÓN USD
-
-Cliente desea:
-${resultado.usd} USD
-
-Total:
-R$${resultado.reales}
-`;
-        }
-
-        // =====================
-        // RECARGA
-        // =====================
-        if (
-          tipo ===
-          "saldo_cup"
-        ) {
-
-          contextoComercial =
-`
-RECARGA CUP
-
-Cliente envía:
-R$${resultado.reales}
-
-Recibe:
-${resultado.cup} CUP
-`;
-        }
-
-        // =====================
-        // EFECTIVO
-        // =====================
-        if (
-          tipo ===
-          "efectivo_habana"
-        ) {
-
-          contextoComercial =
-`
-EFECTIVO HABANA
-
-Cliente envía:
-R$${resultado.valor}
-
-Recibe:
-${resultado.cup} CUP
-
-Entrega:
-R$${resultado.entrega}
-
-Municipio:
-${resultado.municipio || "No informado"}
-`;
-        }
+        return res.sendStatus(200);
       }
-    }
 
-    // =====================
-    // THREAD
-    // =====================
-    let threadId =
-      threads.get(phone);
-
-    if (
-      !threadId &&
-      redis
-    ) {
-
-      threadId =
-        await redis.get(
-          `thread:${phone}`
-        );
-
-      if (threadId) {
-
-        threads.set(
-          phone,
-          threadId
-        );
-      }
-    }
-
-    // =====================
-    // CREATE THREAD
-    // =====================
-    if (!threadId) {
-
-      logger(
-        "info",
-        "NEW_THREAD",
-        { phone }
+      mensajesProcesados.add(
+        messageId
       );
 
-      const thread =
-        await axios.post(
+      const fromMe =
+        body.fromMe === true ||
+        body.fromMe === "true";
 
-          "https://api.openai.com/v1/threads",
+      const isGroup =
+        body.isGroup === true ||
+        body.isGroup === "true";
 
-          {},
+      const phone =
+        String(
+          body.phone || ""
+        )
+        .replace(/\D/g, "");
 
-          {
-            headers,
-            timeout: 15000
-          }
-        );
+      const textMessage =
+        String(
 
-      threadId =
-        thread.data.id;
+          body.text?.message ||
+          ""
+        ).trim();
 
-      threads.set(
-        phone,
-        threadId
-      );
+      if (!phone) {
+
+        return res.sendStatus(200);
+      }
+
+      if (!textMessage) {
+
+        return res.sendStatus(200);
+      }
+
+      if (isGroup) {
+
+        return res.sendStatus(200);
+      }
+
+      // =====================
+      // TAKEOVER
+      // =====================
+      if (fromMe) {
+
+        humanTakeover[phone] =
+          Date.now();
+
+        if (redis) {
+
+          await redis.set(
+
+            `ctx:${phone}`,
+
+            JSON.stringify({
+              humano: true
+            }),
+
+            "EX",
+            60 * 30
+          );
+        }
+
+        return res.sendStatus(200);
+      }
+
+      // =====================
+      // CONTEXTO
+      // =====================
+      let ctx = null;
 
       if (redis) {
 
-        await redis.set(
-          `thread:${phone}`,
-          threadId
-        );
+        const redisCtx =
+          await redis.get(
+            `ctx:${phone}`
+          );
+
+        if (redisCtx) {
+
+          ctx =
+            JSON.parse(
+              redisCtx
+            );
+        }
       }
-    }
 
-    // =====================
-    // USER MESSAGE
-    // =====================
-    await axios.post(
-
-`https://api.openai.com/v1/threads/${threadId}/messages`,
-
-      {
-
-        role: "user",
-
-        content:
-`${contextoComercial}
-
-MENSAJE CLIENTE:
-${textMessage}`
-      },
-
-      {
-        headers,
-        timeout: 15000
-      }
-    );
-
-    logger(
-      "info",
-      "OPENAI_MESSAGE_SENT",
-      { phone }
-    );
-
-    // =====================
-    // RUN
-    // =====================
-    const run =
-      await axios.post(
-
-`https://api.openai.com/v1/threads/${threadId}/runs`,
-
-      {
-
-        assistant_id:
-          OPENAI_ASSISTANT_ID
-      },
-
-      {
-        headers,
-        timeout: 15000
-      }
-    );
-
-    const runId =
-      run.data.id;
-
-    logger(
-      "info",
-      "RUN_CREATED",
-      {
-        phone,
-        runId
-      }
-    );
-
-    const startedAt =
-      Date.now();
-
-    let completed =
-      false;
-
-    // =====================
-    // POLLING
-    // =====================
-    while (!completed) {
-
+      // =====================
+      // HUMAN ACTIVE
+      // =====================
       if (
 
-        Date.now() -
-        startedAt >
-        45000
+        ctx?.humano ||
+
+        (
+          humanTakeover[phone] &&
+
+          (
+            Date.now() -
+            humanTakeover[phone]
+          ) <
+
+          1000 * 60 * 30
+        )
 
       ) {
 
-        throw new Error(
-          "RUN_TIMEOUT"
+        return res.sendStatus(200);
+      }
+
+      // =====================
+      // INTENT ENGINE
+      // =====================
+      const esNegocio =
+        detectarIntencion(
+          textMessage
         );
-      }
 
-      await new Promise(
+      if (!esNegocio) {
 
-        r =>
-          setTimeout(
-            r,
-            1500
-          )
-      );
-
-      const check =
-        await axios.get(
-
-`https://api.openai.com/v1/threads/${threadId}/runs/${runId}`,
-
-        {
-          headers,
-          timeout: 15000
-        }
-      );
-
-      const status =
-        check.data.status;
-
-      logger(
-        "info",
-        "RUN_STATUS",
-        {
-          phone,
-          status
-        }
-      );
-
-      if (
-        status ===
-        "completed"
-      ) {
-
-        completed =
-          true;
-
-      } else if (
-
-        [
-          "failed",
-          "expired",
-          "cancelled"
-        ].includes(status)
-
-      ) {
-
-        throw new Error(
-          `RUN_${status}`
+        logger(
+          "info",
+          "IGNORED_MESSAGE",
+          {
+            phone,
+            message:
+              textMessage
+          }
         );
+
+        return res.sendStatus(200);
       }
-    }
 
-    // =====================
-    // READ RESPONSE
-    // =====================
-    const messages =
-      await axios.get(
+      // =====================
+      // BUFFER
+      // =====================
+      if (!buffers[phone]) {
 
-`https://api.openai.com/v1/threads/${threadId}/messages`,
+        buffers[phone] = {
 
-      {
-        headers,
-        timeout: 15000
+          textos: [],
+          timeout: null
+        };
       }
-    );
 
-    const respuesta =
-      messages.data.data[0]
-      ?.content?.[0]
-      ?.text?.value
-      ?.trim();
+      buffers[phone]
+      .textos
+      .push(textMessage);
 
-    if (!respuesta) {
+      clearTimeout(
+        buffers[phone]
+        .timeout
+      );
+
+      buffers[phone]
+      .timeout =
+        setTimeout(
+
+          async () => {
+
+            try {
+
+              const finalMessage =
+                buffers[phone]
+                .textos
+                .join("\n");
+
+              delete buffers[phone];
+
+              logger(
+                "info",
+                "MESSAGE_RECEIVED",
+                {
+                  phone,
+                  message:
+                    finalMessage
+                }
+              );
+
+              // =====================
+              // OPENAI
+              // =====================
+              await procesarMensaje(
+
+                phone,
+                finalMessage
+              );
+
+            } catch (e) {
+
+              logger(
+                "error",
+                "BUFFER_ERROR",
+                {
+                  err:
+                    e.message
+                }
+              );
+            }
+
+          },
+
+          1500
+        );
+
+      return res.sendStatus(200);
+
+    } catch (e) {
 
       logger(
         "error",
-        "EMPTY_RESPONSE",
-        { phone }
+        "WEBHOOK_ERROR",
+        {
+          err:
+            e.message
+        }
       );
 
-      return;
+      return res.sendStatus(200);
     }
+  }
+);
 
-    logger(
-      "info",
-      "OPENAI_RESPONSE",
-      {
-        phone,
-        response:
-          respuesta
-      }
+// =========================
+// HEALTH
+// =========================
+app.get(
+
+  "/",
+
+  (req, res) => {
+
+    res.send(
+      "YordaBot Online"
     );
+  }
+);
 
-    await enviarMensaje(
-      phone,
-      respuesta
+// =========================
+// START
+// =========================
+const PORT =
+  process.env.PORT || 8080;
+
+app.listen(
+
+  PORT,
+
+  "0.0.0.0",
+
+  () => {
+
+    console.log(
+`✅ Servidor activo puerto ${PORT}`
     );
+  }
+);
 
-    logger(
-      "info",
-      "MESSAGE_SENT",
-      { phone }
-    );
+// =========================
+// ANTI CRASH
+// =========================
+process.on(
 
-  } catch (e) {
+  "unhandledRejection",
+
+  err => {
 
     logger(
       "error",
-      "OPENAI_ERROR",
+      "UNHANDLED_REJECTION",
       {
-        phone,
         err:
-          e.message
+          err?.message
       }
     );
+  }
+);
 
-  } finally {
+process.on(
 
-    usuariosProcesando.delete(
-      phone
+  "uncaughtException",
+
+  err => {
+
+    logger(
+      "error",
+      "UNCAUGHT_EXCEPTION",
+      {
+        err:
+          err?.message
+      }
     );
   }
-}
-
-module.exports = {
-  procesarMensaje
-};
+);
