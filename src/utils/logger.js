@@ -1,17 +1,22 @@
-function logger(level, event, meta = {}) {
+function logger(
+  level,
+  event,
+  data = {}
+) {
 
   console.log(
+
     JSON.stringify({
 
       level,
       event,
-
+      ...data,
       timestamp:
-        new Date().toISOString(),
-
-      ...meta
+        new Date()
+        .toISOString()
     })
   );
 }
 
-module.exports = logger;
+module.exports =
+  logger;
