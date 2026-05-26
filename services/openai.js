@@ -1,2 +1,0 @@
-// integração OpenAI
-module.exports = {};
