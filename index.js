@@ -73,8 +73,21 @@ try {
   const body =
     req.body || {};
 
+  console.log(
+    "📦 BODY:",
+    JSON.stringify(
+      body,
+      null,
+      2
+    )
+  );
+
   const messageId =
-    body.messageId || "";
+    body.messageId ||
+
+    body.id ||
+
+    "";
 
   if (
     mensajesProcesados.has(
@@ -90,35 +103,75 @@ try {
   );
 
   const fromMe =
+
     body.fromMe === true ||
+
     body.fromMe === "true";
 
   const isGroup =
+
     body.isGroup === true ||
+
     body.isGroup === "true";
 
   const phone =
+
     String(
-      body.phone || ""
+
+      body.phone ||
+
+      body.chatId ||
+
+      body.from ||
+
+      ""
     )
     .replace(/\D/g, "");
 
   const textMessage =
+
     String(
-      body.text?.message || ""
-    ).trim();
+
+      body.text?.message ||
+
+      body.message ||
+
+      body.body ||
+
+      body.text ||
+
+      ""
+    )
+    .trim();
+
+  console.log(
+    "📩 MENSAJE:",
+    textMessage
+  );
 
   if (!phone) {
+
+    console.log(
+      "❌ SIN PHONE"
+    );
 
     return res.sendStatus(200);
   }
 
   if (!textMessage) {
 
+    console.log(
+      "❌ SIN MENSAJE"
+    );
+
     return res.sendStatus(200);
   }
 
   if (isGroup) {
+
+    console.log(
+      "🚫 GRUPO IGNORADO"
+    );
 
     return res.sendStatus(200);
   }
@@ -187,6 +240,10 @@ try {
 
   ) {
 
+    console.log(
+      "👨 TAKEOVER ACTIVO"
+    );
+
     return res.sendStatus(200);
   }
 
@@ -196,6 +253,11 @@ try {
     detectarIntencion(
       textMessage
     );
+
+  console.log(
+    "🧠 INTENCION:",
+    esNegocio
+  );
 
   if (!esNegocio) {
 
@@ -258,6 +320,11 @@ try {
             }
           );
 
+          console.log(
+            "🚀 ENVIANDO OPENAI:",
+            finalMessage
+          );
+
           await procesarMensaje(
             phone,
             finalMessage
@@ -272,6 +339,11 @@ try {
               err:
                 e.message
             }
+          );
+
+          console.log(
+            "❌ BUFFER ERROR:",
+            e.message
           );
         }
 
@@ -291,6 +363,11 @@ try {
       err:
         e.message
     }
+  );
+
+  console.log(
+    "❌ WEBHOOK ERROR:",
+    e.message
   );
 
   return res.sendStatus(200);
