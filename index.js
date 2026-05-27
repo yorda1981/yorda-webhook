@@ -2,10 +2,10 @@ const express = require("express");
 const rateLimit = require("express-rate-limit");
 
 const fs =
-  require("fs");
+require("fs");
 
 const path =
-  require("path");
+require("path");
 
 require("dotenv").config();
 
@@ -22,30 +22,33 @@ app.disable("x-powered-by");
 // =========================
 app.use(
 
-  express.static(
+express.static(
 
-    path.join(
-      __dirname,
-      "public"
-    )
-  )
+```
+path.join(
+  __dirname,
+  "public"
+)
+```
+
+)
 );
 
 // =========================
 // SERVICES
 // =========================
 const redis =
-  require("./src/services/redis");
+require("./src/services/redis");
 
 const {
-  procesarMensaje
+procesarMensaje
 } = require("./src/services/openai");
 
 const logger =
-  require("./src/utils/logger");
+require("./src/utils/logger");
 
 const {
-  detectarIntencion
+detectarIntencion
 } = require("./src/engines/intent-engine");
 
 // =========================
@@ -53,33 +56,36 @@ const {
 // =========================
 app.use(
 
-  rateLimit({
+rateLimit({
 
-    windowMs:
-      60 * 1000,
+```
+windowMs:
+  60 * 1000,
 
-    max: 120
-  })
+max: 120
+```
+
+})
 );
 
 // =========================
 // MEMORIA
 // =========================
 const mensajesProcesados =
-  new Set();
+new Set();
 
 const humanTakeover =
-  {};
+{};
 
 const buffers =
-  {};
+{};
 
 // =========================
 // LIMPIAR DUPLICADOS
 // =========================
 setInterval(() => {
 
-  mensajesProcesados.clear();
+mensajesProcesados.clear();
 
 }, 1000 * 60 * 30);
 
@@ -88,253 +94,250 @@ setInterval(() => {
 // =========================
 app.post(
 
-  "/webhook",
+"/webhook",
 
-  async (req, res) => {
+async (req, res) => {
 
-    try {
+```
+try {
 
-      const body =
-        req.body || {};
+  const body =
+    req.body || {};
 
-      const messageId =
-        body.messageId || "";
+  const messageId =
+    body.messageId || "";
 
-      // =====================
-      // DUPLICADOS
-      // =====================
-      if (
+  if (
 
-        mensajesProcesados.has(
-          messageId
-        )
+    mensajesProcesados.has(
+      messageId
+    )
 
-      ) {
+  ) {
 
-        return res.sendStatus(200);
-      }
+    return res.sendStatus(200);
+  }
 
-      mensajesProcesados.add(
-        messageId
+  mensajesProcesados.add(
+    messageId
+  );
+
+  const fromMe =
+    body.fromMe === true ||
+    body.fromMe === "true";
+
+  const isGroup =
+    body.isGroup === true ||
+    body.isGroup === "true";
+
+  const phone =
+    String(
+      body.phone || ""
+    )
+    .replace(/\D/g, "");
+
+  const textMessage =
+    String(
+
+      body.text?.message ||
+      ""
+    ).trim();
+
+  if (!phone) {
+
+    return res.sendStatus(200);
+  }
+
+  if (!textMessage) {
+
+    return res.sendStatus(200);
+  }
+
+  if (isGroup) {
+
+    return res.sendStatus(200);
+  }
+
+  // =====================
+  // TAKEOVER
+  // =====================
+  if (fromMe) {
+
+    humanTakeover[phone] =
+      Date.now();
+
+    if (redis) {
+
+      await redis.set(
+
+        `ctx:${phone}`,
+
+        JSON.stringify({
+          humano: true
+        }),
+
+        "EX",
+        60 * 30
+      );
+    }
+
+    return res.sendStatus(200);
+  }
+
+  // =====================
+  // CONTEXTO
+  // =====================
+  let ctx = null;
+
+  if (redis) {
+
+    const redisCtx =
+      await redis.get(
+        `ctx:${phone}`
       );
 
-      const fromMe =
-        body.fromMe === true ||
-        body.fromMe === "true";
+    if (redisCtx) {
 
-      const isGroup =
-        body.isGroup === true ||
-        body.isGroup === "true";
-
-      const phone =
-        String(
-          body.phone || ""
-        )
-        .replace(/\D/g, "");
-
-      const textMessage =
-        String(
-
-          body.text?.message ||
-          ""
-        ).trim();
-
-      if (!phone) {
-
-        return res.sendStatus(200);
-      }
-
-      if (!textMessage) {
-
-        return res.sendStatus(200);
-      }
-
-      if (isGroup) {
-
-        return res.sendStatus(200);
-      }
-
-      // =====================
-      // TAKEOVER
-      // =====================
-      if (fromMe) {
-
-        humanTakeover[phone] =
-          Date.now();
-
-        if (redis) {
-
-          await redis.set(
-
-            `ctx:${phone}`,
-
-            JSON.stringify({
-              humano: true
-            }),
-
-            "EX",
-            60 * 30
-          );
-        }
-
-        return res.sendStatus(200);
-      }
-
-      // =====================
-      // CONTEXTO
-      // =====================
-      let ctx = null;
-
-      if (redis) {
-
-        const redisCtx =
-          await redis.get(
-            `ctx:${phone}`
-          );
-
-        if (redisCtx) {
-
-          ctx =
-            JSON.parse(
-              redisCtx
-            );
-        }
-      }
-
-      // =====================
-      // HUMAN ACTIVE
-      // =====================
-      if (
-
-        ctx?.humano ||
-
-        (
-          humanTakeover[phone] &&
-
-          (
-            Date.now() -
-            humanTakeover[phone]
-          ) <
-
-          1000 * 60 * 30
-        )
-
-      ) {
-
-        return res.sendStatus(200);
-      }
-
-      // =====================
-      // INTENT ENGINE
-      // =====================
-      const esNegocio =
-        detectarIntencion(
-          textMessage
+      ctx =
+        JSON.parse(
+          redisCtx
         );
-
-      if (!esNegocio) {
-
-        logger(
-          "info",
-          "IGNORED_MESSAGE",
-          {
-            phone,
-            message:
-              textMessage
-          }
-        );
-
-        return res.sendStatus(200);
-      }
-
-      // =====================
-      // BUFFER
-      // =====================
-      if (!buffers[phone]) {
-
-        buffers[phone] = {
-
-          textos: [],
-          timeout: null
-        };
-      }
-
-      buffers[phone]
-      .textos
-      .push(textMessage);
-
-      clearTimeout(
-        buffers[phone]
-        .timeout
-      );
-
-      buffers[phone]
-      .timeout =
-        setTimeout(
-
-          async () => {
-
-            try {
-
-              const finalMessage =
-                buffers[phone]
-                .textos
-                .join("\n");
-
-              delete buffers[phone];
-
-              logger(
-                "info",
-                "MESSAGE_RECEIVED",
-                {
-                  phone,
-                  message:
-                    finalMessage
-                }
-              );
-
-              // =====================
-              // OPENAI
-              // =====================
-              await procesarMensaje(
-
-                phone,
-                finalMessage
-              );
-
-            } catch (e) {
-
-              logger(
-                "error",
-                "BUFFER_ERROR",
-                {
-                  err:
-                    e.message
-                }
-              );
-            }
-
-          },
-
-          1500
-        );
-
-      return res.sendStatus(200);
-
-    } catch (e) {
-
-      logger(
-        "error",
-        "WEBHOOK_ERROR",
-        {
-          err:
-            e.message
-        }
-      );
-
-      return res.sendStatus(200);
     }
   }
+
+  // =====================
+  // HUMAN ACTIVE
+  // =====================
+  if (
+
+    ctx?.humano ||
+
+    (
+      humanTakeover[phone] &&
+
+      (
+        Date.now() -
+        humanTakeover[phone]
+      ) <
+
+      1000 * 60 * 30
+    )
+
+  ) {
+
+    return res.sendStatus(200);
+  }
+
+  // =====================
+  // INTENT ENGINE
+  // =====================
+  const esNegocio =
+    detectarIntencion(
+      textMessage
+    );
+
+  if (!esNegocio) {
+
+    logger(
+      "info",
+      "IGNORED_MESSAGE",
+      {
+        phone,
+        message:
+          textMessage
+      }
+    );
+
+    return res.sendStatus(200);
+  }
+
+  // =====================
+  // BUFFER
+  // =====================
+  if (!buffers[phone]) {
+
+    buffers[phone] = {
+
+      textos: [],
+      timeout: null
+    };
+  }
+
+  buffers[phone]
+  .textos
+  .push(textMessage);
+
+  clearTimeout(
+    buffers[phone]
+    .timeout
+  );
+
+  buffers[phone]
+  .timeout =
+    setTimeout(
+
+      async () => {
+
+        try {
+
+          const finalMessage =
+            buffers[phone]
+            .textos
+            .join("\n");
+
+          delete buffers[phone];
+
+          logger(
+            "info",
+            "MESSAGE_RECEIVED",
+            {
+              phone,
+              message:
+                finalMessage
+            }
+          );
+
+          await procesarMensaje(
+
+            phone,
+            finalMessage
+          );
+
+        } catch (e) {
+
+          logger(
+            "error",
+            "BUFFER_ERROR",
+            {
+              err:
+                e.message
+            }
+          );
+        }
+
+      },
+
+      1500
+    );
+
+  return res.sendStatus(200);
+
+} catch (e) {
+
+  logger(
+    "error",
+    "WEBHOOK_ERROR",
+    {
+      err:
+        e.message
+    }
+  );
+
+  return res.sendStatus(200);
+}
+```
+
+}
 );
 
 // =========================
@@ -342,121 +345,211 @@ app.post(
 // =========================
 app.post(
 
-  "/admin/tasas",
+"/admin/tasas",
 
-  async (req, res) => {
+async (req, res) => {
 
-    try {
+```
+try {
 
-      const body =
-        req.body || {};
+  const body =
+    req.body || {};
 
-      const nuevasTasas = {
+  const nuevasTasas = {
 
-        brl_cup: {
+    brl_cup: {
 
-          faixas: [
+      faixas: [
 
-            {
-              min: 0,
-              max: 99,
-              tasa: 100
-            },
-
-            {
-              min: 100,
-              max: 499,
-              tasa: Number(
-                body.brl1
-              )
-            },
-
-            {
-              min: 500,
-              max: 999999,
-              tasa: Number(
-                body.brl2
-              )
-            }
-          ]
-        },
-
-        usd_clasica: {
-
-          tasa: Number(
-            body.usd1
-          )
-        },
-
-        usd_prepago: {
-
-          tasa: Number(
-            body.usd2
-          )
-        },
-
-        saldo_cup: {
-
+        {
+          min: 0,
+          max: 99,
           tasa: 100
         },
 
-        efectivo_habana: {
+        {
+          min: 100,
+          max: 499,
+          tasa: Number(
+            body.brl1
+          )
+        },
 
-          municipios: {
-
-            "habana vieja": 60,
-            "centro habana": 60,
-            "plaza": 80,
-            "cerro": 80,
-            "boyeros": 100,
-            "guanabacoa": 120
-          }
+        {
+          min: 500,
+          max: 999999,
+          tasa: Number(
+            body.brl2
+          )
         }
-      };
+      ]
+    },
 
-      fs.writeFileSync(
+    usd_clasica: {
 
-        path.join(
+      tasa: Number(
+        body.usd1
+      )
+    },
 
-          __dirname,
+    usd_prepago: {
 
-          "src",
+      tasa: Number(
+        body.usd2
+      )
+    },
 
-          "config",
+    saldo_cup: {
 
-          "tasas.json"
-        ),
+      tasa: 100
+    },
 
-        JSON.stringify(
+    efectivo_habana: {
 
-          nuevasTasas,
+      municipios: {
 
-          null,
+        "habana vieja": 60,
+        "centro habana": 60,
+        "plaza": 80,
+        "cerro": 80,
+        "boyeros": 100,
+        "guanabacoa": 120
+      }
+    }
+  };
 
-          2
-        )
-      );
+  fs.writeFileSync(
 
-      return res.json({
+    path.join(
 
-        success: true,
+      __dirname,
 
-        message:
-          "Tasas actualizadas 🔥"
-      });
+      "src",
 
-    } catch (e) {
+      "config",
 
-      return res.status(500)
-      .json({
+      "tasas.json"
+    ),
 
-        success: false,
+    JSON.stringify(
 
-        error:
-          e.message
-      });
+      nuevasTasas,
+
+      null,
+
+      2
+    )
+  );
+
+  return res.json({
+
+    success: true,
+
+    message:
+      "Tasas actualizadas 🔥"
+  });
+
+} catch (e) {
+
+  return res.status(500)
+  .json({
+
+    success: false,
+
+    error:
+      e.message
+  });
+}
+```
+
+}
+);
+
+// =========================
+// ADMIN STATS
+// =========================
+app.get(
+
+"/admin/stats",
+
+async (req, res) => {
+
+```
+try {
+
+  const {
+    obtenerTodos
+  } = require(
+
+    "./src/services/customer-memory"
+  );
+
+  const clientes =
+    obtenerTodos();
+
+  let totalClientes = 0;
+
+  let totalVip = 0;
+
+  let totalOperaciones = 0;
+
+  let totalEnviado = 0;
+
+  for (
+
+    const [
+
+      phone,
+
+      data
+
+    ] of clientes
+
+  ) {
+
+    totalClientes++;
+
+    totalOperaciones +=
+
+      data.totalOperaciones || 0;
+
+    totalEnviado +=
+
+      data.totalEnviado || 0;
+
+    if (data.vip) {
+
+      totalVip++;
     }
   }
+
+  return res.json({
+
+    clientes:
+      totalClientes,
+
+    vip:
+      totalVip,
+
+    operaciones:
+      totalOperaciones,
+
+    total:
+      totalEnviado
+  });
+
+} catch (e) {
+
+  return res.status(500)
+  .json({
+
+    error:
+      e.message
+  });
+}
+```
+
+}
 );
 
 // =========================
@@ -464,34 +557,40 @@ app.post(
 // =========================
 app.get(
 
-  "/",
+"/",
 
-  (req, res) => {
+(req, res) => {
 
-    res.send(
-      "YordaBot Online"
-    );
-  }
+```
+res.send(
+  "YordaBot Online"
+);
+```
+
+}
 );
 
 // =========================
 // START
 // =========================
 const PORT =
-  process.env.PORT || 8080;
+process.env.PORT || 8080;
 
 app.listen(
 
-  PORT,
+PORT,
 
-  "0.0.0.0",
+"0.0.0.0",
 
-  () => {
+() => {
 
-    console.log(
+```
+console.log(
+```
+
 `✅ Servidor activo puerto ${PORT}`
-    );
-  }
+);
+}
 );
 
 // =========================
@@ -499,34 +598,40 @@ app.listen(
 // =========================
 process.on(
 
-  "unhandledRejection",
+"unhandledRejection",
 
-  err => {
+err => {
 
-    logger(
-      "error",
-      "UNHANDLED_REJECTION",
-      {
-        err:
-          err?.message
-      }
-    );
+```
+logger(
+  "error",
+  "UNHANDLED_REJECTION",
+  {
+    err:
+      err?.message
   }
+);
+```
+
+}
 );
 
 process.on(
 
-  "uncaughtException",
+"uncaughtException",
 
-  err => {
+err => {
 
-    logger(
-      "error",
-      "UNCAUGHT_EXCEPTION",
-      {
-        err:
-          err?.message
-      }
-    );
+```
+logger(
+  "error",
+  "UNCAUGHT_EXCEPTION",
+  {
+    err:
+      err?.message
   }
+);
+```
+
+}
 );
