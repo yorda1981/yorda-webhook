@@ -5,13 +5,21 @@ const clientes =
 // GUARDAR CLIENTE
 // =====================
 function guardarCliente({
+
   phone,
+
   monto = 0,
+
   tipo = "brl_cup"
 }) {
 
   const actual =
-    clientes.get(phone) || {
+
+    clientes.get(phone)
+
+    ||
+
+    {
 
       totalOperaciones: 0,
 
@@ -23,26 +31,44 @@ function guardarCliente({
         tipo,
 
       ultimaOperacion:
-        null
+        null,
+
+      vip: false
     };
 
   actual.totalOperaciones += 1;
 
   actual.totalEnviado +=
-    Number(monto || 0);
+
+    Number(
+      monto || 0
+    );
 
   actual.ultimoMonto =
-    Number(monto || 0);
+
+    Number(
+      monto || 0
+    );
 
   actual.tipoFavorito =
     tipo;
 
   actual.ultimaOperacion =
+
     new Date()
     .toISOString();
 
+  // =====================
+  // VIP
+  // =====================
+  actual.vip =
+
+    actual.totalEnviado >= 1000;
+
   clientes.set(
+
     phone,
+
     actual
   );
 
@@ -57,7 +83,9 @@ function obtenerCliente(
 ) {
 
   return (
+
     clientes.get(phone)
+
     || null
   );
 }
