@@ -3,6 +3,7 @@ function detectarIntencion(
 ) {
 
   const lower =
+
     String(text || "")
     .toLowerCase()
     .trim();
@@ -16,7 +17,7 @@ function detectarIntencion(
   }
 
   // =====================
-  // IGNORAR LINKS
+  // LINKS
   // =====================
   if (
 
@@ -32,7 +33,7 @@ function detectarIntencion(
   }
 
   // =====================
-  // IGNORAR NOTICIAS
+  // NOTICIAS
   // =====================
   const noticias = [
 
@@ -45,7 +46,11 @@ function detectarIntencion(
     "política",
     "politica",
     "master",
-    "busca e apreensão"
+    "busca e apreensão",
+    "trump",
+    "comunismo",
+    "debate",
+    "vivo"
   ];
 
   if (
@@ -62,7 +67,7 @@ function detectarIntencion(
   }
 
   // =====================
-  // IGNORAR MÉDICO
+  // MÉDICO
   // =====================
   const medico = [
 
@@ -73,7 +78,8 @@ function detectarIntencion(
     "receita",
     "consulta",
     "doutor",
-    "exame"
+    "exame",
+    "impetigo"
   ];
 
   if (
@@ -90,12 +96,25 @@ function detectarIntencion(
   }
 
   // =====================
-  // PALABRAS NEGOCIO
+  // SPAM
+  // =====================
+  if (
+
+    /(.)\1{7,}/.test(lower)
+
+  ) {
+
+    return false;
+  }
+
+  // =====================
+  // KEYWORDS
   // =====================
   const keywords = [
 
     "real",
     "reales",
+    "reais",
     "r$",
 
     "cup",
@@ -108,9 +127,9 @@ function detectarIntencion(
     "pix",
 
     "remesa",
+
     "transferencia",
     "transferência",
-    "enviar",
 
     "saldo",
     "recarga",
@@ -130,9 +149,54 @@ function detectarIntencion(
   ];
 
   // =====================
+  // FRASES HUMANAS
+  // =====================
+  const humanas = [
+
+    "quiero enviar",
+    "quero enviar",
+
+    "quiero pasar",
+    "quero passar",
+
+    "quiero colocar",
+    "quero colocar",
+
+    "quiero cargar",
+
+    "puedo enviar",
+
+    "mandame pix",
+    "manda pix",
+
+    "mandame la llave",
+
+    "esa tarjeta",
+    "extra tarjeta",
+
+    "perdi la cuenta",
+
+    "como esta el cup",
+    "como está el cup",
+
+    "estas haciendo envio",
+    "estás haciendo envío",
+
+    "quiero hacer",
+
+    "me manda el pix",
+
+    "ya transferi",
+    "ya transferí",
+
+    "quiero mandar"
+  ];
+
+  // =====================
   // KEYWORDS
   // =====================
   const tieneKeyword =
+
     keywords.some(
 
       k =>
@@ -140,33 +204,78 @@ function detectarIntencion(
     );
 
   // =====================
+  // HUMANAS
+  // =====================
+  const tieneHumana =
+
+    humanas.some(
+
+      h =>
+        lower.includes(h)
+    );
+
+  // =====================
   // NÚMEROS
   // =====================
   const tieneNumero =
+
     /\d+/.test(lower);
+
+  // =====================
+  // CUP / REAL
+  // =====================
+  const tieneCupReal =
+
+    (
+      lower.includes("cup")
+
+      ||
+
+      lower.includes("real")
+
+      ||
+
+      lower.includes("reales")
+
+      ||
+
+      lower.includes("reais")
+
+      ||
+
+      lower.includes("r$")
+    );
+
+  // =====================
+  // TARJETA
+  // =====================
+  const tarjeta16 =
+
+    /\b\d{16}\b/.test(
+
+      lower.replace(/\s/g, "")
+    );
 
   // =====================
   // REGLA FINAL
   // =====================
   if (
 
-    tieneKeyword ||
+    tieneKeyword
+
+    ||
+
+    tieneHumana
+
+    ||
+
+    tarjeta16
+
+    ||
 
     (
       tieneNumero &&
-
-      (
-        lower.includes("real")
-        ||
-
-        lower.includes("r$")
-        ||
-
-        lower.includes("usd")
-        ||
-
-        lower.includes("cup")
-      )
+      tieneCupReal
     )
 
   ) {
