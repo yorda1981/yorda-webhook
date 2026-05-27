@@ -1,26 +1,56 @@
-const tasas =
-  require("../config/tasas.json");
+const fs =
+require("fs");
+
+const path =
+require("path");
+
+// =====================
+// LEER TASAS EN VIVO
+// =====================
+function obtenerTasas() {
+
+const filePath =
+
+path.join(
+
+  __dirname,
+
+  "../config/tasas.json"
+);
+
+const data =
+
+fs.readFileSync(
+  filePath,
+  "utf8"
+);
+
+return JSON.parse(data);
+}
 
 // =====================
 // OBTENER TASA BRL
 // =====================
 function obtenerTasaBRL(
-  valor
+valor
 ) {
 
-  const faixa =
-    tasas.brl_cup.faixas.find(
+const tasas =
+obtenerTasas();
 
-      f =>
+const faixa =
+tasas.brl_cup.faixas.find(
 
-        valor >= f.min &&
+  f =>
 
-        valor <= f.max
-    );
+    valor >= f.min &&
 
-  return faixa
-    ? faixa.tasa
-    : 100;
+    valor <= f.max
+);
+
+return faixa
+? faixa.tasa
+: 100;
 }
 
 // =====================
@@ -28,191 +58,199 @@ function obtenerTasaBRL(
 // =====================
 function calcularOperacion({
 
-  tipo,
-  valor,
-  municipio
+tipo,
+valor,
+municipio
 }) {
 
-  // =====================
-  // BRL → CUP
-  // =====================
-  if (
-    tipo ===
-    "brl_cup"
-  ) {
+const tasas =
+obtenerTasas();
 
-    const tasa =
-      obtenerTasaBRL(
-        valor
-      );
+// =====================
+// BRL → CUP
+// =====================
+if (
+tipo ===
+"brl_cup"
+) {
 
-    const cup =
-      valor * tasa;
+const tasa =
+  obtenerTasaBRL(
+    valor
+  );
 
-    let upsell =
-      null;
+const cup =
+  valor * tasa;
 
-    // =====================
-    // UPSELL
-    // =====================
-    const siguienteFaixa =
-      tasas.brl_cup.faixas.find(
+let upsell =
+  null;
 
-        f =>
-          valor < f.min
-      );
+// =====================
+// UPSELL
+// =====================
+const siguienteFaixa =
+  tasas.brl_cup.faixas.find(
 
-    if (siguienteFaixa) {
+    f =>
+      valor < f.min
+  );
 
-      const falta =
-        siguienteFaixa.min -
-        valor;
+if (siguienteFaixa) {
 
-      upsell = {
+  const falta =
+    siguienteFaixa.min -
+    valor;
 
-        falta,
+  upsell = {
 
-        nuevoTotal:
+    falta,
 
-          siguienteFaixa.min *
+    nuevoTotal:
 
-          siguienteFaixa.tasa
-      };
-    }
+      siguienteFaixa.min *
 
-    return {
+      siguienteFaixa.tasa
+  };
+}
 
-      tipo,
+return {
 
-      valor,
+  tipo,
 
-      tasa,
+  valor,
 
-      cup,
+  tasa,
 
-      upsell
-    };
-  }
+  cup,
 
-  // =====================
-  // USD CLÁSICA
-  // =====================
-  if (
-    tipo ===
-    "usd_clasica"
-  ) {
+  upsell
+};
 
-    const tasa =
-      tasas.usd_clasica.tasa;
+}
 
-    return {
+// =====================
+// USD CLÁSICA
+// =====================
+if (
+tipo ===
+"usd_clasica"
+) {
 
-      tipo,
+const tasa =
+  tasas.usd_clasica.tasa;
 
-      usd:
-        valor,
+return {
 
-      tasa,
+  tipo,
 
-      reales:
+  usd:
+    valor,
 
-        (
-          valor * tasa
-        ).toFixed(2)
-    };
-  }
+  tasa,
 
-  // =====================
-  // USD PREPAGO
-  // =====================
-  if (
-    tipo ===
-    "usd_prepago"
-  ) {
+  reales:
 
-    const tasa =
-      tasas.usd_prepago.tasa;
+    (
+      valor * tasa
+    ).toFixed(2)
+};
 
-    return {
+}
 
-      tipo,
+// =====================
+// USD PREPAGO
+// =====================
+if (
+tipo ===
+"usd_prepago"
+) {
 
-      usd:
-        valor,
+const tasa =
+  tasas.usd_prepago.tasa;
 
-      tasa,
+return {
 
-      reales:
+  tipo,
 
-        (
-          valor * tasa
-        ).toFixed(2)
-    };
-  }
+  usd:
+    valor,
 
-  // =====================
-  // RECARGA
-  // =====================
-  if (
-    tipo ===
-    "saldo_cup"
-  ) {
+  tasa,
 
-    const tasa =
-      tasas.saldo_cup.tasa;
+  reales:
 
-    return {
+    (
+      valor * tasa
+    ).toFixed(2)
+};
 
-      tipo,
+}
 
-      reales:
-        valor,
+// =====================
+// RECARGA
+// =====================
+if (
+tipo ===
+"saldo_cup"
+) {
 
-      cup:
-        valor * tasa
-    };
-  }
+const tasa =
+  tasas.saldo_cup.tasa;
 
-  // =====================
-  // EFECTIVO HABANA
-  // =====================
-  if (
-    tipo ===
-    "efectivo_habana"
-  ) {
+return {
 
-    const tasa =
-      obtenerTasaBRL(
-        valor
-      );
+  tipo,
 
-    const entrega =
-      tasas
-      .efectivo_habana
-      .municipios[
-        municipio
-      ] || 0;
+  reales:
+    valor,
 
-    return {
+  cup:
+    valor * tasa
+};
 
-      tipo,
+}
 
-      valor,
+// =====================
+// EFECTIVO HABANA
+// =====================
+if (
+tipo ===
+"efectivo_habana"
+) {
 
-      municipio,
+const tasa =
+  obtenerTasaBRL(
+    valor
+  );
 
-      entrega,
+const entrega =
+  tasas
+  .efectivo_habana
+  .municipios[
+    municipio
+  ] || 0;
 
-      tasa,
+return {
 
-      cup:
-        valor * tasa
-    };
-  }
+  tipo,
 
-  return null;
+  valor,
+
+  municipio,
+
+  entrega,
+
+  tasa,
+
+  cup:
+    valor * tasa
+};
+
+}
+
+return null;
 }
 
 module.exports = {
-  calcularOperacion
+calcularOperacion
 };
