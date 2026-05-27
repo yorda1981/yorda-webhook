@@ -12,13 +12,13 @@
       {
         "min": 100,
         "max": 499,
-        "tasa": 120
+        "tasa": 124
       },
 
       {
         "min": 500,
         "max": 999999,
-        "tasa": 122
+        "tasa": 126
       }
     ]
   },
@@ -30,7 +30,7 @@
 
   "usd_prepago": {
 
-    "tasa": 5.75
+    "tasa": 5.60
   },
 
   "saldo_cup": {
@@ -47,7 +47,7 @@
       "plaza": 80,
       "cerro": 80,
       "boyeros": 100,
-      "guanabacoa": 120
+      "guanabacoa": 100
     }
   }
 }
