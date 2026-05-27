@@ -8,31 +8,22 @@ require("dotenv").config();
 
 const app = express();
 
-app.use(
-express.json({
+app.use(express.json({
 limit: "10mb"
-})
-);
+}));
 
 app.set("trust proxy", 1);
 
 app.disable("x-powered-by");
 
-// =========================
-// STATIC PUBLIC
-// =========================
+// STATIC
 app.use(
 express.static(
-path.join(
-__dirname,
-"public"
-)
+path.join(__dirname, "public")
 )
 );
 
-// =========================
 // SERVICES
-// =========================
 const redis =
 require("./src/services/redis");
 
@@ -47,52 +38,36 @@ const {
 detectarIntencion
 } = require("./src/engines/intent-engine");
 
-// =========================
 // RATE LIMIT
-// =========================
 app.use(
 rateLimit({
-windowMs:
-60 * 1000,
-
-```
+windowMs: 60 * 1000,
 max: 120
-```
-
 })
 );
 
-// =========================
 // MEMORIA
-// =========================
 const mensajesProcesados =
 new Set();
 
-const humanTakeover =
-{};
+const humanTakeover = {};
 
-const buffers =
-{};
+const buffers = {};
 
-// =========================
 // LIMPIAR DUPLICADOS
-// =========================
 setInterval(() => {
 
 mensajesProcesados.clear();
 
 }, 1000 * 60 * 30);
 
-// =========================
 // WEBHOOK
-// =========================
 app.post(
 
 "/webhook",
 
 async (req, res) => {
 
-```
 try {
 
   const body =
@@ -101,15 +76,10 @@ try {
   const messageId =
     body.messageId || "";
 
-  // =====================
-  // DUPLICADOS
-  // =====================
   if (
-
     mensajesProcesados.has(
       messageId
     )
-
   ) {
 
     return res.sendStatus(200);
@@ -120,30 +90,23 @@ try {
   );
 
   const fromMe =
-
     body.fromMe === true ||
-
     body.fromMe === "true";
 
   const isGroup =
-
     body.isGroup === true ||
-
     body.isGroup === "true";
 
   const phone =
-
     String(
       body.phone || ""
     )
     .replace(/\D/g, "");
 
   const textMessage =
-
     String(
       body.text?.message || ""
-    )
-    .trim();
+    ).trim();
 
   if (!phone) {
 
@@ -160,9 +123,7 @@ try {
     return res.sendStatus(200);
   }
 
-  // =====================
   // TAKEOVER
-  // =====================
   if (fromMe) {
 
     humanTakeover[phone] =
@@ -187,9 +148,7 @@ try {
     return res.sendStatus(200);
   }
 
-  // =====================
   // CONTEXTO
-  // =====================
   let ctx = null;
 
   if (redis) {
@@ -208,25 +167,19 @@ try {
     }
   }
 
-  // =====================
   // HUMAN ACTIVE
-  // =====================
   if (
 
     ctx?.humano ||
 
     (
-
       humanTakeover[phone]
 
       &&
 
       (
-
         Date.now() -
-
         humanTakeover[phone]
-
       ) <
 
       1000 * 60 * 30
@@ -237,9 +190,7 @@ try {
     return res.sendStatus(200);
   }
 
-  // =====================
-  // INTENT ENGINE
-  // =====================
+  // INTENT
   const esNegocio =
 
     detectarIntencion(
@@ -249,14 +200,10 @@ try {
   if (!esNegocio) {
 
     logger(
-
       "info",
-
       "IGNORED_MESSAGE",
-
       {
         phone,
-
         message:
           textMessage
       }
@@ -265,15 +212,12 @@ try {
     return res.sendStatus(200);
   }
 
-  // =====================
   // BUFFER
-  // =====================
   if (!buffers[phone]) {
 
     buffers[phone] = {
 
       textos: [],
-
       timeout: null
     };
   }
@@ -305,34 +249,25 @@ try {
           delete buffers[phone];
 
           logger(
-
             "info",
-
             "MESSAGE_RECEIVED",
-
             {
               phone,
-
               message:
                 finalMessage
             }
           );
 
           await procesarMensaje(
-
             phone,
-
             finalMessage
           );
 
         } catch (e) {
 
           logger(
-
             "error",
-
             "BUFFER_ERROR",
-
             {
               err:
                 e.message
@@ -350,11 +285,8 @@ try {
 } catch (e) {
 
   logger(
-
     "error",
-
     "WEBHOOK_ERROR",
-
     {
       err:
         e.message
@@ -363,21 +295,17 @@ try {
 
   return res.sendStatus(200);
 }
-```
 
 }
 );
 
-// =========================
 // ADMIN STATS
-// =========================
 app.get(
 
 "/admin/stats",
 
 async (req, res) => {
 
-```
 try {
 
   const {
@@ -390,21 +318,15 @@ try {
     obtenerTodos();
 
   let totalClientes = 0;
-
   let totalVip = 0;
-
   let totalOperaciones = 0;
-
   let totalEnviado = 0;
 
   for (
 
     const [
-
       phone,
-
       data
-
     ] of clientes
 
   ) {
@@ -412,11 +334,9 @@ try {
     totalClientes++;
 
     totalOperaciones +=
-
       data.totalOperaciones || 0;
 
     totalEnviado +=
-
       data.totalEnviado || 0;
 
     if (data.vip) {
@@ -449,32 +369,25 @@ try {
       e.message
   });
 }
-```
 
 }
 );
 
-// =========================
 // HEALTH
-// =========================
 app.get(
 
 "/",
 
 (req, res) => {
 
-```
 res.send(
   "YordaBot Online"
 );
-```
 
 }
 );
 
-// =========================
 // START
-// =========================
 const PORT =
 process.env.PORT || 8080;
 
@@ -486,37 +399,28 @@ PORT,
 
 () => {
 
-```
 console.log(
   "✅ Servidor activo puerto " + PORT
 );
-```
 
 }
 );
 
-// =========================
 // ANTI CRASH
-// =========================
 process.on(
 
 "unhandledRejection",
 
 err => {
 
-```
 logger(
-
   "error",
-
   "UNHANDLED_REJECTION",
-
   {
     err:
       err?.message
   }
 );
-```
 
 }
 );
@@ -527,19 +431,14 @@ process.on(
 
 err => {
 
-```
 logger(
-
   "error",
-
   "UNCAUGHT_EXCEPTION",
-
   {
     err:
       err?.message
   }
 );
-```
 
 }
 );
