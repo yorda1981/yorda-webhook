@@ -1,1 +1,53 @@
+{
+  "brl_cup": {
 
+    "faixas": [
+
+      {
+        "min": 0,
+        "max": 99,
+        "tasa": 100
+      },
+
+      {
+        "min": 100,
+        "max": 499,
+        "tasa": 120
+      },
+
+      {
+        "min": 500,
+        "max": 999999,
+        "tasa": 122
+      }
+    ]
+  },
+
+  "usd_clasica": {
+
+    "tasa": 5.60
+  },
+
+  "usd_prepago": {
+
+    "tasa": 5.75
+  },
+
+  "saldo_cup": {
+
+    "tasa": 100
+  },
+
+  "efectivo_habana": {
+
+    "municipios": {
+
+      "habana vieja": 60,
+      "centro habana": 60,
+      "plaza": 80,
+      "cerro": 80,
+      "boyeros": 100,
+      "guanabacoa": 120
+    }
+  }
+}
