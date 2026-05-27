@@ -373,6 +373,109 @@ try {
 }
 );
 
+// ADMIN TASAS
+app.post(
+
+"/admin/tasas",
+
+async (req, res) => {
+
+try {
+
+  const body =
+    req.body || {};
+
+  const nuevasTasas = {
+
+    brl_cup: {
+
+      faixas: [
+
+        {
+          min: 0,
+          max: 99,
+          tasa: 100
+        },
+
+        {
+          min: 100,
+          max: 499,
+          tasa: Number(
+            body.brl1
+          )
+        },
+
+        {
+          min: 500,
+          max: 999999,
+          tasa: Number(
+            body.brl2
+          )
+        }
+      ]
+    },
+
+    usd_clasica: {
+
+      tasa: Number(
+        body.usd1
+      )
+    },
+
+    usd_prepago: {
+
+      tasa: Number(
+        body.usd2
+      )
+    }
+  };
+
+  fs.writeFileSync(
+
+    path.join(
+
+      __dirname,
+
+      "src",
+
+      "config",
+
+      "tasas.json"
+    ),
+
+    JSON.stringify(
+
+      nuevasTasas,
+
+      null,
+
+      2
+    )
+  );
+
+  return res.json({
+
+    success: true,
+
+    message:
+      "🔥 Tasas actualizadas"
+  });
+
+} catch (e) {
+
+  return res.status(500)
+  .json({
+
+    success: false,
+
+    error:
+      e.message
+  });
+}
+
+}
+);
+
 // HEALTH
 app.get(
 
