@@ -1,11 +1,8 @@
 const express = require("express");
 const rateLimit = require("express-rate-limit");
 
-const fs =
-require("fs");
-
-const path =
-require("path");
+const fs = require("fs");
+const path = require("path");
 
 require("dotenv").config();
 
@@ -21,16 +18,8 @@ app.disable("x-powered-by");
 // STATIC PUBLIC
 // =========================
 app.use(
-
 express.static(
-
-```
-path.join(
-  __dirname,
-  "public"
-)
-```
-
+path.join(__dirname, "public")
 )
 );
 
@@ -55,16 +44,9 @@ detectarIntencion
 // RATE LIMIT
 // =========================
 app.use(
-
 rateLimit({
-
-```
-windowMs:
-  60 * 1000,
-
+windowMs: 60 * 1000,
 max: 120
-```
-
 })
 );
 
@@ -74,11 +56,9 @@ max: 120
 const mensajesProcesados =
 new Set();
 
-const humanTakeover =
-{};
+const humanTakeover = {};
 
-const buffers =
-{};
+const buffers = {};
 
 // =========================
 // LIMPIAR DUPLICADOS
@@ -108,11 +88,9 @@ try {
     body.messageId || "";
 
   if (
-
     mensajesProcesados.has(
       messageId
     )
-
   ) {
 
     return res.sendStatus(200);
@@ -138,9 +116,7 @@ try {
 
   const textMessage =
     String(
-
-      body.text?.message ||
-      ""
+      body.text?.message || ""
     ).trim();
 
   if (!phone) {
@@ -169,13 +145,10 @@ try {
     if (redis) {
 
       await redis.set(
-
         `ctx:${phone}`,
-
         JSON.stringify({
           humano: true
         }),
-
         "EX",
         60 * 30
       );
@@ -209,20 +182,15 @@ try {
   // HUMAN ACTIVE
   // =====================
   if (
-
     ctx?.humano ||
-
     (
       humanTakeover[phone] &&
-
       (
         Date.now() -
         humanTakeover[phone]
       ) <
-
       1000 * 60 * 30
     )
-
   ) {
 
     return res.sendStatus(200);
@@ -257,7 +225,6 @@ try {
   if (!buffers[phone]) {
 
     buffers[phone] = {
-
       textos: [],
       timeout: null
     };
@@ -298,7 +265,6 @@ try {
           );
 
           await procesarMensaje(
-
             phone,
             finalMessage
           );
@@ -341,131 +307,6 @@ try {
 );
 
 // =========================
-// ADMIN TASAS
-// =========================
-app.post(
-
-"/admin/tasas",
-
-async (req, res) => {
-
-```
-try {
-
-  const body =
-    req.body || {};
-
-  const nuevasTasas = {
-
-    brl_cup: {
-
-      faixas: [
-
-        {
-          min: 0,
-          max: 99,
-          tasa: 100
-        },
-
-        {
-          min: 100,
-          max: 499,
-          tasa: Number(
-            body.brl1
-          )
-        },
-
-        {
-          min: 500,
-          max: 999999,
-          tasa: Number(
-            body.brl2
-          )
-        }
-      ]
-    },
-
-    usd_clasica: {
-
-      tasa: Number(
-        body.usd1
-      )
-    },
-
-    usd_prepago: {
-
-      tasa: Number(
-        body.usd2
-      )
-    },
-
-    saldo_cup: {
-
-      tasa: 100
-    },
-
-    efectivo_habana: {
-
-      municipios: {
-
-        "habana vieja": 60,
-        "centro habana": 60,
-        "plaza": 80,
-        "cerro": 80,
-        "boyeros": 100,
-        "guanabacoa": 120
-      }
-    }
-  };
-
-  fs.writeFileSync(
-
-    path.join(
-
-      __dirname,
-
-      "src",
-
-      "config",
-
-      "tasas.json"
-    ),
-
-    JSON.stringify(
-
-      nuevasTasas,
-
-      null,
-
-      2
-    )
-  );
-
-  return res.json({
-
-    success: true,
-
-    message:
-      "Tasas actualizadas 🔥"
-  });
-
-} catch (e) {
-
-  return res.status(500)
-  .json({
-
-    success: false,
-
-    error:
-      e.message
-  });
-}
-```
-
-}
-);
-
-// =========================
 // ADMIN STATS
 // =========================
 app.get(
@@ -480,7 +321,6 @@ try {
   const {
     obtenerTodos
   } = require(
-
     "./src/services/customer-memory"
   );
 
@@ -488,33 +328,23 @@ try {
     obtenerTodos();
 
   let totalClientes = 0;
-
   let totalVip = 0;
-
   let totalOperaciones = 0;
-
   let totalEnviado = 0;
 
   for (
-
     const [
-
       phone,
-
       data
-
     ] of clientes
-
   ) {
 
     totalClientes++;
 
     totalOperaciones +=
-
       data.totalOperaciones || 0;
 
     totalEnviado +=
-
       data.totalEnviado || 0;
 
     if (data.vip) {
@@ -586,10 +416,10 @@ PORT,
 
 ```
 console.log(
+  `✅ Servidor activo puerto ${PORT}`
+);
 ```
 
-`✅ Servidor activo puerto ${PORT}`
-);
 }
 );
 
