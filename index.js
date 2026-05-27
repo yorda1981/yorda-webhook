@@ -373,6 +373,52 @@ try {
 }
 );
 
+// GET TASAS
+app.get(
+
+"/admin/tasas",
+
+async (req, res) => {
+
+try {
+
+  const filePath =
+
+    path.join(
+
+      __dirname,
+
+      "src",
+
+      "config",
+
+      "tasas.json"
+    );
+
+  const data =
+
+    fs.readFileSync(
+      filePath,
+      "utf8"
+    );
+
+  return res.json(
+    JSON.parse(data)
+  );
+
+} catch (e) {
+
+  return res.status(500)
+  .json({
+
+    error:
+      e.message
+  });
+}
+
+}
+);
+
 // ADMIN TASAS
 app.post(
 
