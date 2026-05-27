@@ -1,1 +1,113 @@
+<!DOCTYPE html>
+<html lang="pt-br">
 
+<head>
+
+<meta charset="UTF-8" />
+
+<meta name="viewport"
+content="width=device-width, initial-scale=1.0"/>
+
+<title>Dashboard</title>
+
+<link
+rel="stylesheet"
+href="style.css"
+/>
+
+</head>
+
+<body>
+
+<script>
+
+const auth =
+
+  localStorage.getItem(
+    "adminAuth"
+  );
+
+if (!auth) {
+
+  window.location =
+    "/login.html";
+}
+
+</script>
+
+<div class="dashboard">
+
+<h1>
+
+📊 Dashboard YordaBot
+
+</h1>
+
+<div class="cards">
+
+<div class="card">
+
+<h2>Clientes</h2>
+
+<p id="clientes">
+0
+</p>
+
+</div>
+
+<div class="card">
+
+<h2>VIP</h2>
+
+<p id="vip">
+0
+</p>
+
+</div>
+
+<div class="card">
+
+<h2>Operaciones</h2>
+
+<p id="ops">
+0
+</p>
+
+</div>
+
+<div class="card">
+
+<h2>Total Enviado</h2>
+
+<p id="total">
+R$0
+</p>
+
+</div>
+
+</div>
+
+<button onclick="logout()">
+
+Salir
+
+</button>
+
+</div>
+
+<script>
+
+function logout() {
+
+  localStorage.removeItem(
+    "adminAuth"
+  );
+
+  window.location =
+    "/login.html";
+}
+
+</script>
+
+</body>
+</html>
