@@ -1,6 +1,12 @@
 const express = require("express");
 const rateLimit = require("express-rate-limit");
 
+const fs =
+  require("fs");
+
+const path =
+  require("path");
+
 require("dotenv").config();
 
 const app = express();
@@ -10,6 +16,20 @@ app.use(express.json({ limit: "10mb" }));
 app.set("trust proxy", 1);
 
 app.disable("x-powered-by");
+
+// =========================
+// STATIC PUBLIC
+// =========================
+app.use(
+
+  express.static(
+
+    path.join(
+      __dirname,
+      "public"
+    )
+  )
+);
 
 // =========================
 // SERVICES
@@ -205,7 +225,7 @@ app.post(
       }
 
       // =====================
-      // INTENT ENGINE V2
+      // INTENT ENGINE
       // =====================
       const esNegocio =
         detectarIntencion(
@@ -313,6 +333,128 @@ app.post(
       );
 
       return res.sendStatus(200);
+    }
+  }
+);
+
+// =========================
+// ADMIN TASAS
+// =========================
+app.post(
+
+  "/admin/tasas",
+
+  async (req, res) => {
+
+    try {
+
+      const body =
+        req.body || {};
+
+      const nuevasTasas = {
+
+        brl_cup: {
+
+          faixas: [
+
+            {
+              min: 0,
+              max: 99,
+              tasa: 100
+            },
+
+            {
+              min: 100,
+              max: 499,
+              tasa: Number(
+                body.brl1
+              )
+            },
+
+            {
+              min: 500,
+              max: 999999,
+              tasa: Number(
+                body.brl2
+              )
+            }
+          ]
+        },
+
+        usd_clasica: {
+
+          tasa: Number(
+            body.usd1
+          )
+        },
+
+        usd_prepago: {
+
+          tasa: Number(
+            body.usd2
+          )
+        },
+
+        saldo_cup: {
+
+          tasa: 100
+        },
+
+        efectivo_habana: {
+
+          municipios: {
+
+            "habana vieja": 60,
+            "centro habana": 60,
+            "plaza": 80,
+            "cerro": 80,
+            "boyeros": 100,
+            "guanabacoa": 120
+          }
+        }
+      };
+
+      fs.writeFileSync(
+
+        path.join(
+
+          __dirname,
+
+          "src",
+
+          "config",
+
+          "tasas.json"
+        ),
+
+        JSON.stringify(
+
+          nuevasTasas,
+
+          null,
+
+          2
+        )
+      );
+
+      return res.json({
+
+        success: true,
+
+        message:
+          "Tasas actualizadas 🔥"
+      });
+
+    } catch (e) {
+
+      return res.status(500)
+      .json({
+
+        success: false,
+
+        error:
+          e.message
+      });
     }
   }
 );
