@@ -97,6 +97,9 @@ Salir
 
 <script>
 
+// =========================
+// LOGOUT
+// =========================
 function logout() {
 
   localStorage.removeItem(
@@ -106,6 +109,69 @@ function logout() {
   window.location =
     "/login.html";
 }
+
+// =========================
+// LOAD STATS
+// =========================
+async function cargarStats() {
+
+  try {
+
+    const req =
+      await fetch(
+
+        "/admin/stats"
+      );
+
+    const data =
+      await req.json();
+
+    document
+    .getElementById(
+      "clientes"
+    )
+    .innerText =
+
+      data.clientes || 0;
+
+    document
+    .getElementById(
+      "vip"
+    )
+    .innerText =
+
+      data.vip || 0;
+
+    document
+    .getElementById(
+      "ops"
+    )
+    .innerText =
+
+      data.operaciones || 0;
+
+    document
+    .getElementById(
+      "total"
+    )
+    .innerText =
+
+      "R$" +
+
+      (
+        data.total || 0
+      );
+
+  } catch (e) {
+
+    console.log(e);
+  }
+}
+
+// =========================
+// INIT
+// =========================
+cargarStats();
 
 </script>
 
