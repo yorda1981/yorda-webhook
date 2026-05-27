@@ -11,6 +11,11 @@ const {
 } = require("../engines/pricing-engine");
 
 const {
+  guardarCliente,
+  obtenerCliente
+} = require("./customer-memory");
+
+const {
   OPENAI_API_KEY,
   OPENAI_ASSISTANT_ID
 } = require("../config/env");
@@ -56,9 +61,7 @@ function detectarTipoOperacion(
   ) {
 
     if (
-
       lower.includes("prepago")
-
     ) {
 
       return "usd_prepago";
@@ -177,16 +180,19 @@ async function procesarMensaje(
     let contextoComercial =
       "";
 
+    let valorOperacion =
+      0;
+
+    let tipoOperacion =
+      detectarTipoOperacion(
+        textMessage
+      );
+
     if (regexValor) {
 
-      const valor =
+      valorOperacion =
         Number(
           regexValor[0]
-        );
-
-      const tipo =
-        detectarTipoOperacion(
-          textMessage
         );
 
       const municipio =
@@ -197,19 +203,32 @@ async function procesarMensaje(
       const resultado =
         calcularOperacion({
 
-          tipo,
-          valor,
+          tipo:
+            tipoOperacion,
+
+          valor:
+            valorOperacion,
+
           municipio
         });
 
       if (resultado) {
 
-        if (
-          tipo ===
-          "brl_cup"
-        ) {
+        // =====================
+        // GUARDAR CLIENTE
+        // =====================
+        guardarCliente({
 
-          contextoComercial =
+          phone,
+
+          monto:
+            valorOperacion,
+
+          tipo:
+            tipoOperacion
+        });
+
+        contextoComercial =
 `
 OPERACIÓN CALCULADA
 
@@ -223,11 +242,11 @@ Cliente recibe:
 ${resultado.cup} CUP
 `;
 
-          if (
-            resultado.upsell
-          ) {
+        if (
+          resultado.upsell
+        ) {
 
-            contextoComercial +=
+          contextoComercial +=
 `
 
 UPSELL DISPONIBLE
@@ -238,9 +257,34 @@ R$${resultado.upsell.falta}
 Recibe:
 ${resultado.upsell.nuevoTotal} CUP
 `;
-          }
         }
       }
+    }
+
+    // =====================
+    // MEMORIA CLIENTE
+    // =====================
+    const cliente =
+      obtenerCliente(
+        phone
+      );
+
+    if (cliente) {
+
+      contextoComercial +=
+`
+
+CONTEXTO CLIENTE
+
+Total operaciones:
+${cliente.totalOperaciones}
+
+Último monto:
+R$${cliente.ultimoMonto}
+
+Total enviado:
+R$${cliente.totalEnviado}
+`;
     }
 
     // =====================
@@ -273,12 +317,6 @@ ${resultado.upsell.nuevoTotal} CUP
     // =====================
     if (!threadId) {
 
-      logger(
-        "info",
-        "NEW_THREAD",
-        { phone }
-      );
-
       const thread =
         await axios.post(
 
@@ -303,7 +341,9 @@ ${resultado.upsell.nuevoTotal} CUP
       if (redis) {
 
         await redis.set(
+
           `thread:${phone}`,
+
           threadId
         );
       }
@@ -333,12 +373,6 @@ ${textMessage}`
       }
     );
 
-    logger(
-      "info",
-      "OPENAI_MESSAGE_SENT",
-      { phone }
-    );
-
     // =====================
     // RUN
     // =====================
@@ -361,15 +395,6 @@ ${textMessage}`
 
     const runId =
       run.data.id;
-
-    logger(
-      "info",
-      "RUN_CREATED",
-      {
-        phone,
-        runId
-      }
-    );
 
     let completed =
       false;
@@ -418,15 +443,6 @@ ${textMessage}`
       const status =
         check.data.status;
 
-      logger(
-        "info",
-        "RUN_STATUS",
-        {
-          phone,
-          status
-        }
-      );
-
       if (
         status ===
         "completed"
@@ -473,22 +489,8 @@ ${textMessage}`
 
     if (!respuesta) {
 
-      logger(
-        "error",
-        "EMPTY_RESPONSE",
-        { phone }
-      );
-
       return;
     }
-
-    logger(
-      "info",
-      "OPENAI_RESPONSE",
-      {
-        phone
-      }
-    );
 
     await enviarMensaje(
       phone,
