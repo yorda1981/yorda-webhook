@@ -24,6 +24,10 @@ const {
 const logger =
   require("./src/utils/logger");
 
+const {
+  detectarIntencion
+} = require("./src/engines/intent-engine");
+
 // =========================
 // RATE LIMIT
 // =========================
@@ -31,7 +35,8 @@ app.use(
 
   rateLimit({
 
-    windowMs: 60 * 1000,
+    windowMs:
+      60 * 1000,
 
     max: 120
   })
@@ -200,6 +205,29 @@ app.post(
       }
 
       // =====================
+      // INTENT ENGINE V2
+      // =====================
+      const esNegocio =
+        detectarIntencion(
+          textMessage
+        );
+
+      if (!esNegocio) {
+
+        logger(
+          "info",
+          "IGNORED_MESSAGE",
+          {
+            phone,
+            message:
+              textMessage
+          }
+        );
+
+        return res.sendStatus(200);
+      }
+
+      // =====================
       // BUFFER
       // =====================
       if (!buffers[phone]) {
@@ -244,47 +272,6 @@ app.post(
                     finalMessage
                 }
               );
-
-              // =====================
-              // BUSINESS DETECTOR
-              // =====================
-              const lower =
-                finalMessage
-                .toLowerCase();
-
-              const esNegocio =
-
-                /\b\d+\s?(real|reales|r\$|cup|usd|mlc)\b/i
-                .test(lower)
-
-                ||
-
-                lower.includes(
-                  "remesa"
-                )
-
-                ||
-
-                lower.includes(
-                  "enviar"
-                )
-
-                ||
-
-                lower.includes(
-                  "tasa"
-                )
-
-                ||
-
-                lower.includes(
-                  "pix"
-                );
-
-              if (!esNegocio) {
-
-                return;
-              }
 
               // =====================
               // OPENAI
