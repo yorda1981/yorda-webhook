@@ -8,7 +8,11 @@ require("dotenv").config();
 
 const app = express();
 
-app.use(express.json({ limit: "10mb" }));
+app.use(
+express.json({
+limit: "10mb"
+})
+);
 
 app.set("trust proxy", 1);
 
@@ -19,7 +23,10 @@ app.disable("x-powered-by");
 // =========================
 app.use(
 express.static(
-path.join(__dirname, "public")
+path.join(
+__dirname,
+"public"
+)
 )
 );
 
@@ -45,8 +52,13 @@ detectarIntencion
 // =========================
 app.use(
 rateLimit({
-windowMs: 60 * 1000,
+windowMs:
+60 * 1000,
+
+```
 max: 120
+```
+
 })
 );
 
@@ -56,9 +68,11 @@ max: 120
 const mensajesProcesados =
 new Set();
 
-const humanTakeover = {};
+const humanTakeover =
+{};
 
-const buffers = {};
+const buffers =
+{};
 
 // =========================
 // LIMPIAR DUPLICADOS
@@ -87,10 +101,15 @@ try {
   const messageId =
     body.messageId || "";
 
+  // =====================
+  // DUPLICADOS
+  // =====================
   if (
+
     mensajesProcesados.has(
       messageId
     )
+
   ) {
 
     return res.sendStatus(200);
@@ -101,23 +120,30 @@ try {
   );
 
   const fromMe =
+
     body.fromMe === true ||
+
     body.fromMe === "true";
 
   const isGroup =
+
     body.isGroup === true ||
+
     body.isGroup === "true";
 
   const phone =
+
     String(
       body.phone || ""
     )
     .replace(/\D/g, "");
 
   const textMessage =
+
     String(
       body.text?.message || ""
-    ).trim();
+    )
+    .trim();
 
   if (!phone) {
 
@@ -145,11 +171,15 @@ try {
     if (redis) {
 
       await redis.set(
-        `ctx:${phone}`,
+
+        "ctx:" + phone,
+
         JSON.stringify({
           humano: true
         }),
+
         "EX",
+
         60 * 30
       );
     }
@@ -166,7 +196,7 @@ try {
 
     const redisCtx =
       await redis.get(
-        `ctx:${phone}`
+        "ctx:" + phone
       );
 
     if (redisCtx) {
@@ -182,15 +212,26 @@ try {
   // HUMAN ACTIVE
   // =====================
   if (
+
     ctx?.humano ||
+
     (
-      humanTakeover[phone] &&
+
+      humanTakeover[phone]
+
+      &&
+
       (
+
         Date.now() -
+
         humanTakeover[phone]
+
       ) <
+
       1000 * 60 * 30
     )
+
   ) {
 
     return res.sendStatus(200);
@@ -200,6 +241,7 @@ try {
   // INTENT ENGINE
   // =====================
   const esNegocio =
+
     detectarIntencion(
       textMessage
     );
@@ -207,10 +249,14 @@ try {
   if (!esNegocio) {
 
     logger(
+
       "info",
+
       "IGNORED_MESSAGE",
+
       {
         phone,
+
         message:
           textMessage
       }
@@ -225,7 +271,9 @@ try {
   if (!buffers[phone]) {
 
     buffers[phone] = {
+
       textos: [],
+
       timeout: null
     };
   }
@@ -241,6 +289,7 @@ try {
 
   buffers[phone]
   .timeout =
+
     setTimeout(
 
       async () => {
@@ -248,6 +297,7 @@ try {
         try {
 
           const finalMessage =
+
             buffers[phone]
             .textos
             .join("\n");
@@ -255,25 +305,34 @@ try {
           delete buffers[phone];
 
           logger(
+
             "info",
+
             "MESSAGE_RECEIVED",
+
             {
               phone,
+
               message:
                 finalMessage
             }
           );
 
           await procesarMensaje(
+
             phone,
+
             finalMessage
           );
 
         } catch (e) {
 
           logger(
+
             "error",
+
             "BUFFER_ERROR",
+
             {
               err:
                 e.message
@@ -291,8 +350,11 @@ try {
 } catch (e) {
 
   logger(
+
     "error",
+
     "WEBHOOK_ERROR",
+
     {
       err:
         e.message
@@ -328,23 +390,33 @@ try {
     obtenerTodos();
 
   let totalClientes = 0;
+
   let totalVip = 0;
+
   let totalOperaciones = 0;
+
   let totalEnviado = 0;
 
   for (
+
     const [
+
       phone,
+
       data
+
     ] of clientes
+
   ) {
 
     totalClientes++;
 
     totalOperaciones +=
+
       data.totalOperaciones || 0;
 
     totalEnviado +=
+
       data.totalEnviado || 0;
 
     if (data.vip) {
@@ -416,7 +488,7 @@ PORT,
 
 ```
 console.log(
-  `✅ Servidor activo puerto ${PORT}`
+  "✅ Servidor activo puerto " + PORT
 );
 ```
 
@@ -434,8 +506,11 @@ err => {
 
 ```
 logger(
+
   "error",
+
   "UNHANDLED_REJECTION",
+
   {
     err:
       err?.message
@@ -454,8 +529,11 @@ err => {
 
 ```
 logger(
+
   "error",
+
   "UNCAUGHT_EXCEPTION",
+
   {
     err:
       err?.message
