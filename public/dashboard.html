@@ -38,9 +38,7 @@ if (!auth) {
 <div class="dashboard">
 
 <h1>
-
 📊 Dashboard YordaBot
-
 </h1>
 
 <div class="cards">
@@ -87,6 +85,78 @@ R$0
 
 </div>
 
+<!-- ===================== -->
+<!-- TASAS -->
+<!-- ===================== -->
+
+<h2>
+⚙️ Tasas
+</h2>
+
+<div class="card">
+
+<label>
+BRL 100-499
+</label>
+
+<input
+id="brl1"
+type="number"
+value="124"
+/>
+
+<br><br>
+
+<label>
+BRL 500+
+</label>
+
+<input
+id="brl2"
+type="number"
+value="126"
+/>
+
+<br><br>
+
+<label>
+USD Clásica
+</label>
+
+<input
+id="usd1"
+type="number"
+step="0.01"
+value="5.60"
+/>
+
+<br><br>
+
+<label>
+USD Prepago
+</label>
+
+<input
+id="usd2"
+type="number"
+step="0.01"
+value="5.40"
+/>
+
+<br><br>
+
+<button onclick="guardarTasas()">
+
+Guardar Tasas
+
+</button>
+
+<p id="status"></p>
+
+</div>
+
+<br>
+
 <button onclick="logout()">
 
 Salir
@@ -119,7 +189,6 @@ async function cargarStats() {
 
     const req =
       await fetch(
-
         "/admin/stats"
       );
 
@@ -161,6 +230,90 @@ async function cargarStats() {
       (
         data.total || 0
       );
+
+  } catch (e) {
+
+    console.log(e);
+  }
+}
+
+// =========================
+// GUARDAR TASAS
+// =========================
+async function guardarTasas() {
+
+  try {
+
+    const body = {
+
+      brl1:
+
+        document
+        .getElementById(
+          "brl1"
+        )
+        .value,
+
+      brl2:
+
+        document
+        .getElementById(
+          "brl2"
+        )
+        .value,
+
+      usd1:
+
+        document
+        .getElementById(
+          "usd1"
+        )
+        .value,
+
+      usd2:
+
+        document
+        .getElementById(
+          "usd2"
+        )
+        .value
+    };
+
+    const req =
+
+      await fetch(
+
+        "/admin/tasas",
+
+        {
+
+          method: "POST",
+
+          headers: {
+
+            "Content-Type":
+              "application/json"
+          },
+
+          body:
+            JSON.stringify(
+              body
+            )
+        }
+      );
+
+    const data =
+      await req.json();
+
+    document
+    .getElementById(
+      "status"
+    )
+    .innerText =
+
+      data.message ||
+
+      "Tasas actualizadas";
 
   } catch (e) {
 
