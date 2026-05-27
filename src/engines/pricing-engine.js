@@ -1,56 +1,82 @@
+const tasas =
+  require("../config/tasas.json");
+
+// =====================
+// OBTENER TASA BRL
+// =====================
+function obtenerTasaBRL(
+  valor
+) {
+
+  const faixa =
+    tasas.brl_cup.faixas.find(
+
+      f =>
+
+        valor >= f.min &&
+
+        valor <= f.max
+    );
+
+  return faixa
+    ? faixa.tasa
+    : 100;
+}
+
+// =====================
+// CALCULAR
+// =====================
 function calcularOperacion({
+
   tipo,
   valor,
-  municipio = null
+  municipio
 }) {
-
-  valor =
-    Number(valor);
-
-  if (
-    isNaN(valor) ||
-    valor <= 0
-  ) {
-
-    return null;
-  }
 
   // =====================
   // BRL → CUP
   // =====================
   if (
-    tipo === "brl_cup"
+    tipo ===
+    "brl_cup"
   ) {
 
-    let tasa = 100;
-
-    if (valor >= 100) {
-
-      tasa = 120;
-    }
-
-    if (valor >= 500) {
-
-      tasa = 122;
-    }
+    const tasa =
+      obtenerTasaBRL(
+        valor
+      );
 
     const cup =
       valor * tasa;
 
-    let upsell = null;
+    let upsell =
+      null;
 
-    if (valor < 100) {
+    // =====================
+    // UPSELL
+    // =====================
+    const siguienteFaixa =
+      tasas.brl_cup.faixas.find(
+
+        f =>
+          valor < f.min
+      );
+
+    if (siguienteFaixa) {
+
+      const falta =
+        siguienteFaixa.min -
+        valor;
 
       upsell = {
 
-        falta:
-          100 - valor,
-
-        nuevaTasa:
-          120,
+        falta,
 
         nuevoTotal:
-          100 * 120
+
+          siguienteFaixa.min *
+
+          siguienteFaixa.tasa
       };
     }
 
@@ -59,7 +85,9 @@ function calcularOperacion({
       tipo,
 
       valor,
+
       tasa,
+
       cup,
 
       upsell
@@ -70,26 +98,27 @@ function calcularOperacion({
   // USD CLÁSICA
   // =====================
   if (
-    tipo === "usd_clasica"
+    tipo ===
+    "usd_clasica"
   ) {
 
     const tasa =
-      5.60;
-
-    const total =
-      valor / tasa;
+      tasas.usd_clasica.tasa;
 
     return {
 
       tipo,
 
-      reales:
+      usd:
         valor,
 
-      usd:
-        total.toFixed(2),
+      tasa,
 
-      tasa
+      reales:
+
+        (
+          valor * tasa
+        ).toFixed(2)
     };
   }
 
@@ -97,38 +126,40 @@ function calcularOperacion({
   // USD PREPAGO
   // =====================
   if (
-    tipo === "usd_prepago"
+    tipo ===
+    "usd_prepago"
   ) {
 
     const tasa =
-      5.60;
-
-    const total =
-      valor / tasa;
+      tasas.usd_prepago.tasa;
 
     return {
 
       tipo,
 
-      reales:
+      usd:
         valor,
 
-      usd:
-        total.toFixed(2),
+      tasa,
 
-      tasa
+      reales:
+
+        (
+          valor * tasa
+        ).toFixed(2)
     };
   }
 
   // =====================
-  // RECARGA SALDO
+  // RECARGA
   // =====================
   if (
-    tipo === "saldo_cup"
+    tipo ===
+    "saldo_cup"
   ) {
 
-    const cup =
-      valor * 20;
+    const tasa =
+      tasas.saldo_cup.tasa;
 
     return {
 
@@ -137,10 +168,8 @@ function calcularOperacion({
       reales:
         valor,
 
-      cup,
-
-      vigencia:
-        365
+      cup:
+        valor * tasa
     };
   }
 
@@ -148,49 +177,36 @@ function calcularOperacion({
   // EFECTIVO HABANA
   // =====================
   if (
-    tipo === "efectivo_habana"
+    tipo ===
+    "efectivo_habana"
   ) {
 
     const tasa =
-      102;
+      obtenerTasaBRL(
+        valor
+      );
 
-    const cup =
-      valor * tasa;
-
-    let entrega =
-      110;
-
-    const municipios60 = [
-
-      "habana vieja",
-      "centro habana",
-      "plaza",
-      "cerro",
-      "diez de octubre"
-    ];
-
-    if (
-
-      municipio &&
-
-      municipios60.includes(
-        municipio.toLowerCase()
-      )
-
-    ) {
-
-      entrega = 60;
-    }
+    const entrega =
+      tasas
+      .efectivo_habana
+      .municipios[
+        municipio
+      ] || 0;
 
     return {
 
       tipo,
 
       valor,
-      tasa,
-      cup,
+
+      municipio,
+
       entrega,
-      municipio
+
+      tasa,
+
+      cup:
+        valor * tasa
     };
   }
 
