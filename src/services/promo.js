@@ -8,7 +8,7 @@ const PROMO_PATH =
 
         __dirname,
 
-        "../configuracion/promo.json"
+        "../config/promo.json"
     );
 
 // ==========================================
