@@ -3,71 +3,17 @@ const path = require("path");
 
 const TASAS_PATH = path.join(__dirname, "../config/tasas.json");
 
-function leerTasas() {
+function obtenerTasaBRL(monto) {
     try {
-        const raw = fs.readFileSync(TASAS_PATH, "utf8");
-        return JSON.parse(raw);
+        if (!fs.existsSync(TASAS_PATH)) return null;
+        const data = JSON.parse(fs.readFileSync(TASAS_PATH, "utf8"));
+        // Buscar en las faixas
+        const faixa = data.brl_cup.faixas.find(f => monto >= f.min && monto <= f.max);
+        return faixa ? faixa.tasa : null;
     } catch (e) {
-        console.error("❌ Error leyendo tasas.json:", e.message);
-        // Valores por defecto para evitar que el bot se detenga
-        return {
-            brl_cup: { faixas: [] },
-            usd_clasica: { tasa: 0 },
-            usd_prepago: { tasa: 0 }
-        };
+        console.error("❌ Error en pricing-engine:", e.message);
+        return null;
     }
 }
 
-function calcularOperacion({ tipo, valor }) {
-    const tasas = leerTasas();
-    const monto = Number(valor);
-
-    // =====================
-    // BRL → CUP (4 ESCALAS)
-    // =====================
-    if (tipo === "brl_cup") {
-        const faixa = tasas.brl_cup.faixas.find(
-            f => monto >= f.min && monto <= f.max
-        );
-
-        if (!faixa) {
-            throw new Error("FAIXA_NOT_FOUND");
-        }
-
-        const cup = Math.floor(monto * faixa.tasa);
-
-        return {
-            valor: monto,
-            tasa: faixa.tasa,
-            cup: cup
-        };
-    }
-
-    // =====================
-    // USD CLÁSICA
-    // =====================
-    if (tipo === "usd_clasica") {
-        return {
-            valor: monto,
-            tasa: tasas.usd_clasica.tasa,
-            cup: Math.floor(monto * tasas.usd_clasica.tasa)
-        };
-    }
-
-    // =====================
-    // USD PREPAGO
-    // =====================
-    if (tipo === "usd_prepago") {
-        return {
-            valor: monto,
-            tasa: tasas.usd_prepago.tasa,
-            cup: Math.floor(monto * tasas.usd_prepago.tasa)
-        };
-    }
-
-    return null;
-}
-
-module.exports = {
-    calcularOperacion
-};
+module.exports = { obtenerTasaBRL };
