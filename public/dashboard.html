@@ -1,3 +1,160 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+
+<head>
+
+<meta charset="UTF-8" />
+
+<meta
+name="viewport"
+content="width=device-width, initial-scale=1.0"
+/>
+
+<title>
+Dashboard
+</title>
+
+<link
+rel="stylesheet"
+href="style.css"
+/>
+
+</head>
+
+<body>
+
+<div class="dashboard">
+
+<h1>
+📊 Dashboard YordaBot
+</h1>
+
+<div class="cards">
+
+<div class="card">
+
+<h2>
+Clientes
+</h2>
+
+<p id="clientes">
+0
+</p>
+
+</div>
+
+<div class="card">
+
+<h2>
+VIP
+</h2>
+
+<p id="vip">
+0
+</p>
+
+</div>
+
+<div class="card">
+
+<h2>
+Operaciones
+</h2>
+
+<p id="ops">
+0
+</p>
+
+</div>
+
+<div class="card">
+
+<h2>
+Total Enviado
+</h2>
+
+<p id="total">
+R$0
+</p>
+
+</div>
+
+</div>
+
+<br>
+
+<h2>
+⚙️ Tasas
+</h2>
+
+<div class="card">
+
+<label>
+BRL 100-499
+</label>
+
+<input
+id="brl1"
+type="number"
+/>
+
+<br><br>
+
+<label>
+BRL 500+
+</label>
+
+<input
+id="brl2"
+type="number"
+/>
+
+<br><br>
+
+<label>
+USD Clásica
+</label>
+
+<input
+id="usd1"
+type="number"
+step="0.01"
+/>
+
+<br><br>
+
+<label>
+USD Prepago
+</label>
+
+<input
+id="usd2"
+type="number"
+step="0.01"
+/>
+
+<br><br>
+
+<button onclick="guardarTasas()">
+
+Guardar Tasas
+
+</button>
+
+<p id="status"></p>
+
+</div>
+
+<br>
+
+<button onclick="logout()">
+
+Salir
+
+</button>
+
+</div>
+
 <script>
 
 const auth =
@@ -167,3 +324,6 @@ cargarStats();
 cargarTasas();
 
 </script>
+
+</body>
+</html>
