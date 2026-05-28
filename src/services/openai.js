@@ -1,5 +1,4 @@
-```js
-const axios = require("axios");
+
 require("dotenv").config();
 
 const {
@@ -24,18 +23,14 @@ async function procesarMensaje(
         // RESPUESTA TEMPORAL
         // =====================================
 
-        let mensajeRespuesta =
+        const mensajeRespuesta =
             `YordaBot 🤖\n\n` +
             `He recibido tu mensaje:\n"${text}"\n\n` +
             `Estoy procesando los datos para darte una respuesta exacta.`;
 
         // =====================================
-        // ENVIAR RESPUESTA
+        // ENVÍO
         // =====================================
-
-        console.log(
-            `🚀 Enviando respuesta por Z-API...`
-        );
 
         await enviarMensaje(
             phone,
@@ -43,7 +38,7 @@ async function procesarMensaje(
         );
 
         console.log(
-            `✅ Mensaje enviado correctamente a ${phone}`
+            `✅ Mensaje enviado a ${phone}`
         );
 
         return true;
@@ -62,4 +57,3 @@ async function procesarMensaje(
 module.exports = {
     procesarMensaje
 };
-```
