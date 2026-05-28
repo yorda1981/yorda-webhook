@@ -26,54 +26,45 @@ const verificarToken = (req, res, next) => {
 };
 
 // ==========================================
-// WEBHOOK (DEBUGGING MODE)
+// WEBHOOK (SIMPLIFICADO Y SEGURO)
 // ==========================================
-app.post("/webhook", (req, res) => {
-    // 1. RESPUESTA INMEDIATA
+app.post("/webhook", async (req, res) => {
+    // 1. Respuesta inmediata a Z-API para evitar reintentos
     res.sendStatus(200);
 
-    // 2. LOG DE ENTRADA (Ver estructura de Z-API)
-    console.log("📩 NUEVO EVENTO RECIBIDO:");
-    console.log(JSON.stringify(req.body, null, 2));
+    try {
+        const body = req.body;
 
-    // 3. PROCESAMIENTO ASÍNCRONO
-    (async () => {
-        try {
-            const body = req.body;
-            if (!body) return console.log("⚠️ Webhook recibido sin body");
-            if (body.fromMe === true || body.fromMe === "true") return;
+        // Log de entrada para monitoreo en Railway
+        console.log("📩 MENSAJE RECIBIDO:");
+        console.log(JSON.stringify(body, null, 2));
 
-            // Intentar cargar el servicio
-            let procesarMensaje;
-            try {
-                const service = require("./src/services/openai");
-                procesarMensaje = service.procesarMensaje;
-            } catch (err) {
-                console.log("❌ ERROR AL CARGAR './src/services/openai':");
-                console.log(err); // Aquí veremos si falta un módulo o hay error de sintaxis
-                return;
-            }
-
-            const phone = body.phone || (body.data && body.data.from) || body.from;
-            const textMessage = body.text?.message || body.body || (body.data && body.data.body);
-
-            if (phone && textMessage) {
-                console.log(`🤖 Procesando para ${phone}: "${textMessage}"`);
-                await procesarMensaje(phone, textMessage);
-                console.log(`✅ Respuesta enviada con éxito a ${phone}`);
-            } else {
-                console.log("❓ No se detectó teléfono o mensaje en la estructura");
-            }
-
-        } catch (e) {
-            console.log("💥 ERROR CRÍTICO EN EL FLUJO DEL WEBHOOK:");
-            console.log(e); // Volcado completo del objeto de error (Stack Trace)
+        // Filtros básicos
+        if (!body || body.fromMe === true || body.fromMe === "true") {
+            return;
         }
-    })();
+
+        // Carga dinámica del servicio de OpenAI
+        const { procesarMensaje } = require("./src/services/openai");
+
+        // Extraer teléfono y mensaje (soporta varias estructuras de Z-API)
+        const phone = body.phone || body.from || (body.data && body.data.from);
+        const textMessage = body.text?.message || body.body || (body.data && body.data.body);
+
+        if (phone && textMessage) {
+            console.log(`🤖 Procesando para ${phone}...`);
+            await procesarMensaje(phone, textMessage);
+            console.log(`✅ Respuesta enviada a ${phone}`);
+        }
+
+    } catch (e) {
+        console.log("❌ ERROR WEBHOOK:");
+        console.log(e); // Volcado completo del error para debugging
+    }
 });
 
 // ==========================================
-// API ADMINISTRATIVA
+// API ADMINISTRATIVA (DASHBOARD)
 // ==========================================
 
 app.get("/admin/stats", verificarToken, async (req, res) => {
@@ -89,7 +80,7 @@ app.get("/admin/stats", verificarToken, async (req, res) => {
                 stats.total += (data.totalEnviado || 0);
                 if (data.vip) stats.vip++;
             }
-        } catch (err) { /* Silencioso para stats */ }
+        } catch (err) { /* Stats base si falla el require */ }
         return res.json(stats);
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -97,7 +88,9 @@ app.get("/admin/stats", verificarToken, async (req, res) => {
 app.get("/admin/tasas", verificarToken, (req, res) => {
     res.setHeader("Cache-Control", "no-store");
     try {
-        if (!fs.existsSync(TASAS_PATH)) return res.json({ brl_0:0, brl_100:0, brl_500:0, brl_1000:0, usd1:0, usd2:0 });
+        if (!fs.existsSync(TASAS_PATH)) {
+            return res.json({ brl_0: 0, brl_100: 0, brl_500: 0, brl_1000: 0, usd1: 0, usd2: 0 });
+        }
         const json = JSON.parse(fs.readFileSync(TASAS_PATH, "utf8"));
         return res.json({
             brl_0: json.brl_cup?.faixas[0]?.tasa || 0,
@@ -130,8 +123,19 @@ app.post("/admin/tasas", verificarToken, (req, res) => {
     } catch (e) { res.status(500).json({ success: false }); }
 });
 
-app.get("/dashboard", verificarToken, (req, res) => res.sendFile(path.join(__dirname, "public", "dashboard.html")));
+// ==========================================
+// RUTAS DE ARCHIVOS
+// ==========================================
+app.get("/dashboard", verificarToken, (req, res) => {
+    res.sendFile(path.join(__dirname, "public", "dashboard.html"));
+});
+
 app.get("/", (req, res) => res.send("YordaBot Online"));
 
+// ==========================================
+// ARRANQUE
+// ==========================================
 const PORT = process.env.PORT || 8080;
-app.listen(PORT, "0.0.0.0", () => console.log(`✅ SERVER UP > Puerto ${PORT}`));
+app.listen(PORT, "0.0.0.0", () => {
+    console.log(`✅ SERVER UP > Puerto ${PORT}`);
+});
