@@ -1,26 +1,8 @@
-<!DOCTYPE html>
-<html lang="pt-br">
-
-<head>
-
-<meta charset="UTF-8" />
-
-<meta name="viewport"
-content="width=device-width, initial-scale=1.0"/>
-
-<title>Dashboard</title>
-
-<link
-rel="stylesheet"
-href="style.css"
-/>
-
-</head>
-
-<body>
-
 <script>
 
+// =========================
+// AUTH
+// =========================
 const auth =
 
   localStorage.getItem(
@@ -32,140 +14,6 @@ if (!auth) {
   window.location =
     "/login.html";
 }
-
-</script>
-
-<div class="dashboard">
-
-<h1>
-📊 Dashboard YordaBot
-</h1>
-
-<div class="cards">
-
-<div class="card">
-
-<h2>Clientes</h2>
-
-<p id="clientes">
-0
-</p>
-
-</div>
-
-<div class="card">
-
-<h2>VIP</h2>
-
-<p id="vip">
-0
-</p>
-
-</div>
-
-<div class="card">
-
-<h2>Operaciones</h2>
-
-<p id="ops">
-0
-</p>
-
-</div>
-
-<div class="card">
-
-<h2>Total Enviado</h2>
-
-<p id="total">
-R$0
-</p>
-
-</div>
-
-</div>
-
-<!-- ===================== -->
-<!-- TASAS -->
-<!-- ===================== -->
-
-<h2>
-⚙️ Tasas
-</h2>
-
-<div class="card">
-
-<label>
-BRL 100-499
-</label>
-
-<input
-id="brl1"
-type="number"
-value="124"
-/>
-
-<br><br>
-
-<label>
-BRL 500+
-</label>
-
-<input
-id="brl2"
-type="number"
-value="126"
-/>
-
-<br><br>
-
-<label>
-USD Clásica
-</label>
-
-<input
-id="usd1"
-type="number"
-step="0.01"
-value="5.60"
-/>
-
-<br><br>
-
-<label>
-USD Prepago
-</label>
-
-<input
-id="usd2"
-type="number"
-step="0.01"
-value="5.40"
-/>
-
-<br><br>
-
-<button onclick="guardarTasas()">
-
-Guardar Tasas
-
-</button>
-
-<p id="status"></p>
-
-</div>
-
-<br>
-
-<button onclick="logout()">
-
-Salir
-
-</button>
-
-</div>
-
-<script>
 
 // =========================
 // LOGOUT
@@ -238,7 +86,70 @@ async function cargarStats() {
 }
 
 // =========================
-// GUARDAR TASAS
+// LOAD TASAS
+// =========================
+async function cargarTasas() {
+
+  try {
+
+    const req =
+      await fetch(
+        "/admin/tasas"
+      );
+
+    const data =
+      await req.json();
+
+    document
+    .getElementById(
+      "brl1"
+    )
+    .value =
+
+      data
+      .brl_cup
+      .faixas[1]
+      .tasa;
+
+    document
+    .getElementById(
+      "brl2"
+    )
+    .value =
+
+      data
+      .brl_cup
+      .faixas[2]
+      .tasa;
+
+    document
+    .getElementById(
+      "usd1"
+    )
+    .value =
+
+      data
+      .usd_clasica
+      .tasa;
+
+    document
+    .getElementById(
+      "usd2"
+    )
+    .value =
+
+      data
+      .usd_prepago
+      .tasa;
+
+  } catch (e) {
+
+    console.log(e);
+  }
+}
+
+// =========================
+// SAVE TASAS
 // =========================
 async function guardarTasas() {
 
@@ -315,6 +226,9 @@ async function guardarTasas() {
 
       "Tasas actualizadas";
 
+    // RECARGAR TASAS
+    cargarTasas();
+
   } catch (e) {
 
     console.log(e);
@@ -326,7 +240,6 @@ async function guardarTasas() {
 // =========================
 cargarStats();
 
-</script>
+cargarTasas();
 
-</body>
-</html>
+</script>
