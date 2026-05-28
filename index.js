@@ -686,8 +686,6 @@ process.on(
 "uncaughtException",
 
 err => {
-
-```
 logger(
   "error",
   "UNCAUGHT_EXCEPTION",
