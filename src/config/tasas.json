@@ -1,53 +1,36 @@
+```json id="q7m4w2"
 {
   "brl_cup": {
-
     "faixas": [
-
       {
         "min": 0,
         "max": 99,
-        "tasa": 100
+        "tasa": 120
       },
-
       {
         "min": 100,
         "max": 499,
         "tasa": 124
       },
-
       {
         "min": 500,
-        "max": 999999,
+        "max": 999,
         "tasa": 126
+      },
+      {
+        "min": 1000,
+        "max": 999999,
+        "tasa": 128
       }
     ]
   },
 
   "usd_clasica": {
-
     "tasa": 5.60
   },
 
   "usd_prepago": {
-
-    "tasa": 5.60
-  },
-
-  "saldo_cup": {
-
-    "tasa": 100
-  },
-
-  "efectivo_habana": {
-
-    "municipios": {
-
-      "habana vieja": 60,
-      "centro habana": 60,
-      "plaza": 80,
-      "cerro": 80,
-      "boyeros": 100,
-      "guanabacoa": 100
-    }
+    "tasa": 5.75
   }
 }
+```
