@@ -38,6 +38,12 @@ const TASAS_PATH =
     );
 
 // ==========================================
+// CONTROL HUMANO
+// ==========================================
+
+const ultimaIntervencionHumana = {};
+
+// ==========================================
 // PROTECCIÓN ADMIN
 // ==========================================
 
@@ -108,54 +114,6 @@ app.post(
             }
 
             // ==========================================
-            // DEBUG PAYLOAD
-            // ==========================================
-
-            console.log(
-                "📦 PAYLOAD:"
-            );
-
-            console.log(
-                JSON.stringify(
-                    body,
-                    null,
-                    2
-                )
-            );
-
-            // ==========================================
-            // IGNORAR MENSAJES PROPIOS
-            // ==========================================
-
-            if (
-                body.fromMe === true ||
-                body.fromMe === "true"
-            ) {
-
-                console.log(
-                    "🚫 Mensaje propio ignorado"
-                );
-
-                return;
-            }
-
-            // ==========================================
-            // IGNORAR GRUPOS / NEWSLETTER
-            // ==========================================
-
-            if (
-                body.isGroup === true ||
-                body.isNewsletter === true
-            ) {
-
-                console.log(
-                    "🚫 Grupo/Newsletter ignorado"
-                );
-
-                return;
-            }
-
-            // ==========================================
             // EXTRAER DATOS
             // ==========================================
 
@@ -168,6 +126,160 @@ app.post(
                 body.text?.message ||
                 body.body ||
                 "";
+
+            // ==========================================
+            // IGNORAR MENSAJES PROPIOS
+            // ==========================================
+
+            if (
+                body.fromMe === true ||
+                body.fromMe === "true"
+            ) {
+
+                console.log(
+                    `🧑 Humano intervino en ${phone}`
+                );
+
+                ultimaIntervencionHumana[phone] =
+                    Date.now();
+
+                return;
+            }
+
+            // ==========================================
+            // PAUSA 5 MINUTOS
+            // ==========================================
+
+            const ultimaIntervencion =
+                ultimaIntervencionHumana[phone];
+
+            if (ultimaIntervencion) {
+
+                const diferencia =
+                    Date.now() -
+                    ultimaIntervencion;
+
+                const cincoMinutos =
+                    5 * 60 * 1000;
+
+                if (
+                    diferencia < cincoMinutos
+                ) {
+
+                    console.log(
+                        `⏸️ Bot pausado para ${phone}`
+                    );
+
+                    return;
+                }
+            }
+
+            // ==========================================
+            // IGNORAR GRUPOS
+            // ==========================================
+
+            if (
+                body.isGroup === true ||
+                body.phone?.includes("group")
+            ) {
+
+                console.log(
+                    "🚫 Grupo ignorado"
+                );
+
+                return;
+            }
+
+            // ==========================================
+            // IGNORAR NEWSLETTER
+            // ==========================================
+
+            if (
+                body.isNewsletter === true
+            ) {
+
+                console.log(
+                    "🚫 Newsletter ignorado"
+                );
+
+                return;
+            }
+
+            // ==========================================
+            // IGNORAR STATUS
+            // ==========================================
+
+            if (
+                body.status === "READ" ||
+                body.status === "PLAYED"
+            ) {
+
+                console.log(
+                    "🚫 Evento status ignorado"
+                );
+
+                return;
+            }
+
+            // ==========================================
+            // IGNORAR IMÁGENES
+            // ==========================================
+
+            if (
+                body.image
+            ) {
+
+                console.log(
+                    "🚫 Imagen ignorada"
+                );
+
+                return;
+            }
+
+            // ==========================================
+            // IGNORAR AUDIOS
+            // ==========================================
+
+            if (
+                body.audio
+            ) {
+
+                console.log(
+                    "🚫 Audio ignorado"
+                );
+
+                return;
+            }
+
+            // ==========================================
+            // IGNORAR VIDEOS
+            // ==========================================
+
+            if (
+                body.video
+            ) {
+
+                console.log(
+                    "🚫 Video ignorado"
+                );
+
+                return;
+            }
+
+            // ==========================================
+            // IGNORAR DOCUMENTOS
+            // ==========================================
+
+            if (
+                body.document
+            ) {
+
+                console.log(
+                    "🚫 Documento ignorado"
+                );
+
+                return;
+            }
 
             // ==========================================
             // VALIDAR MENSAJE
@@ -186,6 +298,10 @@ app.post(
                 return;
             }
 
+            // ==========================================
+            // LOGS
+            // ==========================================
+
             console.log(
                 `📩 Mensaje de: ${
                     body.senderName ||
@@ -194,7 +310,7 @@ app.post(
             );
 
             console.log(
-                `📝 Texto: ${textMessage}`
+                `💬 ${textMessage}`
             );
 
             // ==========================================
@@ -261,7 +377,7 @@ app.post(
             }
 
             console.log(
-                "✅ Respuesta enviada."
+                "✅ Flujo completado"
             );
 
         } catch (e) {
