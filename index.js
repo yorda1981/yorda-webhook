@@ -357,7 +357,7 @@ app.post(
             );
 
             console.log(
-                respuestaIA
+                String(respuestaIA)
             );
 
             // ==========================================
@@ -366,7 +366,7 @@ app.post(
 
             if (
                 !respuestaIA ||
-                respuestaIA.trim() === ""
+                String(respuestaIA).trim() === ""
             ) {
 
                 console.log(
