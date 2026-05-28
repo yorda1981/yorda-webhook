@@ -1,4 +1,6 @@
-const axios = require("axios");
+const {
+enviarMensaje
+} = require("./zapi");
 
 async function procesarMensaje(
 phone,
@@ -11,6 +13,16 @@ phone,
 textMessage
 );
 
+await enviarMensaje(
+
+```
+phone,
+
+`🔥 YordaBot recibió:
+```
+
+${textMessage}`
+);
 }
 
 module.exports = {
