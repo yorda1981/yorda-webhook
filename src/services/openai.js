@@ -682,5 +682,5 @@ usuariosProcesando.delete(
 }
 
 module.exports = {
-procesarMensaje
+  procesarMensaje
 };
