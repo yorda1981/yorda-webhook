@@ -1,3 +1,4 @@
+
 require("dotenv").config();
 
 const OpenAI = require("openai");
@@ -7,7 +8,7 @@ const {
 } = require("./zapi");
 
 // ==========================================
-// OPENAI
+// OPENAI CLIENT
 // ==========================================
 
 const openai =
@@ -16,6 +17,78 @@ const openai =
         apiKey:
             process.env.OPENAI_API_KEY
     });
+
+// ==========================================
+// GATILHOS COMERCIAIS
+// ==========================================
+
+const gatilhos = [
+
+    // CAMBIO
+    "real",
+    "reales",
+    "brl",
+    "cambio",
+    "cambiar",
+    "taxa",
+    "tasa",
+    "cotizacion",
+    "cotización",
+    "precio",
+
+    // DINERO
+    "enviar",
+    "mandar",
+    "transferencia",
+    "transferir",
+    "remesa",
+    "remesas",
+    "dinero",
+    "deposito",
+    "depósito",
+    "pix",
+
+    // CUBA
+    "cuba",
+    "cup",
+    "mlc",
+    "usd",
+    "dolar",
+    "dólar",
+    "tarjeta",
+
+    // CONSULTAS
+    "cuanto",
+    "cuánto",
+    "cuanto recibe",
+    "cuánto recibe",
+    "cuanto llega",
+    "cuánto llega",
+
+    // RECARGAS
+    "recarga",
+    "saldo",
+    "internet",
+    "nauta",
+
+    // HUMANO
+    "yordanys",
+    "asesor",
+    "atendente",
+    "humano"
+];
+
+// ==========================================
+// NORMALIZAR TEXTO
+// ==========================================
+
+function normalizarTexto(texto) {
+
+    return String(texto)
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "");
+}
 
 // ==========================================
 // PROCESAR MENSAJE
@@ -33,6 +106,45 @@ async function procesarMensaje(
         );
 
         // ==========================================
+        // VALIDAR TEXTO
+        // ==========================================
+
+        if (!text) {
+
+            return "";
+        }
+
+        // ==========================================
+        // INTENT ENGINE
+        // ==========================================
+
+        const texto =
+            normalizarTexto(text);
+
+        const activarIA =
+            gatilhos.some(
+
+                g =>
+
+                    texto.includes(
+                        normalizarTexto(g)
+                    )
+            );
+
+        // ==========================================
+        // IGNORAR MENSAJES SIN INTENCIÓN
+        // ==========================================
+
+        if (!activarIA) {
+
+            console.log(
+                "😴 Mensaje ignorado"
+            );
+
+            return "";
+        }
+
+        // ==========================================
         // SYSTEM PROMPT
         // ==========================================
 
@@ -48,7 +160,7 @@ REGRAS IMPORTANTES:
   "Recebi sua mensagem"
   "Aguarde"
 - Respostas curtas estilo WhatsApp.
-- Fale somente no idioma do cliente.
+- Fale somente espanhol.
 - Não fale do negócio se o cliente não perguntar.
 - Seja educado, rápido e vendedor.
 - Evite textos robóticos.
@@ -61,6 +173,15 @@ REGRAS IMPORTANTES:
 - Se o cliente quiser falar com Yordanys:
   diga que ele está ocupado no momento,
   mas entrará assim que possível.
+- Seja especialista em:
+  remesas,
+  câmbio,
+  transferências,
+  PIX,
+  recargas Cuba,
+  CUP,
+  MLC,
+  USD.
 `;
 
         // ==========================================
@@ -85,9 +206,9 @@ REGRAS IMPORTANTES:
                     }
                 ],
 
-                temperature: 0.7,
+                temperature: 0.4,
 
-                max_tokens: 300
+                max_tokens: 120
             });
 
         // ==========================================
@@ -104,9 +225,7 @@ REGRAS IMPORTANTES:
         // VALIDAR RESPUESTA
         // ==========================================
 
-        if (
-            !respuesta
-        ) {
+        if (!respuesta) {
 
             console.log(
                 "❌ OpenAI devolvió vacío"
@@ -128,10 +247,6 @@ REGRAS IMPORTANTES:
             `✅ Mensaje enviado a ${phone}`
         );
 
-        // ==========================================
-        // RETORNAR TEXTO
-        // ==========================================
-
         return String(respuesta);
 
     } catch (error) {
@@ -143,6 +258,26 @@ REGRAS IMPORTANTES:
         console.error(
             error.message
         );
+
+        // ==========================================
+        // FALLBACK
+        // ==========================================
+
+        try {
+
+            await enviarMensaje(
+
+                phone,
+
+                "Hola 👋\n\nEn este momento estamos con alta demanda. Intenta nuevamente en unos minutos."
+            );
+
+        } catch (e) {
+
+            console.error(
+                "❌ Error enviando fallback"
+            );
+        }
 
         return "";
     }
