@@ -1,329 +1,357 @@
+```html
 <!DOCTYPE html>
-<html lang="pt-br">
+<html lang="es">
 
 <head>
 
-<meta charset="UTF-8" />
+  <meta charset="UTF-8">
 
-<meta
-name="viewport"
-content="width=device-width, initial-scale=1.0"
-/>
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  >
 
-<title>
-Dashboard
-</title>
+  <title>
+    YORDA-BOT Dashboard
+  </title>
 
-<link
-rel="stylesheet"
-href="style.css"
-/>
+  <link
+    rel="stylesheet"
+    href="/styles.css"
+  >
 
 </head>
 
 <body>
 
-<div class="dashboard">
+  <div class="container">
 
-<h1>
-📊 Dashboard YordaBot
-</h1>
+    <!-- SIDEBAR -->
+    <aside class="sidebar">
 
-<div class="cards">
+      <div class="logo">
+        YORDA-BOT
+      </div>
 
-<div class="card">
+      <div class="menu">
 
-<h2>
-Clientes
-</h2>
+        <button>
+          Dashboard
+        </button>
 
-<p id="clientes">
-0
-</p>
+        <button>
+          Clientes
+        </button>
 
-</div>
+        <button>
+          Operaciones
+        </button>
 
-<div class="card">
+        <button>
+          Tasas
+        </button>
 
-<h2>
-VIP
-</h2>
+        <button>
+          Logs
+        </button>
 
-<p id="vip">
-0
-</p>
+        <button onclick="logout()">
+          Logout
+        </button>
 
-</div>
+      </div>
 
-<div class="card">
+    </aside>
 
-<h2>
-Operaciones
-</h2>
+    <!-- MAIN -->
+    <main class="main">
 
-<p id="ops">
-0
-</p>
+      <h1 class="title">
+        Dashboard Admin
+      </h1>
 
-</div>
+      <!-- STATS -->
+      <div class="stats-grid">
 
-<div class="card">
+        <div class="card">
 
-<h2>
-Total Enviado
-</h2>
+          <h2>
+            Mensajes Hoy
+          </h2>
 
-<p id="total">
-R$0
-</p>
+          <p id="msgHoy">
+            0
+          </p>
 
-</div>
+        </div>
 
-</div>
+        <div class="card">
 
-<br>
+          <h2>
+            Operaciones
+          </h2>
 
-<h2>
-⚙️ Tasas
-</h2>
+          <p id="opsHoy">
+            0
+          </p>
 
-<div class="card">
+        </div>
 
-<label>
-BRL 100-499
-</label>
+        <div class="card">
 
-<input
-id="brl1"
-type="number"
-/>
+          <h2>
+            Clientes
+          </h2>
 
-<br><br>
+          <p id="clientesHoy">
+            0
+          </p>
 
-<label>
-BRL 500+
-</label>
+        </div>
 
-<input
-id="brl2"
-type="number"
-/>
+        <div class="card">
 
-<br><br>
+          <h2>
+            Conversión
+          </h2>
 
-<label>
-USD Clásica
-</label>
+          <p id="conversion">
+            0%
+          </p>
 
-<input
-id="usd1"
-type="number"
-step="0.01"
-/>
+        </div>
 
-<br><br>
+      </div>
 
-<label>
-USD Prepago
-</label>
+      <!-- TASAS -->
+      <div class="tasas-box">
+
+        <h2
+          style="
+            margin-bottom:20px;
+          "
+        >
+          Configuración de Tasas
+        </h2>
+
+        <!-- BRL -->
+        <div class="input-group">
 
-<input
-id="usd2"
-type="number"
-step="0.01"
-/>
+          <label>
+            BRL → CUP
+          </label>
 
-<br><br>
+          <input
+            type="number"
+            id="brlCup"
+          >
+
+        </div>
 
-<button onclick="guardarTasas()">
+        <!-- USD -->
+        <div class="input-group">
+
+          <label>
+            USD → CUP
+          </label>
+
+          <input
+            type="number"
+            id="usdCup"
+          >
+
+        </div>
+
+        <!-- SAVE -->
+        <button
+          class="save-btn"
+          onclick="guardarTasas()"
+        >
+          Guardar Tasas
+        </button>
+
+      </div>
 
-Guardar Tasas
+    </main>
+
+  </div>
+
+  <script>
+
+    // =====================
+    // LOGIN SIMPLE
+    // =====================
+    const password =
+      prompt(
+        "Ingrese contraseña admin"
+      );
+
+    if (
+      password !==
+      "admin123"
+    ) {
+
+      alert(
+        "Acceso denegado"
+      );
+
+      window.location.href =
+        "/";
+    }
+
+    // =====================
+    // CARGAR STATS
+    // =====================
+    async function cargarStats() {
+
+      try {
+
+        const req =
+          await fetch(
+            "/admin/stats"
+          );
+
+        const data =
+          await req.json();
+
+        document.getElementById(
+          "msgHoy"
+        ).innerText =
+          data.messages || 0;
+
+        document.getElementById(
+          "opsHoy"
+        ).innerText =
+          data.operations || 0;
+
+        document.getElementById(
+          "clientesHoy"
+        ).innerText =
+          data.clients || 0;
 
-</button>
+        document.getElementById(
+          "conversion"
+        ).innerText =
+          `${data.conversion || 0}%`;
+
+      } catch (e) {
 
-<p id="status"></p>
+        console.log(e);
+      }
+    }
+
+    // =====================
+    // CARGAR TASAS
+    // =====================
+    async function cargarTasas() {
 
-</div>
+      try {
+
+        const req =
+          await fetch(
+            "/admin/tasas"
+          );
 
-<br>
+        const data =
+          await req.json();
 
-<button onclick="logout()">
+        document.getElementById(
+          "brlCup"
+        ).value =
+          data.brlCup || 0;
 
-Salir
+        document.getElementById(
+          "usdCup"
+        ).value =
+          data.usdCup || 0;
 
-</button>
+      } catch (e) {
 
-</div>
+        console.log(e);
+      }
+    }
 
-<script>
+    // =====================
+    // GUARDAR TASAS
+    // =====================
+    async function guardarTasas() {
 
-const auth =
-localStorage.getItem(
-"adminAuth"
-);
+      try {
 
-if (!auth) {
+        const body = {
 
-window.location =
-"/login.html";
-}
+          brlCup:
+            Number(
+              document.getElementById(
+                "brlCup"
+              ).value
+            ),
 
-function logout() {
+          usdCup:
+            Number(
+              document.getElementById(
+                "usdCup"
+              ).value
+            )
+        };
 
-localStorage.removeItem(
-"adminAuth"
-);
+        const req =
+          await fetch(
+            "/admin/tasas",
+            {
 
-window.location =
-"/login.html";
-}
+              method:
+                "POST",
 
-async function cargarStats() {
+              headers: {
 
-try {
+                "Content-Type":
+                  "application/json"
+              },
 
-const req =
-await fetch(
-"/admin/stats"
-);
+              body:
+                JSON.stringify(
+                  body
+                )
+            }
+          );
 
-const data =
-await req.json();
+        const data =
+          await req.json();
 
-document.getElementById(
-"clientes"
-).innerText =
-data.clientes || 0;
+        alert(
+          "✅ Tasas actualizadas"
+        );
 
-document.getElementById(
-"vip"
-).innerText =
-data.vip || 0;
+        console.log(data);
 
-document.getElementById(
-"ops"
-).innerText =
-data.operaciones || 0;
+      } catch (e) {
 
-document.getElementById(
-"total"
-).innerText =
-"R$" + (
-data.total || 0
-);
+        console.log(e);
 
-} catch (e) {
+        alert(
+          "❌ Error guardando tasas"
+        );
+      }
+    }
 
-console.log(e);
-}
-}
+    // =====================
+    // LOGOUT
+    // =====================
+    function logout() {
 
-async function cargarTasas() {
+      location.reload();
+    }
 
-try {
+    // =====================
+    // INIT
+    // =====================
+    cargarStats();
 
-const req =
-await fetch(
-"/admin/tasas"
-);
+    cargarTasas();
 
-const data =
-await req.json();
-
-document.getElementById(
-"brl1"
-).value =
-data.brl_cup.faixas[1].tasa;
-
-document.getElementById(
-"brl2"
-).value =
-data.brl_cup.faixas[2].tasa;
-
-document.getElementById(
-"usd1"
-).value =
-data.usd_clasica.tasa;
-
-document.getElementById(
-"usd2"
-).value =
-data.usd_prepago.tasa;
-
-} catch (e) {
-
-console.log(e);
-}
-}
-
-async function guardarTasas() {
-
-try {
-
-const body = {
-
-brl1:
-document.getElementById(
-"brl1"
-).value,
-
-brl2:
-document.getElementById(
-"brl2"
-).value,
-
-usd1:
-document.getElementById(
-"usd1"
-).value,
-
-usd2:
-document.getElementById(
-"usd2"
-).value
-};
-
-const req =
-await fetch(
-
-"/admin/tasas",
-
-{
-method: "POST",
-
-headers: {
-"Content-Type":
-"application/json"
-},
-
-body:
-JSON.stringify(
-body
-)
-}
-);
-
-const data =
-await req.json();
-
-document.getElementById(
-"status"
-).innerText =
-data.message;
-
-cargarTasas();
-
-} catch (e) {
-
-console.log(e);
-}
-}
-
-cargarStats();
-
-cargarTasas();
-
-</script>
+  </script>
 
 </body>
 </html>
+```
