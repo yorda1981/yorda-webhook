@@ -1,9 +1,16 @@
-
 require("dotenv").config();
+
+const OpenAI = require("openai");
 
 const {
     enviarMensaje
 } = require("./zapi");
+
+const openai =
+    new OpenAI({
+        apiKey:
+            process.env.OPENAI_API_KEY
+    });
 
 /**
  * Procesa mensajes entrantes
@@ -20,28 +27,78 @@ async function procesarMensaje(
         );
 
         // =====================================
-        // RESPUESTA TEMPORAL
+        // OPENAI
         // =====================================
 
-        const mensajeRespuesta =
-            `YordaBot 🤖\n\n` +
-            `He recibido tu mensaje:\n"${text}"\n\n` +
-            `Estoy procesando los datos para darte una respuesta exacta.`;
+        const completion =
+            await openai.chat.completions.create({
+
+                model: "gpt-4o-mini",
+
+                messages: [
+
+                    {
+                        role: "system",
+                        content:
+`
+Você é YordaBot.
+
+REGRAS:
+
+- Responda de forma humana.
+- Nunca diga que está processando.
+- Nunca diga "recebi sua mensagem".
+- Seja curto e natural.
+- Fale no idioma do cliente.
+- Não fale do negócio se não perguntarem.
+- Seja educado e vendedor.
+- Respostas estilo WhatsApp real.
+`
+                    },
+
+                    {
+                        role: "user",
+                        content: text
+                    }
+                ],
+
+                temperature: 0.7,
+                max_tokens: 300
+            });
 
         // =====================================
-        // ENVÍO
+        // RESPUESTA
+        // =====================================
+
+        const respuesta =
+            completion.choices?.[0]
+            ?.message
+            ?.content
+            ?.trim();
+
+        if (!respuesta) {
+
+            console.log(
+                "❌ OpenAI devolvió vacío"
+            );
+
+            return "";
+        }
+
+        // =====================================
+        // ENVIAR
         // =====================================
 
         await enviarMensaje(
             phone,
-            mensajeRespuesta
+            respuesta
         );
 
         console.log(
             `✅ Mensaje enviado a ${phone}`
         );
 
-        return true;
+        return respuesta;
 
     } catch (error) {
 
@@ -50,7 +107,7 @@ async function procesarMensaje(
             error.message
         );
 
-        throw error;
+        return "";
     }
 }
 
