@@ -1,4 +1,3 @@
-
 const fs = require("fs");
 const path = require("path");
 
@@ -57,8 +56,20 @@ function cargarClientes() {
     asegurarDB();
 
     const raw = fs.readFileSync(
-      DB_PATH
+      DB_PATH,
+      "utf8"
     );
+
+    if (!raw || raw.trim() === "") {
+
+      clientes = new Map();
+
+      console.log(
+        "📂 DB vacía iniciada"
+      );
+
+      return;
+    }
 
     const data = JSON.parse(raw);
 
@@ -76,6 +87,8 @@ function cargarClientes() {
       "❌ Error cargando clientes",
       err
     );
+
+    clientes = new Map();
   }
 }
 
@@ -93,6 +106,10 @@ function guardarDB() {
     fs.writeFileSync(
       DB_PATH,
       JSON.stringify(obj, null, 2)
+    );
+
+    console.log(
+      "💾 DB guardada correctamente"
     );
 
   } catch (err) {
@@ -124,88 +141,116 @@ function guardarCliente({
 
 }) {
 
-  if (!phone) return null;
+  try {
 
-  const actual =
+    if (!phone) {
 
-    clientes.get(phone)
+      console.log(
+        "🚫 Phone inválido"
+      );
 
-    ||
+      return null;
+    }
 
-    {
+    const actual =
 
-      nombre: "",
+      clientes.get(phone)
 
-      totalOperaciones: 0,
+      ||
 
-      totalEnviado: 0,
+      {
 
-      ultimoMonto: 0,
+        nombre: "",
 
-      tipoFavorito: tipo,
+        totalOperaciones: 0,
 
-      bancoFavorito: "",
+        totalEnviado: 0,
 
-      tarjetaFrecuente: "",
+        ultimoMonto: 0,
 
-      ultimaOperacion: null,
+        tipoFavorito: tipo,
 
-      vip: false,
+        bancoFavorito: "",
 
-      createdAt:
-        new Date().toISOString()
-    };
+        tarjetaFrecuente: "",
 
-  // =====================
-  // ACTUALIZAR DATOS
-  // =====================
+        ultimaOperacion: null,
 
-  actual.nombre =
-    nombre || actual.nombre;
+        vip: false,
 
-  actual.totalOperaciones += 1;
+        createdAt:
+          new Date().toISOString()
+      };
 
-  actual.totalEnviado +=
-    Number(monto || 0);
+    // =====================
+    // ACTUALIZAR DATOS
+    // =====================
 
-  actual.ultimoMonto =
-    Number(monto || 0);
+    actual.nombre =
+      nombre || actual.nombre;
 
-  actual.tipoFavorito =
-    tipo || actual.tipoFavorito;
+    // SOLO SUMAR SI HAY MONTO
 
-  actual.bancoFavorito =
-    banco || actual.bancoFavorito;
+    if (Number(monto) > 0) {
 
-  actual.tarjetaFrecuente =
-    tarjeta || actual.tarjetaFrecuente;
+      actual.totalOperaciones += 1;
 
-  actual.ultimaOperacion =
-    new Date().toISOString();
+      actual.totalEnviado +=
+        Number(monto || 0);
 
-  actual.updatedAt =
-    new Date().toISOString();
+      actual.ultimoMonto =
+        Number(monto || 0);
 
-  // =====================
-  // VIP
-  // =====================
+      actual.tipoFavorito =
+        tipo || actual.tipoFavorito;
+    }
 
-  actual.vip = (
+    actual.bancoFavorito =
+      banco || actual.bancoFavorito;
 
-    actual.totalEnviado >= 1000 ||
+    actual.tarjetaFrecuente =
+      tarjeta || actual.tarjetaFrecuente;
 
-    actual.totalOperaciones >= 10
+    actual.ultimaOperacion =
+      new Date().toISOString();
 
-  );
+    actual.updatedAt =
+      new Date().toISOString();
 
-  clientes.set(
-    phone,
-    actual
-  );
+    // =====================
+    // VIP
+    // =====================
 
-  guardarDB();
+    actual.vip = (
 
-  return actual;
+      actual.totalEnviado >= 1000 ||
+
+      actual.totalOperaciones >= 10
+
+    );
+
+    clientes.set(
+      phone,
+      actual
+    );
+
+    guardarDB();
+
+    console.log(
+      `👤 Cliente actualizado: ${phone}`
+    );
+
+    return actual;
+
+  } catch (err) {
+
+    console.error(
+      "❌ Error guardando cliente",
+      err
+    );
+
+    return null;
+  }
 }
 
 // =====================
@@ -247,6 +292,10 @@ function eliminarCliente(
   clientes.delete(phone);
 
   guardarDB();
+
+  console.log(
+    `🗑️ Cliente eliminado: ${phone}`
+  );
 }
 
 // =====================
