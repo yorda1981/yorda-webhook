@@ -384,11 +384,7 @@ app.post(
                                     mensaje
                                 );
 
-                            console.log(
-                                "✅ Respuesta enviada."
-                            );
-lastResponses.set( phone, Date.now() );
-                        } catch (e) {
+                            console.log( "✅ Respuesta enviada." ); lastResponses.set( phone, Date.now() ); } catch (e) {
 
                             console.error(
                                 "💥 ERROR EN BUFFER:"
