@@ -11,6 +11,11 @@ const {
     calcularOperacion
 } = require("./calculator");
 
+const {
+    guardarCliente,
+    obtenerCliente
+} = require("./customer-memory");
+
 // ==========================================
 // OPENAI CLIENT
 // ==========================================
@@ -90,7 +95,8 @@ function formatearNumero(numero) {
 
 async function procesarMensaje(
     phone,
-    text
+    text,
+    pushName = ""
 ) {
 
     try {
@@ -99,12 +105,26 @@ async function procesarMensaje(
             `🧠 Procesando mensaje para ${phone}: ${text}`
         );
 
-        if (!text) {
+        if (!text || !phone) {
             return "";
         }
 
         const texto =
             normalizarTexto(text);
+
+        // ==========================================
+        // GUARDAR CLIENTE
+        // ==========================================
+
+        guardarCliente({
+
+            phone,
+
+            nombre: pushName
+        });
+
+        const cliente =
+            obtenerCliente(phone);
 
         // ==========================================
         // ACTIVAR SOLO MENSAJES COMERCIALES
@@ -167,6 +187,17 @@ async function procesarMensaje(
 
             if (resultado) {
 
+                guardarCliente({
+
+                    phone,
+
+                    nombre: pushName,
+
+                    monto: valor,
+
+                    tipo: "brl_cup"
+                });
+
                 const respuesta =
 `Hoy estamos trabajando a ${resultado.tasa} CUP por real 🇨🇺
 
@@ -208,6 +239,17 @@ Con ${valor} reales llegan ${formatearNumero(resultado.cup)} CUP 👍`;
 
             if (resultado) {
 
+                guardarCliente({
+
+                    phone,
+
+                    nombre: pushName,
+
+                    monto: valor,
+
+                    tipo: "usd_clasica"
+                });
+
                 const respuesta =
 `La USD clásica hoy está en ${resultado.tasa} CUP 🇨🇺
 
@@ -246,6 +288,17 @@ Con ${valor} USD clásica llegan ${formatearNumero(resultado.cup)} CUP 👍`;
 
             if (resultado) {
 
+                guardarCliente({
+
+                    phone,
+
+                    nombre: pushName,
+
+                    monto: valor,
+
+                    tipo: "usd_prepago"
+                });
+
                 const respuesta =
 `La USD prepago hoy está en ${resultado.tasa} CUP 🇨🇺
 
@@ -276,8 +329,14 @@ Con ${valor} USD prepago llegan ${formatearNumero(resultado.cup)} CUP 👍`;
 
         ) {
 
-            const respuesta =
+            let respuesta =
 "Hoy estamos trabajando con muy buena tasa 👍\n\n¿Deseas calcular reales, USD clásica o USD prepago?";
+
+            if (cliente?.vip) {
+
+                respuesta +=
+"\n\n🔥 Cliente VIP detectado.";
+            }
 
             await enviarMensaje(
                 phone,
@@ -313,12 +372,34 @@ Con ${valor} USD prepago llegan ${formatearNumero(resultado.cup)} CUP 👍`;
         }
 
         // ==========================================
+        // PROMPT EXTRA
+        // ==========================================
+
+        let contextoCliente = "";
+
+        if (cliente) {
+
+            contextoCliente +=
+`
+CLIENTE:
+
+- Nombre: ${cliente.nombre || "No definido"}
+- Total operaciones: ${cliente.totalOperaciones || 0}
+- Total enviado: ${cliente.totalEnviado || 0}
+- VIP: ${cliente.vip ? "SI" : "NO"}
+- Tipo favorito: ${cliente.tipoFavorito || "No definido"}
+`;
+        }
+
+        // ==========================================
         // OPENAI
         // ==========================================
 
         const systemPrompt =
 `
 Eres YordaBot.
+
+${contextoCliente}
 
 REGLAS:
 
@@ -338,6 +419,9 @@ REGLAS:
 
 - Si no sabes una tasa:
   pedir el monto.
+
+- Si el cliente es VIP:
+  tratar con prioridad.
 `;
 
         const completion =
