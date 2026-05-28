@@ -54,6 +54,9 @@ const gatilhos = [
     "saldo",
     "internet",
     "nauta",
+    "clasica",
+    "clásica",
+    "prepago",
     "yordanys",
     "asesor",
     "humano"
@@ -65,10 +68,20 @@ const gatilhos = [
 
 function normalizarTexto(texto) {
 
-    return String(texto)
+    return String(texto || "")
         .toLowerCase()
         .normalize("NFD")
         .replace(/[\u0300-\u036f]/g, "");
+}
+
+// ==========================================
+// FORMATEAR
+// ==========================================
+
+function formatearNumero(numero) {
+
+    return Number(numero)
+        .toLocaleString("es-ES");
 }
 
 // ==========================================
@@ -83,9 +96,7 @@ async function procesarMensaje(
     try {
 
         console.log(
-            "Procesando mensaje para:",
-            phone,
-            text
+            `🧠 Procesando mensaje para ${phone}: ${text}`
         );
 
         if (!text) {
@@ -96,7 +107,7 @@ async function procesarMensaje(
             normalizarTexto(text);
 
         // ==========================================
-        // ACTIVAR IA SOLO EN MENSAJES COMERCIALES
+        // ACTIVAR SOLO MENSAJES COMERCIALES
         // ==========================================
 
         const activarIA =
@@ -112,22 +123,31 @@ async function procesarMensaje(
         if (!activarIA) {
 
             console.log(
-                "Mensaje ignorado"
+                "🚫 Mensaje ignorado"
             );
 
             return "";
         }
 
         // ==========================================
-        // DETECTAR MONTO + REAL
+        // DETECTAR MONTO
         // ==========================================
 
         const numeroDetectado =
             texto.match(/\d+/);
 
+        const valor =
+            numeroDetectado
+                ? Number(numeroDetectado[0])
+                : null;
+
+        // ==========================================
+        // BRL → CUP
+        // ==========================================
+
         if (
 
-            numeroDetectado &&
+            valor &&
 
             (
                 texto.includes("real") ||
@@ -136,11 +156,6 @@ async function procesarMensaje(
             )
 
         ) {
-
-            const valor =
-                Number(
-                    numeroDetectado[0]
-                );
 
             const resultado =
                 calcularOperacion({
@@ -155,15 +170,11 @@ async function procesarMensaje(
                 const respuesta =
 `Hoy estamos trabajando a ${resultado.tasa} CUP por real 🇨🇺
 
-Con ${valor} reales llegan ${resultado.cup.toLocaleString()} CUP 👍`;
+Con ${valor} reales llegan ${formatearNumero(resultado.cup)} CUP 👍`;
 
                 await enviarMensaje(
                     phone,
                     respuesta
-                );
-
-                console.log(
-                    `Mensaje enviado a ${phone}`
                 );
 
                 return respuesta;
@@ -171,7 +182,138 @@ Con ${valor} reales llegan ${resultado.cup.toLocaleString()} CUP 👍`;
         }
 
         // ==========================================
-        // SYSTEM PROMPT
+        // USD CLÁSICA
+        // ==========================================
+
+        if (
+
+            valor &&
+
+            texto.includes("usd") &&
+
+            (
+                texto.includes("clasica") ||
+                texto.includes("clásica")
+            )
+
+        ) {
+
+            const resultado =
+                calcularOperacion({
+
+                    tipo: "usd_clasica",
+
+                    valor
+                });
+
+            if (resultado) {
+
+                const respuesta =
+`La USD clásica hoy está en ${resultado.tasa} CUP 🇨🇺
+
+Con ${valor} USD clásica llegan ${formatearNumero(resultado.cup)} CUP 👍`;
+
+                await enviarMensaje(
+                    phone,
+                    respuesta
+                );
+
+                return respuesta;
+            }
+        }
+
+        // ==========================================
+        // USD PREPAGO
+        // ==========================================
+
+        if (
+
+            valor &&
+
+            texto.includes("usd") &&
+
+            texto.includes("prepago")
+
+        ) {
+
+            const resultado =
+                calcularOperacion({
+
+                    tipo: "usd_prepago",
+
+                    valor
+                });
+
+            if (resultado) {
+
+                const respuesta =
+`La USD prepago hoy está en ${resultado.tasa} CUP 🇨🇺
+
+Con ${valor} USD prepago llegan ${formatearNumero(resultado.cup)} CUP 👍`;
+
+                await enviarMensaje(
+                    phone,
+                    respuesta
+                );
+
+                return respuesta;
+            }
+        }
+
+        // ==========================================
+        // CONSULTA GENERAL CAMBIO
+        // ==========================================
+
+        if (
+
+            texto.includes("cambio") ||
+
+            texto.includes("tasa") ||
+
+            texto.includes("cotizacion") ||
+
+            texto.includes("cotización")
+
+        ) {
+
+            const respuesta =
+"Hoy estamos trabajando con muy buena tasa 👍\n\n¿Deseas calcular reales, USD clásica o USD prepago?";
+
+            await enviarMensaje(
+                phone,
+                respuesta
+            );
+
+            return respuesta;
+        }
+
+        // ==========================================
+        // HABLAR CON YORDANYS
+        // ==========================================
+
+        if (
+
+            texto.includes("yordanys") ||
+
+            texto.includes("humano") ||
+
+            texto.includes("asesor")
+
+        ) {
+
+            const respuesta =
+"Yordanys ahora mismo está ocupado 👌\n\nApenas pueda entra al chat.";
+
+            await enviarMensaje(
+                phone,
+                respuesta
+            );
+
+            return respuesta;
+        }
+
+        // ==========================================
+        // OPENAI
         // ==========================================
 
         const systemPrompt =
@@ -180,38 +322,23 @@ Eres YordaBot.
 
 REGLAS:
 
-- Responder SIEMPRE en español.
-- Hablar como vendedor humano.
-- Respuestas cortas.
-- Sonar natural.
+- Responder siempre en español.
+- Sonar humano.
+- Respuestas cortas estilo WhatsApp.
+- Hablar como vendedor real.
 - No parecer IA.
-- No usar respuestas técnicas.
+- No inventar tasas.
+- No inventar cálculos.
+- No usar textos largos.
+- No usar lenguaje técnico.
 - No decir:
-  "Estoy procesando"
-  "Aguarde"
+  "procesando"
   "transacción"
+  "aguarde"
 
-- Hablar como atención real de WhatsApp.
-
-IMPORTANTE:
-
-- Si preguntan por cambio:
-  responder corto y vendedor.
-
-- Si quieren hablar con Yordanys:
-  decir que ahora está ocupado,
-  pero entra al chat apenas pueda.
-
-- Nunca inventar tasas.
-
-- Nunca inventar cálculos.
-
-- No escribir textos largos.
+- Si no sabes una tasa:
+  pedir el monto.
 `;
-
-        // ==========================================
-        // OPENAI REQUEST
-        // ==========================================
 
         const completion =
             await openai.chat.completions.create({
@@ -236,10 +363,6 @@ IMPORTANTE:
                 max_tokens: 120
             });
 
-        // ==========================================
-        // RESPUESTA IA
-        // ==========================================
-
         const respuesta =
             completion
                 ?.choices?.[0]
@@ -249,14 +372,14 @@ IMPORTANTE:
         if (!respuesta) {
 
             console.log(
-                "OpenAI vacío"
+                "❌ OpenAI vacío"
             );
 
             return "";
         }
 
         // ==========================================
-        // ENVIAR MENSAJE
+        // ENVIAR
         // ==========================================
 
         await enviarMensaje(
@@ -265,15 +388,15 @@ IMPORTANTE:
         );
 
         console.log(
-            `Mensaje enviado a ${phone}`
+            `✅ Mensaje enviado a ${phone}`
         );
 
-        return String(respuesta);
+        return respuesta;
 
     } catch (error) {
 
         console.error(
-            "Error en procesarMensaje:"
+            "❌ Error en procesarMensaje:"
         );
 
         console.error(
@@ -286,13 +409,13 @@ IMPORTANTE:
 
                 phone,
 
-                "Hola 👋\n\nAhora mismo estamos con alta demanda. Escríbeme nuevamente en unos minutos."
+                "Hola 👋\n\nAhora mismo estamos con muchas solicitudes. Escríbeme nuevamente en unos minutos."
             );
 
         } catch (e) {
 
             console.error(
-                "Error enviando fallback"
+                "❌ Error enviando fallback"
             );
         }
 
