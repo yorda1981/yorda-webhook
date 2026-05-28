@@ -42,7 +42,7 @@ app.set(
 const buffers =
     new Map();
 
-const pendingMessages =
+const lastResponses =
     new Map();
 
 // ==========================================
