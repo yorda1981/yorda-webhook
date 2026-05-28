@@ -5,8 +5,8 @@ require("dotenv").config();
 
 const app = express();
 
-// Configuración de Middlewares base
-app.use(express.json({ limit: '10mb' })); // Aumentamos límite por si Z-API manda fotos
+// Configuración de Middlewares
+app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, "public")));
 
 const TASAS_PATH = path.join(__dirname, "src", "config", "tasas.json");
@@ -25,34 +25,36 @@ const verificarToken = (req, res, next) => {
 // WEBHOOK: EL CORAZÓN DEL BOT
 // ==========================================
 app.post("/webhook", async (req, res) => {
-    // 1. Responder siempre 200 inmediatamente
+    // 1. Respuesta inmediata para Z-API
     res.status(200).send("OK");
 
     try {
         const body = req.body;
-        
-        // Log para ver qué llega exactamente
-        console.log("📩 Evento recibido de:", body.senderName || "Desconocido");
-
-        // Validaciones de seguridad para evitar procesar lo que no debe
         if (!body || body.fromMe === true || body.fromMe === "true") return;
 
-        // Carga dinámica del servicio para evitar errores de inicio
-        const { procesarMensaje } = require("./src/services/openai");
+        console.log("📩 Mensaje de:", body.senderName || body.phone);
 
-        // Extraer datos (Estructura estándar de Z-API)
+        // CORRECCIÓN AQUÍ: Importación más segura
+        const openaiService = require("./src/services/openai");
+        
+        // Verificamos si la función existe antes de llamarla
+        if (typeof openaiService.procesarMensaje !== 'function') {
+            throw new Error("La función 'procesarMensaje' no está exportada correctamente en openai.js");
+        }
+
         const phone = body.phone || body.from;
         const textMessage = body.text?.message || body.body;
 
         if (phone && textMessage) {
             console.log(`🤖 IA trabajando para ${phone}...`);
-            await procesarMensaje(phone, textMessage);
+            // Llamada directa al método del objeto exportado
+            await openaiService.procesarMensaje(phone, textMessage);
             console.log(`✅ Respuesta enviada.`);
         }
 
     } catch (e) {
         console.error("💥 ERROR EN WEBHOOK:");
-        console.error(e); // Esto nos dará el Stack Trace completo en Railway
+        console.error(e); // Railway te mostrará el Stack Trace completo
     }
 });
 
@@ -62,17 +64,18 @@ app.post("/webhook", async (req, res) => {
 
 app.get("/admin/stats", verificarToken, async (req, res) => {
     try {
-        const { obtenerTodos } = require("./src/services/customer-memory");
-        const clientes = obtenerTodos();
+        const memory = require("./src/services/customer-memory");
+        const clientes = memory.obtenerTodos();
         let stats = { clientes: 0, vip: 0, operaciones: 0, total: 0 };
         
-        // Lógica de conteo...
+        // Si clientes es un Map o Objeto, procesamos...
         return res.json(stats);
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.get("/admin/tasas", verificarToken, (req, res) => {
     try {
+        if (!fs.existsSync(TASAS_PATH)) return res.json({});
         const data = JSON.parse(fs.readFileSync(TASAS_PATH, "utf8"));
         return res.json({
             brl_0: data.brl_cup?.faixas[0]?.tasa || 0,
