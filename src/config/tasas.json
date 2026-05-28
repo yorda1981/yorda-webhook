@@ -1,36 +1,12 @@
-```json id="q7m4w2"
 {
   "brl_cup": {
     "faixas": [
-      {
-        "min": 0,
-        "max": 99,
-        "tasa": 120
-      },
-      {
-        "min": 100,
-        "max": 499,
-        "tasa": 124
-      },
-      {
-        "min": 500,
-        "max": 999,
-        "tasa": 126
-      },
-      {
-        "min": 1000,
-        "max": 999999,
-        "tasa": 128
-      }
+      { "min": 0, "max": 99, "tasa": 120 },
+      { "min": 100, "max": 499, "tasa": 125 },
+      { "min": 500, "max": 999, "tasa": 130 },
+      { "min": 1000, "max": 999999, "tasa": 135 }
     ]
   },
-
-  "usd_clasica": {
-    "tasa": 5.60
-  },
-
-  "usd_prepago": {
-    "tasa": 5.75
-  }
+  "usd_clasica": { "tasa": 300 },
+  "usd_prepago": { "tasa": 310 }
 }
-```
