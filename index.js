@@ -18,11 +18,16 @@ const TASAS_PATH = path.join(__dirname, "src", "config", "tasas.json");
 // ==========================================
 app.use("/dashboard", (req, res, next) => {
     const token = req.query.token;
-    // Debes agregar ADMIN_TOKEN en tus variables de entorno de Railway
-    const secret = process.env.ADMIN_TOKEN || "yorda123"; 
+    const secret = (process.env.ADMIN_TOKEN || "yorda123").trim();
 
-    if (token !== secret) {
-        return res.status(401).send("<h1>🔒 No autorizado</h1><p>Se requiere un token válido para acceder al panel.</p>");
+    if (!token || token.trim() !== secret) {
+        return res.status(401).send(`
+            <div style="font-family:sans-serif; text-align:center; padding-top:50px;">
+                <h1>🔒 Acceso Denegado</h1>
+                <p>El token proporcionado es inválido o no existe.</p>
+                <small style="color:#666">YordaBot Admin Security</small>
+            </div>
+        `);
     }
     next();
 });
@@ -40,25 +45,26 @@ app.get("/dashboard", (req, res) => {
 // API ADMINISTRATIVA
 // ==========================================
 
-// 3. STATS REALES (Conectado a tu lógica de memoria)
+// 3. STATS REALES
 app.get("/admin/stats", async (req, res) => {
     try {
-        // Aquí intentamos cargar tu memoria de clientes real
-        // Si no existe el servicio, devolvemos un objeto base para no romper la UI
         let stats = { clientes: 0, vip: 0, operaciones: 0, total: 0 };
         
         try {
             const { obtenerTodos } = require("./src/services/customer-memory");
-            const clientes = obtenerTodos(); // Asumiendo que es un Map o Array
+            const clientes = obtenerTodos();
             
-            for (const [phone, data] of clientes) {
+            // Si es un Map o un Array de entradas
+            const entries = clientes instanceof Map ? clientes.entries() : Object.entries(clientes);
+
+            for (const [phone, data] of entries) {
                 stats.clientes++;
                 stats.operaciones += (data.totalOperaciones || 0);
                 stats.total += (data.totalEnviado || 0);
                 if (data.vip) stats.vip++;
             }
         } catch (err) {
-            console.log("⚠️ Nota: Servicio de memoria no conectado aún. Usando ceros.");
+            console.log("⚠️ Nota: Conectando con stats base...");
         }
         
         return res.json(stats);
@@ -67,7 +73,7 @@ app.get("/admin/stats", async (req, res) => {
     }
 });
 
-// 2. GET TASAS CON CACHE ZERO
+// 2. GET TASAS (CACHE ZERO)
 app.get("/admin/tasas", (req, res) => {
     res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
     try {
@@ -90,17 +96,16 @@ app.get("/admin/tasas", (req, res) => {
     }
 });
 
-// 1. POST CON VALIDACIÓN DE DATOS
+// 1. POST (VALIDACIÓN DE DATOS)
 app.post("/admin/tasas", (req, res) => {
     try {
         const { brl_0, brl_100, brl_500, brl_1000, usd1, usd2 } = req.body;
 
-        // Validación estricta: si alguno no es un número válido, rechazar
         const valores = [brl_0, brl_100, brl_500, brl_1000, usd1, usd2];
         if (valores.some(v => v === null || v === undefined || isNaN(Number(v)))) {
             return res.status(400).json({
                 success: false,
-                error: "Datos inválidos: Todos los campos deben ser numéricos."
+                error: "Datos inválidos: Revisa los números."
             });
         }
 
