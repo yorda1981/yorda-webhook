@@ -1,4 +1,4 @@
-```js
+
 const axios = require("axios");
 
 const redis =
@@ -205,7 +205,7 @@ async function procesarMensaje(
     phone
   );
 
-  ```js
+  
 try {
 
   // =====================
