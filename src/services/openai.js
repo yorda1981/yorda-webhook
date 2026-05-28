@@ -7,6 +7,10 @@ const {
     enviarMensaje
 } = require("./zapi");
 
+const {
+    calcularOperacion
+} = require("./calculator");
+
 // ==========================================
 // OPENAI CLIENT
 // ==========================================
@@ -19,12 +23,11 @@ const openai =
     });
 
 // ==========================================
-// GATILHOS COMERCIAIS
+// GATILHOS
 // ==========================================
 
 const gatilhos = [
 
-    // CAMBIO
     "real",
     "reales",
     "brl",
@@ -36,57 +39,28 @@ const gatilhos = [
     "cotización",
     "precio",
     "valor",
-    "cuanto esta",
-    "como esta el real",
-    "a como esta",
-
-    // DINERO
-    "enviar",
-    "mandar",
-    "transferencia",
-    "transferir",
-    "remesa",
-    "remesas",
-    "dinero",
-    "deposito",
-    "depósito",
-    "pix",
-    "tarjeta",
-
-    // CUBA
-    "cuba",
-    "cup",
-    "mlc",
-    "usd",
-    "dolar",
-    "dólar",
-
-    // CONSULTAS
     "cuanto",
     "cuánto",
-    "cuanto recibe",
-    "cuánto recibe",
-    "cuanto llega",
-    "cuánto llega",
-    "calcular",
-    "calculo",
-    "calcula",
-
-    // RECARGAS
+    "cup",
+    "usd",
+    "mlc",
+    "pix",
+    "remesa",
+    "transferencia",
+    "enviar",
+    "mandar",
+    "tarjeta",
     "recarga",
     "saldo",
     "internet",
     "nauta",
-
-    // HUMANO
     "yordanys",
     "asesor",
-    "atendente",
     "humano"
 ];
 
 // ==========================================
-// NORMALIZAR TEXTO
+// NORMALIZAR
 // ==========================================
 
 function normalizarTexto(texto) {
@@ -109,24 +83,21 @@ async function procesarMensaje(
     try {
 
         console.log(
-            `🧠 Procesando mensaje para ${phone}: ${text}`
+            "Procesando mensaje para:",
+            phone,
+            text
         );
 
-        // ==========================================
-        // VALIDAR TEXTO
-        // ==========================================
-
         if (!text) {
-
             return "";
         }
 
-        // ==========================================
-        // INTENT ENGINE
-        // ==========================================
-
         const texto =
             normalizarTexto(text);
+
+        // ==========================================
+        // ACTIVAR IA SOLO EN MENSAJES COMERCIALES
+        // ==========================================
 
         const activarIA =
             gatilhos.some(
@@ -138,17 +109,65 @@ async function procesarMensaje(
                     )
             );
 
-        // ==========================================
-        // IGNORAR MENSAJES SIN INTENCIÓN
-        // ==========================================
-
         if (!activarIA) {
 
             console.log(
-                "😴 Mensaje ignorado"
+                "Mensaje ignorado"
             );
 
             return "";
+        }
+
+        // ==========================================
+        // DETECTAR MONTO + REAL
+        // ==========================================
+
+        const numeroDetectado =
+            texto.match(/\d+/);
+
+        if (
+
+            numeroDetectado &&
+
+            (
+                texto.includes("real") ||
+                texto.includes("reales") ||
+                texto.includes("brl")
+            )
+
+        ) {
+
+            const valor =
+                Number(
+                    numeroDetectado[0]
+                );
+
+            const resultado =
+                calcularOperacion({
+
+                    tipo: "brl_cup",
+
+                    valor
+                });
+
+            if (resultado) {
+
+                const respuesta =
+`Hoy estamos trabajando a ${resultado.tasa} CUP por real 🇨🇺
+
+Con ${valor} reales llegan ${resultado.cup.toLocaleString()} CUP 👍`;
+
+                await enviarMensaje(
+                    phone,
+                    respuesta
+                );
+
+                console.log(
+                    `Mensaje enviado a ${phone}`
+                );
+
+                return respuesta;
+            }
         }
 
         // ==========================================
@@ -159,81 +178,35 @@ async function procesarMensaje(
 `
 Eres YordaBot.
 
-REGLAS IMPORTANTES:
+REGLAS:
 
 - Responder SIEMPRE en español.
-- Hablar como vendedor humano de WhatsApp.
-- Respuestas cortas y naturales.
-- Nunca responder como IA.
-- Nunca usar respuestas técnicas.
-- Nunca decir:
+- Hablar como vendedor humano.
+- Respuestas cortas.
+- Sonar natural.
+- No parecer IA.
+- No usar respuestas técnicas.
+- No decir:
   "Estoy procesando"
-  "Recibí tu mensaje"
   "Aguarde"
   "transacción"
-  "cotización específica"
 
-- No usar textos largos.
-- No usar emojis exagerados.
-- Sonar rápido, humano y confiable.
-- Hablar natural como atención real.
+- Hablar como atención real de WhatsApp.
 
 IMPORTANTE:
 
-- Solo hablar del negocio si el cliente pregunta algo relacionado.
-- Si el cliente solo saluda:
-  responder saludo corto.
+- Si preguntan por cambio:
+  responder corto y vendedor.
 
-- Si preguntan por real, cambio o tasa:
-  responder directo.
+- Si quieren hablar con Yordanys:
+  decir que ahora está ocupado,
+  pero entra al chat apenas pueda.
 
-EJEMPLOS:
+- Nunca inventar tasas.
 
-Cliente:
-"como esta el real"
+- Nunca inventar cálculos.
 
-Respuesta:
-"Hoy estamos trabajando a 124 🇨🇺"
-
-Cliente:
-"tasa"
-
-Respuesta:
-"124 CUP por real 🇨🇺"
-
-Cliente:
-"100 reales"
-
-Respuesta:
-"Con 100 reales recibe 12.400 CUP 🇨🇺"
-
-Cliente:
-"quiero enviar"
-
-Respuesta:
-"Dime cuánto deseas enviar 👍"
-
-Cliente:
-"quiero hablar con yordanys"
-
-Respuesta:
-"Ahora mismo está ocupado, pero en cuanto pueda entra al chat 👍"
-
-ESPECIALISTA EN:
-
-- Remesas Cuba
-- Cambio BRL CUP
-- PIX
-- Transferencias
-- Recargas Cuba
-- CUP
-- MLC
-- USD
-
-IMPORTANTE:
-
-- Responder como humano REAL.
-- No parecer chatbot.
+- No escribir textos largos.
 `;
 
         // ==========================================
@@ -264,7 +237,7 @@ IMPORTANTE:
             });
 
         // ==========================================
-        // RESPUESTA
+        // RESPUESTA IA
         // ==========================================
 
         const respuesta =
@@ -273,14 +246,10 @@ IMPORTANTE:
                 ?.message?.content
                 ?.trim();
 
-        // ==========================================
-        // VALIDAR RESPUESTA
-        // ==========================================
-
         if (!respuesta) {
 
             console.log(
-                "❌ OpenAI devolvió vacío"
+                "OpenAI vacío"
             );
 
             return "";
@@ -296,7 +265,7 @@ IMPORTANTE:
         );
 
         console.log(
-            `✅ Mensaje enviado a ${phone}`
+            `Mensaje enviado a ${phone}`
         );
 
         return String(respuesta);
@@ -304,16 +273,12 @@ IMPORTANTE:
     } catch (error) {
 
         console.error(
-            "❌ Error en procesarMensaje:"
+            "Error en procesarMensaje:"
         );
 
         console.error(
             error.message
         );
-
-        // ==========================================
-        // FALLBACK
-        // ==========================================
 
         try {
 
@@ -321,13 +286,13 @@ IMPORTANTE:
 
                 phone,
 
-                "Hola 👋\n\nEn este momento estamos con alta demanda. Escríbeme nuevamente en unos minutos."
+                "Hola 👋\n\nAhora mismo estamos con alta demanda. Escríbeme nuevamente en unos minutos."
             );
 
         } catch (e) {
 
             console.error(
-                "❌ Error enviando fallback"
+                "Error enviando fallback"
             );
         }
 
