@@ -1,296 +1,322 @@
-
 const axios = require("axios");
 
 const redis =
-  require("./redis");
+require("./redis");
 
 const logger =
-  require("../utils/logger");
+require("../utils/logger");
 
 const {
-  calcularOperacion
+calcularOperacion
 } = require("../engines/pricing-engine");
 
 const {
-  guardarCliente,
-  obtenerCliente
+guardarCliente,
+obtenerCliente
 } = require("./customer-memory");
 
 const {
-  OPENAI_API_KEY,
-  OPENAI_ASSISTANT_ID
+OPENAI_API_KEY,
+OPENAI_ASSISTANT_ID
 } = require("../config/env");
 
 const {
-  enviarMensaje
+enviarMensaje
 } = require("./zapi");
 
 // =====================
 // THREADS
 // =====================
 const threads =
-  new Map();
+new Map();
 
 // =====================
 // LOCKS
 // =====================
 const usuariosProcesando =
-  new Set();
+new Set();
 
 // =====================
 // EXTRAER VALOR
 // =====================
 function extraerValor(text) {
 
-  const match =
-    text.match(
-      /(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d+)?|\d+)/
-    );
+const match =
+text.match(
+/(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d+)?|\d+)/
+);
 
-  if (!match) {
-    return null;
-  }
+if (!match) {
+return null;
+}
 
-  const valor =
-    match[1]
-      .replace(/\./g, "")
-      .replace(",", ".");
+const valor =
+match[1]
+.replace(/./g, "")
+.replace(",", ".");
 
-  return Number(valor);
+return Number(valor);
 }
 
 // =====================
 // DETECTAR TIPO
 // =====================
 function detectarTipoOperacion(
-  text
+text
 ) {
 
-  const lower =
-    text.toLowerCase();
+const lower =
+text.toLowerCase();
 
-  if (
+if (
 
-    lower.includes("usd")
+```
+lower.includes("usd")
 
-    ||
+||
 
-    lower.includes("dolar")
+lower.includes("dolar")
 
-    ||
+||
 
-    lower.includes("dólar")
+lower.includes("dólar")
+```
 
-  ) {
+) {
 
-    if (
-      lower.includes("prepago")
-    ) {
+```
+if (
+  lower.includes("prepago")
+) {
 
-      return "usd_prepago";
-    }
+  return "usd_prepago";
+}
 
-    return "usd_clasica";
-  }
+return "usd_clasica";
+```
 
-  if (
+}
 
-    lower.includes("saldo")
+if (
 
-    ||
+```
+lower.includes("saldo")
 
-    lower.includes("recarga")
+||
 
-  ) {
+lower.includes("recarga")
+```
 
-    return "saldo_cup";
-  }
+) {
 
-  if (
+```
+return "saldo_cup";
+```
 
-    lower.includes("habana")
+}
 
-    ||
+if (
 
-    lower.includes("efectivo")
+```
+lower.includes("habana")
 
-  ) {
+||
 
-    return "efectivo_habana";
-  }
+lower.includes("efectivo")
+```
 
-  return "brl_cup";
+) {
+
+```
+return "efectivo_habana";
+```
+
+}
+
+return "brl_cup";
 }
 
 // =====================
 // MUNICIPIO
 // =====================
 function detectarMunicipio(
-  text
+text
 ) {
 
-  const municipios = [
+const municipios = [
 
-    "habana vieja",
-    "centro habana",
-    "plaza",
-    "cerro",
-    "boyeros",
-    "guanabacoa"
-  ];
+```
+"habana vieja",
+"centro habana",
+"plaza",
+"cerro",
+"boyeros",
+"guanabacoa"
+```
 
-  const lower =
-    text.toLowerCase();
+];
 
-  return municipios.find(
-    m =>
-      lower.includes(m)
-  ) || null;
+const lower =
+text.toLowerCase();
+
+return municipios.find(
+m =>
+lower.includes(m)
+) || null;
 }
 
 // =====================
 // VALIDAR RESPUESTA IA
 // =====================
 function validarRespuestaIA(
-  respuesta,
-  resultado
+respuesta,
+resultado
 ) {
 
-  if (!respuesta) {
-    return false;
-  }
+if (!respuesta) {
+return false;
+}
 
-  if (
-    resultado &&
-    !respuesta.includes(
-      String(resultado.cup)
-    )
-  ) {
+if (
+resultado &&
+!respuesta.includes(
+String(resultado.cup)
+)
+) {
 
-    return false;
-  }
+```
+return false;
+```
 
-  return true;
+}
+
+return true;
 }
 
 // =====================
 // PROCESAR MENSAJE
 // =====================
 async function procesarMensaje(
-  phone,
-  textMessage
+phone,
+textMessage
 ) {
 
-  // =====================
-  // LOCK
-  // =====================
-  if (
+// =====================
+// LOCK
+// =====================
+if (
 
-    usuariosProcesando.has(
-      phone
-    )
-
-  ) {
-
-    logger(
-      "info",
-      "USER_BUSY",
-      { phone }
-    );
-
-    return;
-  }
-
-  usuariosProcesando.add(
-    phone
-  );
-
-  
-try {
-
-  // =====================
-  // HEADERS
-  // =====================
-  const headers = {
-
-    Authorization: "Bearer " + OPENAI_API_KEY,
-
-    "Content-Type":
-      "application/json",
-
-    "OpenAI-Beta":
-      "assistants=v2"
-  };
-
-  // =====================
-  // VARIABLES
-  // =====================
+```
+usuariosProcesando.has(
+  phone
+)
 ```
 
-    let contextoComercial =
-      "";
+) {
 
-    let resultadoOperacion =
-      null;
+```
+logger(
+  "info",
+  "USER_BUSY",
+  { phone }
+);
+
+return;
+```
+
+}
+
+usuariosProcesando.add(
+phone
+);
+
+try {
+
+```
+// =====================
+// HEADERS
+// =====================
+const headers = {
+
+  Authorization:
+    "Bearer " +
+    OPENAI_API_KEY,
+
+  "Content-Type":
+    "application/json",
+
+  "OpenAI-Beta":
+    "assistants=v2"
+};
+
+// =====================
+// VARIABLES
+// =====================
+let contextoComercial =
+  "";
+
+let resultadoOperacion =
+  null;
+
+// =====================
+// DETECTAR VALOR
+// =====================
+const valorOperacion =
+  extraerValor(
+    textMessage
+  );
+
+const tipoOperacion =
+  detectarTipoOperacion(
+    textMessage
+  );
+
+// =====================
+// CALCULAR
+// =====================
+if (
+
+  valorOperacion &&
+  valorOperacion > 0
+
+) {
+
+  const municipio =
+    detectarMunicipio(
+      textMessage
+    );
+
+  resultadoOperacion =
+    calcularOperacion({
+
+      tipo:
+        tipoOperacion,
+
+      valor:
+        valorOperacion,
+
+      municipio
+    });
+
+  if (resultadoOperacion) {
 
     // =====================
-    // DETECTAR VALOR
+    // GUARDAR CLIENTE
     // =====================
-    const valorOperacion =
-      extraerValor(
-        textMessage
-      );
+    guardarCliente({
 
-    const tipoOperacion =
-      detectarTipoOperacion(
-        textMessage
-      );
+      phone,
 
-    // =====================
-    // CALCULAR
-    // =====================
-    if (
+      monto:
+        valorOperacion,
 
-      valorOperacion &&
-      valorOperacion > 0
+      tipo:
+        tipoOperacion
+    });
 
-    ) {
+    contextoComercial = `
+```
 
-      const municipio =
-        detectarMunicipio(
-          textMessage
-        );
-
-      resultadoOperacion =
-        calcularOperacion({
-
-          tipo:
-            tipoOperacion,
-
-          valor:
-            valorOperacion,
-
-          municipio
-        });
-
-      if (resultadoOperacion) {
-
-        // =====================
-        // GUARDAR CLIENTE
-        // =====================
-        guardarCliente({
-
-          phone,
-
-          monto:
-            valorOperacion,
-
-          tipo:
-            tipoOperacion
-        });
-
-        ```js id="yib6gx"
-contextoComercial = `
 RESULTADO OFICIAL CALCULADO POR BACKEND
 
 Cliente envía:
@@ -303,25 +329,24 @@ Cliente recibe:
 ${resultadoOperacion.cup} CUP
 
 IMPORTANTE:
-- Los números fueron calculados por el backend
-- Nunca recalcules
-- Nunca alteres tasas
-- Nunca inventes valores
-- Solo redacta bonito
-`;
-```
 
-`;
+* Los números fueron calculados por el backend
+* Nunca recalcules
+* Nunca alteres tasas
+* Nunca inventes valores
+* Solo redacta bonito
+  `;
 
-        // =====================
-        // UPSELL
-        // =====================
-        if (
-          resultadoOperacion.upsell
-        ) {
+  ```
+    // =====================
+    // UPSELL
+    // =====================
+    if (
+      resultadoOperacion.upsell
+    ) {
 
-          contextoComercial +=
-`
+      contextoComercial += `
+  ```
 
 UPSELL DISPONIBLE
 
@@ -331,22 +356,23 @@ R$${resultadoOperacion.upsell.falta}
 Recibe:
 ${resultadoOperacion.upsell.nuevoTotal} CUP
 `;
-        }
-      }
-    }
+}
+}
+}
 
-    // =====================
-    // MEMORIA CLIENTE
-    // =====================
-    const cliente =
-      obtenerCliente(
-        phone
-      );
+```
+// =====================
+// MEMORIA CLIENTE
+// =====================
+const cliente =
+  obtenerCliente(
+    phone
+  );
 
-    if (cliente) {
+if (cliente) {
 
-      contextoComercial +=
-`
+  contextoComercial += `
+```
 
 CONTEXTO CLIENTE
 
@@ -360,291 +386,301 @@ Total enviado:
 R$${cliente.totalEnviado}
 `;
 
-      // =====================
-      // VIP
-      // =====================
-      if (
-        cliente.totalEnviado >=
-        5000
-      ) {
+```
+  // =====================
+  // VIP
+  // =====================
+  if (
+    cliente.totalEnviado >=
+    5000
+  ) {
 
-        contextoComercial +=
-`
+    contextoComercial += `
+```
 
 CLIENTE VIP
 Dar atención premium.
 `;
-      }
-    }
+}
+}
 
-    // =====================
-    // THREAD
-    // =====================
-    let threadId =
-      threads.get(phone);
+```
+// =====================
+// THREAD
+// =====================
+let threadId =
+  threads.get(phone);
 
-    if (
-      !threadId &&
-      redis
-    ) {
+if (
+  !threadId &&
+  redis
+) {
 
-      threadId =
-        await redis.get(
-          `thread:${phone}`
-        );
-
-      if (threadId) {
-
-        threads.set(
-          phone,
-          threadId
-        );
-      }
-    }
-
-    // =====================
-    // CREATE THREAD
-    // =====================
-    if (!threadId) {
-
-      const thread =
-        await axios.post(
-
-          "https://api.openai.com/v1/threads",
-
-          {},
-
-          {
-            headers,
-            timeout: 15000
-          }
-        );
-
-      threadId =
-        thread.data.id;
-
-      threads.set(
-        phone,
-        threadId
-      );
-
-      if (redis) {
-
-        await redis.set(
-
-          `thread:${phone}`,
-
-          threadId
-        );
-      }
-    }
-
-    // =====================
-    // USER MESSAGE
-    // =====================
-    await axios.post(
-
-`https://api.openai.com/v1/threads/${threadId}/messages`,
-
-      {
-
-        role: "user",
-
-        content:
-`${contextoComercial}
-
-MENSAJE CLIENTE:
-${textMessage}`
-      },
-
-      {
-        headers,
-        timeout: 15000
-      }
+  threadId =
+    await redis.get(
+      `thread:${phone}`
     );
 
-    // =====================
-    // RUN
-    // =====================
-    const run =
-      await axios.post(
+  if (threadId) {
 
-`https://api.openai.com/v1/threads/${threadId}/runs`,
-
-      {
-
-        assistant_id:
-          OPENAI_ASSISTANT_ID
-      },
-
-      {
-        headers,
-        timeout: 15000
-      }
-    );
-
-    const runId =
-      run.data.id;
-
-    let completed =
-      false;
-
-    const startedAt =
-      Date.now();
-
-    // =====================
-    // POLLING
-    // =====================
-    while (!completed) {
-
-      if (
-
-        Date.now() -
-        startedAt >
-        45000
-
-      ) {
-
-        throw new Error(
-          "RUN_TIMEOUT"
-        );
-      }
-
-      await new Promise(
-
-        r =>
-          setTimeout(
-            r,
-            1500
-          )
-      );
-
-      const check =
-        await axios.get(
-
-`https://api.openai.com/v1/threads/${threadId}/runs/${runId}`,
-
-        {
-          headers,
-          timeout: 15000
-        }
-      );
-
-      const status =
-        check.data.status;
-
-      if (
-        status ===
-        "completed"
-      ) {
-
-        completed =
-          true;
-
-      } else if (
-
-        [
-          "failed",
-          "expired",
-          "cancelled"
-        ].includes(status)
-
-      ) {
-
-        throw new Error(
-          `RUN_${status}`
-        );
-      }
-    }
-
-    // =====================
-    // READ RESPONSE
-    // =====================
-    const messages =
-      await axios.get(
-
-`https://api.openai.com/v1/threads/${threadId}/messages`,
-
-      {
-        headers,
-        timeout: 15000
-      }
-    );
-
-    const respuesta =
-      messages.data.data[0]
-      ?.content?.[0]
-      ?.text?.value
-      ?.trim();
-
-    if (!respuesta) {
-      return;
-    }
-
-    // =====================
-    // VALIDAR IA
-    // =====================
-    if (
-
-      resultadoOperacion &&
-      !validarRespuestaIA(
-        respuesta,
-        resultadoOperacion
-      )
-
-    ) {
-
-      logger(
-        "error",
-        "IA_INVALID_RESPONSE",
-        {
-          phone
-        }
-      );
-
-      return await enviarMensaje(
-
-        phone,
-
-        `⚠️ Hubo un problema procesando el cálculo. Por favor intente nuevamente.`
-      );
-    }
-
-    // =====================
-    // SEND
-    // =====================
-    await enviarMensaje(
+    threads.set(
       phone,
-      respuesta
-    );
-
-    logger(
-      "info",
-      "MESSAGE_SENT",
-      { phone }
-    );
-
-  } catch (e) {
-
-    logger(
-      "error",
-      "OPENAI_ERROR",
-      {
-        phone,
-        err:
-          e.message
-      }
-    );
-
-  } finally {
-
-    usuariosProcesando.delete(
-      phone
+      threadId
     );
   }
 }
 
-module.exports = {
-  procesarMensaje
-};
+// =====================
+// CREATE THREAD
+// =====================
+if (!threadId) {
+
+  const thread =
+    await axios.post(
+
+      "https://api.openai.com/v1/threads",
+
+      {},
+
+      {
+        headers,
+        timeout: 15000
+      }
+    );
+
+  threadId =
+    thread.data.id;
+
+  threads.set(
+    phone,
+    threadId
+  );
+
+  if (redis) {
+
+    await redis.set(
+
+      `thread:${phone}`,
+
+      threadId
+    );
+  }
+}
+
+// =====================
+// USER MESSAGE
+// =====================
+await axios.post(
+
+  `https://api.openai.com/v1/threads/${threadId}/messages`,
+
+  {
+
+    role: "user",
+
+    content:
 ```
+
+`${contextoComercial}
+
+MENSAJE CLIENTE:
+${textMessage}`
+},
+
+```
+  {
+    headers,
+    timeout: 15000
+  }
+);
+
+// =====================
+// RUN
+// =====================
+const run =
+  await axios.post(
+
+    `https://api.openai.com/v1/threads/${threadId}/runs`,
+
+    {
+
+      assistant_id:
+        OPENAI_ASSISTANT_ID
+    },
+
+    {
+      headers,
+      timeout: 15000
+    }
+  );
+
+const runId =
+  run.data.id;
+
+let completed =
+  false;
+
+const startedAt =
+  Date.now();
+
+// =====================
+// POLLING
+// =====================
+while (!completed) {
+
+  if (
+
+    Date.now() -
+    startedAt >
+    45000
+
+  ) {
+
+    throw new Error(
+      "RUN_TIMEOUT"
+    );
+  }
+
+  await new Promise(
+
+    r =>
+      setTimeout(
+        r,
+        1500
+      )
+  );
+
+  const check =
+    await axios.get(
+
+      `https://api.openai.com/v1/threads/${threadId}/runs/${runId}`,
+
+      {
+        headers,
+        timeout: 15000
+      }
+    );
+
+  const status =
+    check.data.status;
+
+  if (
+    status ===
+    "completed"
+  ) {
+
+    completed =
+      true;
+
+  } else if (
+
+    [
+      "failed",
+      "expired",
+      "cancelled"
+    ].includes(status)
+
+  ) {
+
+    throw new Error(
+      `RUN_${status}`
+    );
+  }
+}
+
+// =====================
+// READ RESPONSE
+// =====================
+const messages =
+  await axios.get(
+
+    `https://api.openai.com/v1/threads/${threadId}/messages`,
+
+    {
+      headers,
+      timeout: 15000
+    }
+  );
+
+const respuesta =
+  messages.data.data[0]
+  ?.content?.[0]
+  ?.text?.value
+  ?.trim();
+
+if (!respuesta) {
+  return;
+}
+
+// =====================
+// VALIDAR IA
+// =====================
+if (
+
+  resultadoOperacion &&
+  !validarRespuestaIA(
+    respuesta,
+    resultadoOperacion
+  )
+
+) {
+
+  logger(
+    "error",
+    "IA_INVALID_RESPONSE",
+    {
+      phone
+    }
+  );
+
+  return await enviarMensaje(
+
+    phone,
+
+    "⚠️ Hubo un problema procesando el cálculo. Por favor intente nuevamente."
+  );
+}
+
+// =====================
+// SEND
+// =====================
+await enviarMensaje(
+  phone,
+  respuesta
+);
+
+logger(
+  "info",
+  "MESSAGE_SENT",
+  { phone }
+);
+```
+
+} catch (e) {
+
+```
+logger(
+  "error",
+  "OPENAI_ERROR",
+  {
+    phone,
+    err:
+      e.message
+  }
+);
+```
+
+} finally {
+
+```
+usuariosProcesando.delete(
+  phone
+);
+```
+
+}
+}
+
+module.exports = {
+procesarMensaje
+};
