@@ -1,243 +1,167 @@
 <script>
 
-// =========================
-// AUTH
-// =========================
 const auth =
-
-  localStorage.getItem(
-    "adminAuth"
-  );
+localStorage.getItem(
+"adminAuth"
+);
 
 if (!auth) {
 
-  window.location =
-    "/login.html";
+window.location =
+"/login.html";
 }
 
-// =========================
-// LOGOUT
-// =========================
 function logout() {
 
-  localStorage.removeItem(
-    "adminAuth"
-  );
+localStorage.removeItem(
+"adminAuth"
+);
 
-  window.location =
-    "/login.html";
+window.location =
+"/login.html";
 }
 
-// =========================
-// LOAD STATS
-// =========================
 async function cargarStats() {
 
-  try {
+try {
 
-    const req =
-      await fetch(
-        "/admin/stats"
-      );
+const req =
+await fetch(
+"/admin/stats"
+);
 
-    const data =
-      await req.json();
+const data =
+await req.json();
 
-    document
-    .getElementById(
-      "clientes"
-    )
-    .innerText =
+document.getElementById(
+"clientes"
+).innerText =
+data.clientes || 0;
 
-      data.clientes || 0;
+document.getElementById(
+"vip"
+).innerText =
+data.vip || 0;
 
-    document
-    .getElementById(
-      "vip"
-    )
-    .innerText =
+document.getElementById(
+"ops"
+).innerText =
+data.operaciones || 0;
 
-      data.vip || 0;
+document.getElementById(
+"total"
+).innerText =
+"R$" + (
+data.total || 0
+);
 
-    document
-    .getElementById(
-      "ops"
-    )
-    .innerText =
+} catch (e) {
 
-      data.operaciones || 0;
-
-    document
-    .getElementById(
-      "total"
-    )
-    .innerText =
-
-      "R$" +
-
-      (
-        data.total || 0
-      );
-
-  } catch (e) {
-
-    console.log(e);
-  }
+console.log(e);
+}
 }
 
-// =========================
-// LOAD TASAS
-// =========================
 async function cargarTasas() {
 
-  try {
+try {
 
-    const req =
-      await fetch(
-        "/admin/tasas"
-      );
+const req =
+await fetch(
+"/admin/tasas"
+);
 
-    const data =
-      await req.json();
+const data =
+await req.json();
 
-    document
-    .getElementById(
-      "brl1"
-    )
-    .value =
+document.getElementById(
+"brl1"
+).value =
+data.brl_cup.faixas[1].tasa;
 
-      data
-      .brl_cup
-      .faixas[1]
-      .tasa;
+document.getElementById(
+"brl2"
+).value =
+data.brl_cup.faixas[2].tasa;
 
-    document
-    .getElementById(
-      "brl2"
-    )
-    .value =
+document.getElementById(
+"usd1"
+).value =
+data.usd_clasica.tasa;
 
-      data
-      .brl_cup
-      .faixas[2]
-      .tasa;
+document.getElementById(
+"usd2"
+).value =
+data.usd_prepago.tasa;
 
-    document
-    .getElementById(
-      "usd1"
-    )
-    .value =
+} catch (e) {
 
-      data
-      .usd_clasica
-      .tasa;
-
-    document
-    .getElementById(
-      "usd2"
-    )
-    .value =
-
-      data
-      .usd_prepago
-      .tasa;
-
-  } catch (e) {
-
-    console.log(e);
-  }
+console.log(e);
+}
 }
 
-// =========================
-// SAVE TASAS
-// =========================
 async function guardarTasas() {
 
-  try {
+try {
 
-    const body = {
+const body = {
 
-      brl1:
+brl1:
+document.getElementById(
+"brl1"
+).value,
 
-        document
-        .getElementById(
-          "brl1"
-        )
-        .value,
+brl2:
+document.getElementById(
+"brl2"
+).value,
 
-      brl2:
+usd1:
+document.getElementById(
+"usd1"
+).value,
 
-        document
-        .getElementById(
-          "brl2"
-        )
-        .value,
+usd2:
+document.getElementById(
+"usd2"
+).value
+};
 
-      usd1:
+const req =
+await fetch(
 
-        document
-        .getElementById(
-          "usd1"
-        )
-        .value,
+"/admin/tasas",
 
-      usd2:
+{
+method: "POST",
 
-        document
-        .getElementById(
-          "usd2"
-        )
-        .value
-    };
+headers: {
+"Content-Type":
+"application/json"
+},
 
-    const req =
+body:
+JSON.stringify(
+body
+)
+}
+);
 
-      await fetch(
+const data =
+await req.json();
 
-        "/admin/tasas",
+document.getElementById(
+"status"
+).innerText =
+data.message;
 
-        {
+cargarTasas();
 
-          method: "POST",
+} catch (e) {
 
-          headers: {
-
-            "Content-Type":
-              "application/json"
-          },
-
-          body:
-            JSON.stringify(
-              body
-            )
-        }
-      );
-
-    const data =
-      await req.json();
-
-    document
-    .getElementById(
-      "status"
-    )
-    .innerText =
-
-      data.message ||
-
-      "Tasas actualizadas";
-
-    // RECARGAR TASAS
-    cargarTasas();
-
-  } catch (e) {
-
-    console.log(e);
-  }
+console.log(e);
+}
 }
 
-// =========================
-// INIT
-// =========================
 cargarStats();
 
 cargarTasas();
