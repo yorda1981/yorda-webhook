@@ -276,18 +276,37 @@ app.post(
 
                 body.text?.message ||
 
-                body.body;
+                body.body ||
+
+                body.message;
+
+            // ==========================================
+            // VALIDAR TELÉFONO
+            // ==========================================
+
+            if (!phone) {
+
+                console.log(
+                    "⚠️ Teléfono inválido"
+                );
+
+                return;
+            }
+
+            // ==========================================
+            // IGNORAR EVENTOS SIN TEXTO
+            // ==========================================
 
             if (
 
-                !phone ||
+                !textMessage ||
 
-                !textMessage
+                typeof textMessage !== "string"
 
             ) {
 
                 console.log(
-                    "⚠️ Mensaje inválido"
+                    "🔕 Evento sin texto ignorado"
                 );
 
                 return;
