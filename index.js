@@ -696,7 +696,3 @@ logger(
       err?.message
   }
 );
-```
-
-}
-);
