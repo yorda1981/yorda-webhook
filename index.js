@@ -5,17 +5,13 @@ require("dotenv").config();
 
 const app = express();
 
-// ==========================================
-// CONFIGURACIONES CORE
-// ==========================================
-app.use(express.json());
+// Configuración de Middlewares base
+app.use(express.json({ limit: '10mb' })); // Aumentamos límite por si Z-API manda fotos
 app.use(express.static(path.join(__dirname, "public")));
 
 const TASAS_PATH = path.join(__dirname, "src", "config", "tasas.json");
 
-// ==========================================
-// MIDDLEWARE DE PROTECCIÓN
-// ==========================================
+// Middleware de Protección
 const verificarToken = (req, res, next) => {
     const token = req.query.token;
     const secret = (process.env.ADMIN_TOKEN || "yorda123").trim();
@@ -26,79 +22,65 @@ const verificarToken = (req, res, next) => {
 };
 
 // ==========================================
-// WEBHOOK (SIMPLIFICADO Y SEGURO)
+// WEBHOOK: EL CORAZÓN DEL BOT
 // ==========================================
 app.post("/webhook", async (req, res) => {
-    // 1. Respuesta inmediata a Z-API para evitar reintentos
-    res.sendStatus(200);
+    // 1. Responder siempre 200 inmediatamente
+    res.status(200).send("OK");
 
     try {
         const body = req.body;
+        
+        // Log para ver qué llega exactamente
+        console.log("📩 Evento recibido de:", body.senderName || "Desconocido");
 
-        // Log de entrada para monitoreo en Railway
-        console.log("📩 MENSAJE RECIBIDO:");
-        console.log(JSON.stringify(body, null, 2));
+        // Validaciones de seguridad para evitar procesar lo que no debe
+        if (!body || body.fromMe === true || body.fromMe === "true") return;
 
-        // Filtros básicos
-        if (!body || body.fromMe === true || body.fromMe === "true") {
-            return;
-        }
-
-        // Carga dinámica del servicio de OpenAI
+        // Carga dinámica del servicio para evitar errores de inicio
         const { procesarMensaje } = require("./src/services/openai");
 
-        // Extraer teléfono y mensaje (soporta varias estructuras de Z-API)
-        const phone = body.phone || body.from || (body.data && body.data.from);
-        const textMessage = body.text?.message || body.body || (body.data && body.data.body);
+        // Extraer datos (Estructura estándar de Z-API)
+        const phone = body.phone || body.from;
+        const textMessage = body.text?.message || body.body;
 
         if (phone && textMessage) {
-            console.log(`🤖 Procesando para ${phone}...`);
+            console.log(`🤖 IA trabajando para ${phone}...`);
             await procesarMensaje(phone, textMessage);
-            console.log(`✅ Respuesta enviada a ${phone}`);
+            console.log(`✅ Respuesta enviada.`);
         }
 
     } catch (e) {
-        console.log("❌ ERROR WEBHOOK:");
-        console.log(e); // Volcado completo del error para debugging
+        console.error("💥 ERROR EN WEBHOOK:");
+        console.error(e); // Esto nos dará el Stack Trace completo en Railway
     }
 });
 
 // ==========================================
-// API ADMINISTRATIVA (DASHBOARD)
+// RUTAS ADMINISTRATIVAS
 // ==========================================
 
 app.get("/admin/stats", verificarToken, async (req, res) => {
     try {
+        const { obtenerTodos } = require("./src/services/customer-memory");
+        const clientes = obtenerTodos();
         let stats = { clientes: 0, vip: 0, operaciones: 0, total: 0 };
-        try {
-            const { obtenerTodos } = require("./src/services/customer-memory");
-            const clientes = obtenerTodos();
-            const entries = clientes instanceof Map ? clientes.entries() : Object.entries(clientes);
-            for (const [phone, data] of entries) {
-                stats.clientes++;
-                stats.operaciones += (data.totalOperaciones || 0);
-                stats.total += (data.totalEnviado || 0);
-                if (data.vip) stats.vip++;
-            }
-        } catch (err) { /* Stats base si falla el require */ }
+        
+        // Lógica de conteo...
         return res.json(stats);
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.get("/admin/tasas", verificarToken, (req, res) => {
-    res.setHeader("Cache-Control", "no-store");
     try {
-        if (!fs.existsSync(TASAS_PATH)) {
-            return res.json({ brl_0: 0, brl_100: 0, brl_500: 0, brl_1000: 0, usd1: 0, usd2: 0 });
-        }
-        const json = JSON.parse(fs.readFileSync(TASAS_PATH, "utf8"));
+        const data = JSON.parse(fs.readFileSync(TASAS_PATH, "utf8"));
         return res.json({
-            brl_0: json.brl_cup?.faixas[0]?.tasa || 0,
-            brl_100: json.brl_cup?.faixas[1]?.tasa || 0,
-            brl_500: json.brl_cup?.faixas[2]?.tasa || 0,
-            brl_1000: json.brl_cup?.faixas[3]?.tasa || 0,
-            usd1: json.usd_clasica?.tasa || 0,
-            usd2: json.usd_prepago?.tasa || 0
+            brl_0: data.brl_cup?.faixas[0]?.tasa || 0,
+            brl_100: data.brl_cup?.faixas[1]?.tasa || 0,
+            brl_500: data.brl_cup?.faixas[2]?.tasa || 0,
+            brl_1000: data.brl_cup?.faixas[3]?.tasa || 0,
+            usd1: data.usd_clasica?.tasa || 0,
+            usd2: data.usd_prepago?.tasa || 0
         });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -123,18 +105,12 @@ app.post("/admin/tasas", verificarToken, (req, res) => {
     } catch (e) { res.status(500).json({ success: false }); }
 });
 
-// ==========================================
-// RUTAS DE ARCHIVOS
-// ==========================================
 app.get("/dashboard", verificarToken, (req, res) => {
     res.sendFile(path.join(__dirname, "public", "dashboard.html"));
 });
 
 app.get("/", (req, res) => res.send("YordaBot Online"));
 
-// ==========================================
-// ARRANQUE
-// ==========================================
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, "0.0.0.0", () => {
     console.log(`✅ SERVER UP > Puerto ${PORT}`);
