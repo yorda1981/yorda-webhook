@@ -68,6 +68,7 @@ app.post(
 
 async (req, res) => {
 
+```
 try {
 
   const body =
@@ -83,12 +84,14 @@ try {
   );
 
   const messageId =
+
     body.messageId ||
 
     body.id ||
 
     "";
 
+  // DUPLICADOS
   if (
     mensajesProcesados.has(
       messageId
@@ -102,18 +105,21 @@ try {
     messageId
   );
 
+  // FROM ME
   const fromMe =
 
     body.fromMe === true ||
 
     body.fromMe === "true";
 
+  // GROUP
   const isGroup =
 
     body.isGroup === true ||
 
     body.isGroup === "true";
 
+  // PHONE
   const phone =
 
     String(
@@ -128,17 +134,24 @@ try {
     )
     .replace(/\D/g, "");
 
+  // MESSAGE
   const textMessage =
 
     String(
 
       body.text?.message ||
 
-      body.message ||
+      body.message?.conversation ||
+
+      body.message?.extendedTextMessage?.text ||
+
+      body.message?.imageMessage?.caption ||
 
       body.body ||
 
       body.text ||
+
+      body.caption ||
 
       ""
     )
@@ -149,6 +162,7 @@ try {
     textMessage
   );
 
+  // NO PHONE
   if (!phone) {
 
     console.log(
@@ -158,6 +172,7 @@ try {
     return res.sendStatus(200);
   }
 
+  // NO MESSAGE
   if (!textMessage) {
 
     console.log(
@@ -167,6 +182,7 @@ try {
     return res.sendStatus(200);
   }
 
+  // GROUPS
   if (isGroup) {
 
     console.log(
@@ -259,6 +275,7 @@ try {
     esNegocio
   );
 
+  // IGNORAR
   if (!esNegocio) {
 
     logger(
@@ -285,16 +302,16 @@ try {
   }
 
   buffers[phone]
-  .textos
-  .push(textMessage);
+    .textos
+    .push(textMessage);
 
   clearTimeout(
     buffers[phone]
-    .timeout
+      .timeout
   );
 
   buffers[phone]
-  .timeout =
+    .timeout =
 
     setTimeout(
 
@@ -305,8 +322,8 @@ try {
           const finalMessage =
 
             buffers[phone]
-            .textos
-            .join("\n");
+              .textos
+              .join("\n");
 
           delete buffers[phone];
 
@@ -372,6 +389,7 @@ try {
 
   return res.sendStatus(200);
 }
+```
 
 }
 );
@@ -383,6 +401,7 @@ app.get(
 
 async (req, res) => {
 
+```
 try {
 
   const {
@@ -440,12 +459,13 @@ try {
 } catch (e) {
 
   return res.status(500)
-  .json({
+    .json({
 
-    error:
-      e.message
-  });
+      error:
+        e.message
+    });
 }
+```
 
 }
 );
@@ -457,6 +477,7 @@ app.get(
 
 async (req, res) => {
 
+```
 try {
 
   const filePath =
@@ -486,12 +507,13 @@ try {
 } catch (e) {
 
   return res.status(500)
-  .json({
+    .json({
 
-    error:
-      e.message
-  });
+      error:
+        e.message
+    });
 }
+```
 
 }
 );
@@ -503,6 +525,7 @@ app.post(
 
 async (req, res) => {
 
+```
 try {
 
   const body =
@@ -587,14 +610,15 @@ try {
 } catch (e) {
 
   return res.status(500)
-  .json({
+    .json({
 
-    success: false,
+      success: false,
 
-    error:
-      e.message
-  });
+      error:
+        e.message
+    });
 }
+```
 
 }
 );
@@ -606,9 +630,11 @@ app.get(
 
 (req, res) => {
 
+```
 res.send(
   "YordaBot Online"
 );
+```
 
 }
 );
@@ -625,9 +651,11 @@ PORT,
 
 () => {
 
+```
 console.log(
   "✅ Servidor activo puerto " + PORT
 );
+```
 
 }
 );
@@ -639,6 +667,7 @@ process.on(
 
 err => {
 
+```
 logger(
   "error",
   "UNHANDLED_REJECTION",
@@ -647,6 +676,7 @@ logger(
       err?.message
   }
 );
+```
 
 }
 );
@@ -657,6 +687,7 @@ process.on(
 
 err => {
 
+```
 logger(
   "error",
   "UNCAUGHT_EXCEPTION",
@@ -665,6 +696,7 @@ logger(
       err?.message
   }
 );
+```
 
 }
 );
