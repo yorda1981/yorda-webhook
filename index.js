@@ -1,4 +1,3 @@
-
 const express = require("express");
 const fs = require("fs");
 const path = require("path");
@@ -85,10 +84,7 @@ app.post(
         res
     ) => {
 
-        // ==========================================
-        // RESPUESTA INMEDIATA Z-API
-        // ==========================================
-
+        // RESPUESTA INMEDIATA
         res
             .status(200)
             .send("OK");
@@ -99,12 +95,33 @@ app.post(
                 req.body;
 
             // ==========================================
-            // IGNORAR VACÍOS
+            // VALIDAR BODY
             // ==========================================
 
-            if (
-                !body
-            ) return;
+            if (!body) {
+
+                console.log(
+                    "🚫 Body vacío"
+                );
+
+                return;
+            }
+
+            // ==========================================
+            // DEBUG PAYLOAD
+            // ==========================================
+
+            console.log(
+                "📦 PAYLOAD:"
+            );
+
+            console.log(
+                JSON.stringify(
+                    body,
+                    null,
+                    2
+                )
+            );
 
             // ==========================================
             // IGNORAR MENSAJES PROPIOS
@@ -123,7 +140,7 @@ app.post(
             }
 
             // ==========================================
-            // IGNORAR GRUPOS
+            // IGNORAR GRUPOS / NEWSLETTER
             // ==========================================
 
             if (
@@ -138,21 +155,28 @@ app.post(
                 return;
             }
 
+            // ==========================================
+            // EXTRAER DATOS
+            // ==========================================
+
             const phone =
                 body.phone ||
-                body.from;
+                body.from ||
+                "";
 
             const textMessage =
                 body.text?.message ||
-                body.body;
+                body.body ||
+                "";
 
             // ==========================================
-            // VALIDACIÓN
+            // VALIDAR MENSAJE
             // ==========================================
 
             if (
                 !phone ||
-                !textMessage
+                !textMessage ||
+                textMessage.trim() === ""
             ) {
 
                 console.log(
@@ -167,6 +191,10 @@ app.post(
                     body.senderName ||
                     phone
                 }`
+            );
+
+            console.log(
+                `📝 Texto: ${textMessage}`
             );
 
             // ==========================================
@@ -193,11 +221,44 @@ app.post(
                 `🤖 IA trabajando para ${phone}...`
             );
 
-            await openaiService
-                .procesarMensaje(
-                    phone,
-                    textMessage
+            // ==========================================
+            // GENERAR RESPUESTA IA
+            // ==========================================
+
+            const respuestaIA =
+                await openaiService
+                    .procesarMensaje(
+                        phone,
+                        textMessage
+                    );
+
+            // ==========================================
+            // DEBUG RESPUESTA IA
+            // ==========================================
+
+            console.log(
+                "🧠 RESPUESTA IA:"
+            );
+
+            console.log(
+                respuestaIA
+            );
+
+            // ==========================================
+            // VALIDAR RESPUESTA
+            // ==========================================
+
+            if (
+                !respuestaIA ||
+                respuestaIA.trim() === ""
+            ) {
+
+                console.log(
+                    "❌ IA devolvió vacío"
                 );
+
+                return;
+            }
 
             console.log(
                 "✅ Respuesta enviada."
@@ -399,6 +460,10 @@ app.post(
                 )
             );
 
+            console.log(
+                "💾 Tasas actualizadas"
+            );
+
             return res.json({
                 success: true
             });
@@ -453,7 +518,7 @@ app.get(
     ) => {
 
         res.send(
-            "YordaBot Online"
+            "YordaBot Online 🚀"
         );
     }
 );
