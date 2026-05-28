@@ -6,48 +6,46 @@ require("dotenv").config();
 
 const app = express();
 
-// CONFIGURACIÓN
+// --- CONFIGURACIÓN ---
 app.use(express.json({ limit: "10mb" }));
 app.set("trust proxy", 1);
 app.disable("x-powered-by");
 
-// ESTÁTICOS
+// Servir archivos de la carpeta public (CSS, JS, etc.)
 app.use(express.static(path.join(__dirname, "public")));
 
-// SERVICIOS
+// --- SERVICIOS ---
 const redis = require("./src/services/redis");
 const { procesarMensaje } = require("./src/services/openai");
 const logger = require("./src/utils/logger");
 const { detectarIntencion } = require("./src/engines/intent-engine");
 
-// RATE LIMIT
-app.use(
-  rateLimit({
-    windowMs: 60 * 1000,
-    max: 120,
-  })
-);
+// --- RATE LIMIT ---
+app.use(rateLimit({ windowMs: 60 * 1000, max: 120 }));
 
-// MEMORIA TEMPORAL
+// --- MEMORIA ---
 const mensajesProcesados = new Set();
 const humanTakeover = {};
 const buffers = {};
 
-// LIMPIAR DUPLICADOS CADA 30 MIN
-setInterval(() => {
-  mensajesProcesados.clear();
-}, 1000 * 60 * 30);
+setInterval(() => mensajesProcesados.clear(), 1000 * 60 * 30);
 
-// WEBHOOK PRINCIPAL
+// --- RUTAS DE NAVEGACIÓN ---
+
+app.get("/", (req, res) => res.send("YordaBot Online"));
+
+// RUTA DASHBOARD (Sincronizada con Railway)
+app.get("/dashboard", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "dashboard.html"));
+});
+
+// --- WEBHOOK PRINCIPAL ---
 app.post("/webhook", async (req, res) => {
   try {
     const body = req.body || {};
     const messageId = body.messageId || body.id || "";
 
-    // Evitar duplicados
-    if (mensajesProcesados.has(messageId)) {
-      return res.sendStatus(200);
-    }
+    if (mensajesProcesados.has(messageId)) return res.sendStatus(200);
     if (messageId) mensajesProcesados.add(messageId);
 
     const fromMe = body.fromMe === true || body.fromMe === "true";
@@ -55,52 +53,23 @@ app.post("/webhook", async (req, res) => {
     const phone = String(body.phone || body.chatId || body.from || "").replace(/\D/g, "");
 
     const textMessage = String(
-      body.text?.message ||
-      body.message?.conversation ||
-      body.message?.extendedTextMessage?.text ||
-      body.message?.imageMessage?.caption ||
-      body.body ||
-      body.text ||
-      body.caption ||
-      ""
+      body.text?.message || body.message?.conversation || 
+      body.message?.extendedTextMessage?.text || body.body || ""
     ).trim();
 
-    if (!phone || !textMessage || isGroup) {
-      return res.sendStatus(200);
-    }
+    if (!phone || !textMessage || isGroup) return res.sendStatus(200);
 
-    // Lógica de Takeover (Intervención Humana)
+    // Human Takeover
     if (fromMe) {
       humanTakeover[phone] = Date.now();
-      if (redis) {
-        await redis.set("ctx:" + phone, JSON.stringify({ humano: true }), "EX", 60 * 30);
-      }
+      if (redis) await redis.set("ctx:" + phone, JSON.stringify({ humano: true }), "EX", 1800);
       return res.sendStatus(200);
     }
 
-    let ctx = null;
-    if (redis) {
-      const redisCtx = await redis.get("ctx:" + phone);
-      if (redisCtx) ctx = JSON.parse(redisCtx);
-    }
+    // Buffer y procesamiento
+    if (!detectarIntencion(textMessage)) return res.sendStatus(200);
 
-    if (ctx?.humano || (humanTakeover[phone] && Date.now() - humanTakeover[phone] < 1000 * 60 * 30)) {
-      console.log("👨 TAKEOVER ACTIVO");
-      return res.sendStatus(200);
-    }
-
-    // Detección de Intención
-    const esNegocio = detectarIntencion(textMessage);
-    if (!esNegocio) {
-      logger("info", "IGNORED_MESSAGE", { phone, message: textMessage });
-      return res.sendStatus(200);
-    }
-
-    // Buffer de mensajes (agrupar ráfagas de mensajes)
-    if (!buffers[phone]) {
-      buffers[phone] = { textos: [], timeout: null };
-    }
-
+    if (!buffers[phone]) buffers[phone] = { textos: [], timeout: null };
     buffers[phone].textos.push(textMessage);
     clearTimeout(buffers[phone].timeout);
 
@@ -108,22 +77,16 @@ app.post("/webhook", async (req, res) => {
       try {
         const finalMessage = buffers[phone].textos.join("\n");
         delete buffers[phone];
-
-        logger("info", "MESSAGE_RECEIVED", { phone, message: finalMessage });
         await procesarMensaje(phone, finalMessage);
-      } catch (e) {
-        logger("error", "BUFFER_ERROR", { err: e.message });
-      }
+      } catch (e) { logger("error", "BUFFER_ERR", { err: e.message }); }
     }, 1500);
 
     return res.sendStatus(200);
-  } catch (e) {
-    logger("error", "WEBHOOK_ERROR", { err: e.message });
-    return res.sendStatus(200);
-  }
+  } catch (e) { return res.sendStatus(200); }
 });
 
-// ADMIN: ESTADÍSTICAS
+// --- API ADMINISTRATIVA (Sincronizada con dashboard.html) ---
+
 app.get("/admin/stats", async (req, res) => {
   try {
     const { obtenerTodos } = require("./src/services/customer-memory");
@@ -137,65 +100,46 @@ app.get("/admin/stats", async (req, res) => {
       if (data.vip) stats.vip++;
     }
     return res.json(stats);
-  } catch (e) {
-    return res.status(500).json({ error: e.message });
-  }
+  } catch (e) { return res.status(500).json({ error: e.message }); }
 });
 
-// ADMIN: VER TASAS
 app.get("/admin/tasas", async (req, res) => {
   try {
-    const filePath = path.join(__dirname, "src", "config", "tasas.json");
-    const data = fs.readFileSync(filePath, "utf8");
-    return res.json(JSON.parse(data));
-  } catch (e) {
-    return res.status(500).json({ error: e.message });
-  }
+    const data = fs.readFileSync(path.join(__dirname, "src/config/tasas.json"), "utf8");
+    const json = JSON.parse(data);
+    // Enviamos los 4 valores explícitos para el frontend premium
+    return res.json({
+      brl1: json.brl_cup?.faixas[1]?.tasa || 0,
+      brl2: json.brl_cup?.faixas[2]?.tasa || 0,
+      usd1: json.usd_clasica?.tasa || 0,
+      usd2: json.usd_prepago?.tasa || 0
+    });
+  } catch (e) { return res.status(500).json({ error: e.message }); }
 });
 
-// ADMIN: ACTUALIZAR TASAS
 app.post("/admin/tasas", async (req, res) => {
   try {
-    const body = req.body || {};
+    const { brl1, brl2, usd1, usd2 } = req.body;
     const nuevasTasas = {
       brl_cup: {
         faixas: [
           { min: 0, max: 99, tasa: 100 },
-          { min: 100, max: 499, tasa: Number(body.brl1) },
-          { min: 500, max: 999999, tasa: Number(body.brl2) }
+          { min: 100, max: 499, tasa: Number(brl1) },
+          { min: 500, max: 999999, tasa: Number(brl2) }
         ]
       },
-      usd_clasica: { tasa: Number(body.usd1) },
-      usd_prepago: { tasa: Number(body.usd2) }
+      usd_clasica: { tasa: Number(usd1) },
+      usd_prepago: { tasa: Number(usd2) }
     };
-
-    fs.writeFileSync(
-      path.join(__dirname, "src", "config", "tasas.json"),
-      JSON.stringify(nuevasTasas, null, 2)
-    );
-
-    return res.json({ success: true, message: "🔥 Tasas actualizadas" });
-  } catch (e) {
-    return res.status(500).json({ success: false, error: e.message });
-  }
+    fs.writeFileSync(path.join(__dirname, "src/config/tasas.json"), JSON.stringify(nuevasTasas, null, 2));
+    return res.json({ success: true });
+  } catch (e) { return res.status(500).json({ success: false, error: e.message }); }
 });
 
-// HEALTH CHECK
-app.get("/", (req, res) => {
-  res.send("YordaBot Online");
-});
-
-// INICIO DEL SERVIDOR
+// --- ARRANQUE ---
 const PORT = process.env.PORT || 8080;
-app.listen(PORT, "0.0.0.0", () => {
-  console.log("✅ Servidor activo puerto " + PORT);
-});
+app.listen(PORT, "0.0.0.0", () => console.log("✅ Servidor en puerto " + PORT));
 
-// --- CORRECCIÓN DE CIERRE DE PROCESOS ---
-process.on("unhandledRejection", (err) => {
-  logger("error", "UNHANDLED_REJECTION", { err: err?.message });
-});
-
-process.on("uncaughtException", (err) => {
-  logger("error", "UNCAUGHT_EXCEPTION", { err: err?.message });
-});
+// CIERRE DE SEGURIDAD
+process.on("unhandledRejection", (err) => logger("error", "REJECTION", { err: err?.message }));
+process.on("uncaughtException", (err) => logger("error", "EXCEPTION", { err: err?.message }));
