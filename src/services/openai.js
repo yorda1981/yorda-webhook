@@ -1,3 +1,4 @@
+```js
 const axios = require("axios");
 
 const redis =
@@ -35,6 +36,28 @@ const threads =
 // =====================
 const usuariosProcesando =
   new Set();
+
+// =====================
+// EXTRAER VALOR
+// =====================
+function extraerValor(text) {
+
+  const match =
+    text.match(
+      /(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d+)?|\d+)/
+    );
+
+  if (!match) {
+    return null;
+  }
+
+  const valor =
+    match[1]
+      .replace(/\./g, "")
+      .replace(",", ".");
+
+  return Number(valor);
+}
 
 // =====================
 // DETECTAR TIPO
@@ -126,6 +149,33 @@ function detectarMunicipio(
 }
 
 // =====================
+// VALIDAR RESPUESTA IA
+// =====================
+function validarRespuestaIA(
+  respuesta,
+  resultado
+) {
+
+  if (!respuesta) {
+    return false;
+  }
+
+  // Validar total esperado
+  if (
+
+    !respuesta.includes(
+      String(resultado.cup)
+    )
+
+  ) {
+
+    return false;
+  }
+
+  return true;
+}
+
+// =====================
 // PROCESAR MENSAJE
 // =====================
 async function procesarMensaje(
@@ -172,35 +222,43 @@ async function procesarMensaje(
     };
 
     // =====================
-    // DETECTAR VALOR
+    // VARIABLES
     // =====================
-    const regexValor =
-      textMessage.match(/\d+/);
-
     let contextoComercial =
       "";
 
-    let valorOperacion =
-      0;
+    let resultadoOperacion =
+      null;
 
-    let tipoOperacion =
+    // =====================
+    // DETECTAR VALOR
+    // =====================
+    const valorOperacion =
+      extraerValor(
+        textMessage
+      );
+
+    const tipoOperacion =
       detectarTipoOperacion(
         textMessage
       );
 
-    if (regexValor) {
+    // =====================
+    // CALCULAR
+    // =====================
+    if (
 
-      valorOperacion =
-        Number(
-          regexValor[0]
-        );
+      valorOperacion &&
+      valorOperacion > 0
+
+    ) {
 
       const municipio =
         detectarMunicipio(
           textMessage
         );
 
-      const resultado =
+      resultadoOperacion =
         calcularOperacion({
 
           tipo:
@@ -212,7 +270,7 @@ async function procesarMensaje(
           municipio
         });
 
-      if (resultado) {
+      if (resultadoOperacion) {
 
         // =====================
         // GUARDAR CLIENTE
@@ -230,20 +288,30 @@ async function procesarMensaje(
 
         contextoComercial =
 `
-OPERACIÓN CALCULADA
+RESULTADO OFICIAL CALCULADO POR BACKEND
 
 Cliente envía:
-R$${resultado.valor}
+R$${resultadoOperacion.valor}
 
-Tasa:
-${resultado.tasa}
+Tasa actual:
+${resultadoOperacion.tasa}
 
 Cliente recibe:
-${resultado.cup} CUP
+${resultadoOperacion.cup} CUP
+
+IMPORTANTE:
+- Los números fueron calculados por el backend
+- Nunca recalcules
+- Nunca alteres tasas
+- Nunca inventes valores
+- Solo redacta bonito
 `;
 
+        // =====================
+        // UPSELL
+        // =====================
         if (
-          resultado.upsell
+          resultadoOperacion.upsell
         ) {
 
           contextoComercial +=
@@ -252,10 +320,10 @@ ${resultado.cup} CUP
 UPSELL DISPONIBLE
 
 Si agrega:
-R$${resultado.upsell.falta}
+R$${resultadoOperacion.upsell.falta}
 
 Recibe:
-${resultado.upsell.nuevoTotal} CUP
+${resultadoOperacion.upsell.nuevoTotal} CUP
 `;
         }
       }
@@ -285,6 +353,22 @@ R$${cliente.ultimoMonto}
 Total enviado:
 R$${cliente.totalEnviado}
 `;
+
+      // =====================
+      // VIP
+      // =====================
+      if (
+        cliente.totalEnviado >=
+        5000
+      ) {
+
+        contextoComercial +=
+`
+
+CLIENTE VIP
+Dar atención premium.
+`;
+      }
     }
 
     // =====================
@@ -488,10 +572,41 @@ ${textMessage}`
       ?.trim();
 
     if (!respuesta) {
-
       return;
     }
 
+    // =====================
+    // VALIDAR IA
+    // =====================
+    if (
+
+      resultadoOperacion &&
+      !validarRespuestaIA(
+        respuesta,
+        resultadoOperacion
+      )
+
+    ) {
+
+      logger(
+        "error",
+        "IA_INVALID_RESPONSE",
+        {
+          phone
+        }
+      );
+
+      return await enviarMensaje(
+
+        phone,
+
+        `⚠️ Hubo un problema procesando el cálculo. Por favor intente nuevamente.`
+      );
+    }
+
+    // =====================
+    // SEND
+    // =====================
     await enviarMensaje(
       phone,
       respuesta
@@ -526,3 +641,4 @@ ${textMessage}`
 module.exports = {
   procesarMensaje
 };
+```
