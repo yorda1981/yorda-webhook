@@ -1,3 +1,4 @@
+```js
 const axios = require("axios");
 
 const redis =
@@ -159,13 +160,11 @@ function validarRespuestaIA(
     return false;
   }
 
-  // Validar total esperado
   if (
-
+    resultado &&
     !respuesta.includes(
       String(resultado.cup)
     )
-
   ) {
 
     return false;
@@ -208,19 +207,19 @@ async function procesarMensaje(
 
   try {
 
-    ```js id="xy2efm"
-const headers = {
+    // =====================
+    // HEADERS
+    // =====================
+    const headers = {
 
-  Authorization: `Bearer ${OPENAI_API_KEY}`,
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
 
-  "Content-Type":
-    "application/json",
+      "Content-Type":
+        "application/json",
 
-  "OpenAI-Beta":
-    "assistants=v2"
-};
-```
-
+      "OpenAI-Beta":
+        "assistants=v2"
+    };
 
     // =====================
     // VARIABLES
@@ -642,4 +641,4 @@ ${textMessage}`
 module.exports = {
   procesarMensaje
 };
-
+```
