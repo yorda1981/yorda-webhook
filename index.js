@@ -17,7 +17,7 @@ const {
     obtenerPromo,
     guardarPromo
 } = require(
-    "./src/servicios/promo"
+    "./src/services/promo"
 );
 
 // ==========================================
