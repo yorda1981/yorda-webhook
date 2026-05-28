@@ -1,534 +1,226 @@
-```html
 <!DOCTYPE html>
 <html lang="pt-br">
-
 <head>
-
-<meta charset="UTF-8" />
-
-<meta
-name="viewport"
-content="width=device-width, initial-scale=1.0"/>
-
-<title>YordaBot Admin</title>
-
-<link
-href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
-rel="stylesheet"
-/>
-
-<style>
-
-*{
-  margin:0;
-  padding:0;
-  box-sizing:border-box;
-}
-
-body{
-
-  font-family:
-    "Inter",
-    sans-serif;
-
-  background:
-    linear-gradient(
-      135deg,
-      #050816,
-      #0b1026,
-      #111936
-    );
-
-  min-height:100vh;
-
-  display:flex;
-
-  justify-content:center;
-
-  align-items:center;
-
-  padding:30px;
-
-  color:white;
-}
-
-.card{
-
-  width:100%;
-
-  max-width:650px;
-
-  background:
-    rgba(17,24,39,.78);
-
-  backdrop-filter:
-    blur(14px);
-
-  border:
-    1px solid rgba(255,255,255,.08);
-
-  border-radius:28px;
-
-  padding:40px;
-
-  box-shadow:
-    0 20px 60px rgba(0,0,0,.45);
-}
-
-.top{
-
-  display:flex;
-
-  align-items:center;
-
-  justify-content:space-between;
-
-  margin-bottom:35px;
-}
-
-.logo{
-
-  font-size:32px;
-
-  font-weight:700;
-
-  background:
-    linear-gradient(
-      90deg,
-      #8b5cf6,
-      #a855f7
-    );
-
-  -webkit-background-clip:text;
-
-  -webkit-text-fill-color:
-    transparent;
-}
-
-.badge{
-
-  background:
-    rgba(139,92,246,.18);
-
-  border:
-    1px solid rgba(139,92,246,.3);
-
-  color:#c4b5fd;
-
-  padding:
-    10px 16px;
-
-  border-radius:14px;
-
-  font-size:14px;
-
-  font-weight:600;
-}
-
-.section{
-
-  margin-bottom:30px;
-}
-
-.section-title{
-
-  font-size:20px;
-
-  font-weight:700;
-
-  margin-bottom:20px;
-
-  color:#f3f4f6;
-}
-
-.grid{
-
-  display:grid;
-
-  grid-template-columns:
-    repeat(auto-fit,minmax(240px,1fr));
-
-  gap:20px;
-}
-
-.field{
-
-  display:flex;
-
-  flex-direction:column;
-}
-
-label{
-
-  margin-bottom:10px;
-
-  font-size:14px;
-
-  color:#9ca3af;
-
-  font-weight:500;
-}
-
-input{
-
-  width:100%;
-
-  background:
-    rgba(255,255,255,.04);
-
-  border:
-    1px solid rgba(255,255,255,.08);
-
-  color:white;
-
-  padding:16px;
-
-  border-radius:16px;
-
-  font-size:18px;
-
-  outline:none;
-
-  transition:.25s;
-}
-
-input:focus{
-
-  border:
-    1px solid #8b5cf6;
-
-  box-shadow:
-    0 0 0 4px rgba(139,92,246,.15);
-}
-
-.actions{
-
-  margin-top:35px;
-
-  display:flex;
-
-  gap:16px;
-}
-
-button{
-
-  flex:1;
-
-  padding:16px;
-
-  border:none;
-
-  border-radius:18px;
-
-  font-size:16px;
-
-  font-weight:700;
-
-  cursor:pointer;
-
-  transition:.25s;
-}
-
-.btn-save{
-
-  background:
-    linear-gradient(
-      90deg,
-      #7c3aed,
-      #9333ea
-    );
-
-  color:white;
-
-  box-shadow:
-    0 10px 30px rgba(124,58,237,.35);
-}
-
-.btn-save:hover{
-
-  transform:
-    translateY(-2px);
-
-  opacity:.95;
-}
-
-.btn-reset{
-
-  background:
-    rgba(255,255,255,.06);
-
-  color:#d1d5db;
-
-  border:
-    1px solid rgba(255,255,255,.08);
-}
-
-.btn-reset:hover{
-
-  background:
-    rgba(255,255,255,.1);
-}
-
-.footer{
-
-  margin-top:35px;
-
-  text-align:center;
-
-  color:#6b7280;
-
-  font-size:13px;
-}
-
-@media(max-width:700px){
-
-  .card{
-    padding:25px;
-  }
-
-  .top{
-    flex-direction:column;
-    align-items:flex-start;
-    gap:15px;
-  }
-
-  .actions{
-    flex-direction:column;
-  }
-}
-
-</style>
-
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>YordaBot Admin</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <style>
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body {
+            font-family: "Inter", sans-serif;
+            background: linear-gradient(135deg, #050816, #0b1026, #111936);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 30px;
+            color: white;
+        }
+        .card {
+            width: 100%;
+            max-width: 650px;
+            background: rgba(17, 24, 39, .78);
+            backdrop-filter: blur(14px);
+            border: 1px solid rgba(255, 255, 255, .08);
+            border-radius: 28px;
+            padding: 40px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, .45);
+        }
+        .top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 35px; }
+        .logo {
+            font-size: 32px; font-weight: 700;
+            background: linear-gradient(90deg, #8b5cf6, #a855f7);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        }
+        .badge {
+            background: rgba(139, 92, 246, .18);
+            border: 1px solid rgba(139, 92, 246, .3);
+            color: #c4b5fd; padding: 10px 16px; border-radius: 14px; font-size: 14px; font-weight: 600;
+        }
+        /* Stats Bar */
+        .stats-bar {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+        .stat-item {
+            background: rgba(255,255,255,0.03);
+            padding: 15px;
+            border-radius: 18px;
+            text-align: center;
+            border: 1px solid rgba(255,255,255,0.05);
+        }
+        .stat-item span { display: block; font-size: 11px; color: #9ca3af; text-transform: uppercase; margin-bottom: 5px; }
+        .stat-item b { font-size: 18px; color: #8b5cf6; }
+
+        .section { margin-bottom: 30px; }
+        .section-title { font-size: 20px; font-weight: 700; margin-bottom: 20px; color: #f3f4f6; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 20px; }
+        .field { display: flex; flex-direction: column; }
+        label { margin-bottom: 10px; font-size: 14px; color: #9ca3af; font-weight: 500; }
+        input {
+            width: 100%; background: rgba(255, 255, 255, .04); border: 1px solid rgba(255, 255, 255, .08);
+            color: white; padding: 16px; border-radius: 16px; font-size: 18px; outline: none; transition: .25s;
+        }
+        input:focus { border: 1px solid #8b5cf6; box-shadow: 0 0 0 4px rgba(139, 92, 246, .15); }
+        .actions { margin-top: 35px; display: flex; gap: 16px; }
+        button { flex: 1; padding: 16px; border: none; border-radius: 18px; font-size: 16px; font-weight: 700; cursor: pointer; transition: .25s; }
+        .btn-save { background: linear-gradient(90deg, #7c3aed, #9333ea); color: white; box-shadow: 0 10px 30px rgba(124, 58, 237, .35); }
+        .btn-save:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-reset { background: rgba(255, 255, 255, .06); color: #d1d5db; border: 1px solid rgba(255, 255, 255, .08); }
+        .footer { margin-top: 35px; text-align: center; color: #6b7280; font-size: 13px; }
+    </style>
 </head>
-
 <body>
 
 <div class="card">
-
-  <div class="top">
-
-    <div>
-
-      <div class="logo">
-        YORDA-BOT
-      </div>
-
-      <div
-      style="
-      margin-top:8px;
-      color:#9ca3af;
-      ">
-        Panel Administrativo
-      </div>
-
+    <div class="top">
+        <div>
+            <div class="logo">YORDA-BOT</div>
+            <div style="margin-top:8px; color:#9ca3af;">Panel Administrativo</div>
+        </div>
+        <div class="badge" id="statusBadge">● Sistema Online</div>
     </div>
 
-    <div class="badge">
-      ● Online
+    <div class="stats-bar">
+        <div class="stat-item"><span>Clientes</span><b id="stat-clientes">-</b></div>
+        <div class="stat-item"><span>Operações</span><b id="stat-ops">-</b></div>
+        <div class="stat-item"><span>Volumen</span><b id="stat-vol">-</b></div>
     </div>
 
-  </div>
-
-  <!-- BRL -->
-
-  <div class="section">
-
-    <div class="section-title">
-      💱 BRL → CUP
+    <div class="section">
+        <div class="section-title">💱 BRL → CUP</div>
+        <div class="grid">
+            <div class="field">
+                <label>BRL 100–499</label>
+                <input id="taxa1" type="number" />
+            </div>
+            <div class="field">
+                <label>BRL 500+</label>
+                <input id="taxa2" type="number" />
+            </div>
+        </div>
     </div>
 
-    <div class="grid">
-
-      <div class="field">
-
-        <label>
-          BRL 100–499
-        </label>
-
-        <input
-        id="taxa1"
-        type="number"
-        value="124"
-        />
-
-      </div>
-
-      <div class="field">
-
-        <label>
-          BRL 500+
-        </label>
-
-        <input
-        id="taxa2"
-        type="number"
-        value="126"
-        />
-
-      </div>
-
+    <div class="section">
+        <div class="section-title">💵 USD</div>
+        <div class="grid">
+            <div class="field">
+                <label>USD Clásica</label>
+                <input id="usd1" type="number" step="0.01" />
+            </div>
+            <div class="field">
+                <label>USD Prepago</label>
+                <input id="usd2" type="number" step="0.01" />
+            </div>
+        </div>
     </div>
 
-  </div>
-
-  <!-- USD -->
-
-  <div class="section">
-
-    <div class="section-title">
-      💵 USD
+    <div class="actions">
+        <button id="btnSave" class="btn-save" onclick="guardar()">Guardar Cambios</button>
+        <button class="btn-reset" onclick="init()">Actualizar</button>
     </div>
 
-    <div class="grid">
-
-      <div class="field">
-
-        <label>
-          USD Clásica
-        </label>
-
-        <input
-        id="usd1"
-        type="number"
-        step="0.01"
-        value="5.60"
-        />
-
-      </div>
-
-      <div class="field">
-
-        <label>
-          USD Prepago
-        </label>
-
-        <input
-        id="usd2"
-        type="number"
-        step="0.01"
-        value="5.75"
-        />
-
-      </div>
-
-    </div>
-
-  </div>
-
-  <!-- BUTTONS -->
-
-  <div class="actions">
-
-    <button
-    class="btn-save"
-    onclick="guardar()">
-
-      Guardar Cambios
-
-    </button>
-
-    <button
-    class="btn-reset"
-    onclick="location.reload()">
-
-      Restablecer
-
-    </button>
-
-  </div>
-
-  <div class="footer">
-
-    © 2026 YordaBot Admin
-
-  </div>
-
+    <div class="footer">© 2026 YordaBot Admin</div>
 </div>
 
 <script>
+    const LOGIN_KEY = "admin123";
+    let autorizado = false;
 
-async function guardar() {
-
-  try {
-
-    const data = {
-
-      brl1:
-        Number(
-          document
-          .getElementById("taxa1")
-          .value
-        ),
-
-      brl2:
-        Number(
-          document
-          .getElementById("taxa2")
-          .value
-        ),
-
-      usd1:
-        Number(
-          document
-          .getElementById("usd1")
-          .value
-        ),
-
-      usd2:
-        Number(
-          document
-          .getElementById("usd2")
-          .value
-        )
-    };
-
-    const req =
-      await fetch(
-
-        "/admin/tasas",
-
-        {
-
-          method:"POST",
-
-          headers:{
-            "Content-Type":
-              "application/json"
-          },
-
-          body:
-            JSON.stringify(data)
-        }
-      );
-
-    const res =
-      await req.json();
-
-    if(res.success){
-
-      alert(
-        "✅ Tasas actualizadas"
-      );
-
-    } else {
-
-      alert(
-        "❌ Error guardando"
-      );
+    // Notificaciones modernas
+    function showToast(msj, color = "#8b5cf6") {
+        const toast = document.createElement("div");
+        toast.innerText = msj;
+        Object.assign(toast.style, {
+            position: "fixed", bottom: "20px", right: "20px",
+            background: color, color: "white", padding: "12px 24px",
+            borderRadius: "12px", zIndex: "10000", transition: "all 0.5s",
+            boxShadow: "0 10px 20px rgba(0,0,0,0.2)"
+        });
+        document.body.appendChild(toast);
+        setTimeout(() => toast.remove(), 3000);
     }
 
-  } catch(e){
+    async function verificarAcceso() {
+        const pass = prompt("🔐 Ingrese contraseña admin:");
+        if (pass === LOGIN_KEY) {
+            autorizado = true;
+            init();
+        } else {
+            alert("Acceso denegado.");
+            window.location.href = "/";
+        }
+    }
 
-    console.error(e);
+    async function init() {
+        if (!autorizado) return;
+        try {
+            // Cargar Tasas
+            const resT = await fetch("/admin/tasas");
+            const tasas = await resT.json();
+            document.getElementById("taxa1").value = tasas.brl1 || 0;
+            document.getElementById("taxa2").value = tasas.brl2 || 0;
+            document.getElementById("usd1").value = tasas.usd1 || 0;
+            document.getElementById("usd2").value = tasas.usd2 || 0;
 
-    alert(
-      "❌ Error de conexión"
-    );
-  }
-}
+            // Cargar Stats
+            const resS = await fetch("/admin/stats");
+            const stats = await resS.json();
+            document.getElementById("stat-clientes").innerText = stats.clientes || 0;
+            document.getElementById("stat-ops").innerText = stats.operaciones || 0;
+            
+            const volumen = Number(stats.total || 0).toLocaleString("pt-BR", { 
+                style: "currency", currency: "BRL" 
+            });
+            document.getElementById("stat-vol").innerText = volumen;
 
+        } catch (e) {
+            console.error("Error de sincronización", e);
+        }
+    }
+
+    async function guardar() {
+        const btn = document.getElementById("btnSave");
+        try {
+            btn.disabled = true;
+            btn.innerText = "Guardando...";
+
+            const data = {
+                brl1: Number(document.getElementById("taxa1").value),
+                brl2: Number(document.getElementById("taxa2").value),
+                usd1: Number(document.getElementById("usd1").value),
+                usd2: Number(document.getElementById("usd2").value)
+            };
+
+            const req = await fetch("/admin/tasas", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(data)
+            });
+
+            const res = await req.json();
+            if (res.success) {
+                showToast("✅ Tasas sincronizadas", "#10b981");
+                await init();
+            } else {
+                showToast("❌ Error al guardar", "#ef4444");
+            }
+        } catch (e) {
+            showToast("❌ Error de conexión", "#f59e0b");
+        } finally {
+            btn.disabled = false;
+            btn.innerText = "Guardar Cambios";
+        }
+    }
+
+    // Auto-refresh cada 30 segundos
+    setInterval(() => { if(autorizado) init(); }, 30000);
+
+    verificarAcceso();
 </script>
 
 </body>
 </html>
-```
