@@ -1,4 +1,4 @@
-```js id="v9m2kx"
+
 require("dotenv").config();
 
 const OpenAI = require("openai");
@@ -342,4 +342,3 @@ IMPORTANTE:
 module.exports = {
     procesarMensaje
 };
-```
