@@ -209,17 +209,19 @@ async function procesarMensaje(
 
   try {
 
-    const headers = {
+    ```js id="xy2efm"
+const headers = {
 
-      Authorization:
-`Bearer ${OPENAI_API_KEY}`,
+  Authorization: `Bearer ${OPENAI_API_KEY}`,
 
-      "Content-Type":
-        "application/json",
+  "Content-Type":
+    "application/json",
 
-      "OpenAI-Beta":
-        "assistants=v2"
-    };
+  "OpenAI-Beta":
+    "assistants=v2"
+};
+```
+
 
     // =====================
     // VARIABLES
