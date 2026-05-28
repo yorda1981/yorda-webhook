@@ -1,4 +1,3 @@
-
 const express = require("express");
 const fs = require("fs");
 const path = require("path");
@@ -222,7 +221,7 @@ app.post(
             ) {
 
                 console.log(
-                    "Callback ignorado"
+                    "🚫 Callback ignorado"
                 );
 
                 return;
@@ -241,7 +240,7 @@ app.post(
             ) {
 
                 console.log(
-                    "Mensaje propio ignorado"
+                    "🚫 Mensaje propio ignorado"
                 );
 
                 return;
@@ -260,11 +259,15 @@ app.post(
             ) {
 
                 console.log(
-                    "Grupo/Newsletter ignorado"
+                    "🚫 Grupo/Newsletter ignorado"
                 );
 
                 return;
             }
+
+            // ==========================================
+            // DATOS
+            // ==========================================
 
             const phone =
 
@@ -278,7 +281,17 @@ app.post(
 
                 body.body ||
 
-                body.message;
+                body.message ||
+
+                "";
+
+            const pushName =
+
+                body.senderName ||
+
+                body.sender?.pushName ||
+
+                "Cliente";
 
             // ==========================================
             // VALIDAR TELÉFONO
@@ -287,7 +300,7 @@ app.post(
             if (!phone) {
 
                 console.log(
-                    "Teléfono inválido"
+                    "🚫 Teléfono inválido"
                 );
 
                 return;
@@ -306,7 +319,7 @@ app.post(
             ) {
 
                 console.log(
-                    "Evento sin texto ignorado"
+                    "🚫 Evento sin texto"
                 );
 
                 return;
@@ -330,13 +343,11 @@ app.post(
             }
 
             console.log(
-                `Mensaje de: ${
-                    body.senderName || phone
-                }`
+                `📩 ${pushName}: ${textMessage}`
             );
 
             // ==========================================
-            // EVITAR DOBLE RESPUESTA
+            // COOLDOWN
             // ==========================================
 
             const ultimaRespuesta =
@@ -351,7 +362,7 @@ app.post(
             ) {
 
                 console.log(
-                    "Cooldown activo"
+                    "⏳ Cooldown activo"
                 );
 
                 pendingMessages.delete(phone);
@@ -360,7 +371,7 @@ app.post(
             }
 
             // ==========================================
-            // GUARDAR ÚLTIMO MENSAJE
+            // GUARDAR MENSAJE
             // ==========================================
 
             pendingMessages.set(
@@ -369,7 +380,7 @@ app.post(
             );
 
             // ==========================================
-            // REINICIAR BUFFER
+            // LIMPIAR BUFFER
             // ==========================================
 
             if (
@@ -381,12 +392,12 @@ app.post(
                 );
 
                 console.log(
-                    `Buffer reiniciado para ${phone}`
+                    `🔄 Buffer reiniciado ${phone}`
                 );
             }
 
             // ==========================================
-            // NUEVO TIMER
+            // TIMER
             // ==========================================
 
             buffers.set(
@@ -405,7 +416,7 @@ app.post(
                         ) {
 
                             console.log(
-                                "Mensaje vacío ignorado"
+                                "🚫 Mensaje vacío"
                             );
 
                             return;
@@ -414,14 +425,18 @@ app.post(
                         try {
 
                             console.log(
-                                `IA trabajando para ${phone}`
+                                `🧠 IA trabajando para ${phone}`
                             );
 
                             const respuesta =
                                 await openaiService
                                     .procesarMensaje(
+
                                         phone,
-                                        mensaje
+
+                                        mensaje,
+
+                                        pushName
                                     );
 
                             if (respuesta) {
@@ -445,7 +460,7 @@ app.post(
                         } catch (e) {
 
                             console.error(
-                                "ERROR EN BUFFER"
+                                "❌ ERROR EN BUFFER"
                             );
 
                             console.error(e);
@@ -466,7 +481,7 @@ app.post(
         } catch (e) {
 
             console.error(
-                "ERROR EN WEBHOOK"
+                "❌ ERROR EN WEBHOOK"
             );
 
             console.error(e);
@@ -873,13 +888,13 @@ const server =
         () => {
 
             console.log(
-                `SERVER UP ${PORT}`
+                `🚀 SERVER UP ${PORT}`
             );
         }
     );
 
 // ==========================================
-// GRACEFUL SHUTDOWN
+// SHUTDOWN
 // ==========================================
 
 const shutdown = (
@@ -901,7 +916,7 @@ const shutdown = (
         clearTimeout(timer);
 
         console.log(
-            `Buffer cancelado ${phone}`
+            `🛑 Buffer cancelado ${phone}`
         );
     }
 
