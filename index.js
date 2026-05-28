@@ -387,7 +387,7 @@ app.post(
                             console.log(
                                 "✅ Respuesta enviada."
                             );
-
+lastResponses.set( phone, Date.now() );
                         } catch (e) {
 
                             console.error(
