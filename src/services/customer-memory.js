@@ -1,3 +1,4 @@
+```js id="q5n7m2"
 const clientes =
   new Map();
 
@@ -11,6 +12,7 @@ function guardarCliente({
   monto = 0,
 
   tipo = "brl_cup"
+
 }) {
 
   const actual =
@@ -61,6 +63,7 @@ function guardarCliente({
   // =====================
   // VIP
   // =====================
+
   actual.vip =
 
     actual.totalEnviado >= 1000;
@@ -90,9 +93,20 @@ function obtenerCliente(
   );
 }
 
+// =====================
+// OBTENER TODOS
+// =====================
+function obtenerTodos(){
+
+  return clientes;
+}
+
 module.exports = {
 
   guardarCliente,
 
-  obtenerCliente
+  obtenerCliente,
+
+  obtenerTodos
 };
+```
