@@ -289,8 +289,8 @@ try {
             tipoOperacion
         });
 
-        contextoComercial =
-`
+        ```js id="yib6gx"
+contextoComercial = `
 RESULTADO OFICIAL CALCULADO POR BACKEND
 
 Cliente envía:
@@ -308,6 +308,9 @@ IMPORTANTE:
 - Nunca alteres tasas
 - Nunca inventes valores
 - Solo redacta bonito
+`;
+```
+
 `;
 
         // =====================
