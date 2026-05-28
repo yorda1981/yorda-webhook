@@ -1,34 +1,36 @@
-const axios = require("axios");
-require("dotenv").config();
+const fs = require("fs");
+const path = require("path");
 
-// Importamos los motores que ya limpiamos
-const { obtenerTasaBRL } = require("../engines/pricing-engine");
-const { calcularOperacion } = require("./calculator");
+const TASAS_PATH = path.join(__dirname, "../config/tasas.json");
 
-async function procesarMensaje(phone, text) {
+function leerTasas() {
     try {
-        console.log(`🧠 Iniciando lógica de OpenAI para: ${text}`);
-        
-        // AQUÍ VA TU LÓGICA DE OPENAI (Asegúrate de tener la API KEY en Railway)
-        // Ejemplo rápido de respuesta para probar:
-        const mensajeRespuesta = `Hola! Recibí tu mensaje: "${text}". Estoy procesando las tasas...`;
-
-        // Lógica para enviar a Z-API
-        const instance = process.env.INSTANCE_ID;
-        const token = process.env.INSTANCE_TOKEN;
-        const url = `https://api.z-api.io/instances/${instance}/token/${token}/send-messages`;
-
-        await axios.post(url, {
-            phone: phone,
-            message: mensajeRespuesta
-        });
-
-        return true;
-    } catch (error) {
-        console.error("❌ Error dentro de procesarMensaje:", error.message);
-        throw error;
+        if (!fs.existsSync(TASAS_PATH)) return null;
+        const raw = fs.readFileSync(TASAS_PATH, "utf8");
+        return JSON.parse(raw);
+    } catch (e) {
+        console.error("Error leyendo tasas.json:", e.message);
+        return null;
     }
 }
 
-// ESTA LÍNEA ES LA MÁS IMPORTANTE
-module.exports = { procesarMensaje };
+function calcularOperacion({ tipo, valor }) {
+    const tasas = leerTasas();
+    if (!tasas) return null;
+
+    const monto = Number(valor);
+
+    if (tipo === "brl_cup") {
+        const faixa = tasas.brl_cup.faixas.find(f => monto >= f.min && monto <= f.max);
+        if (!faixa) return null;
+        return { valor: monto, tasa: faixa.tasa, cup: Math.floor(monto * faixa.tasa) };
+    }
+
+    if (tipo === "usd_clasica") {
+        return { valor: monto, tasa: tasas.usd_clasica.tasa, cup: Math.floor(monto * tasas.usd_clasica.tasa) };
+    }
+
+    return null;
+}
+
+module.exports = { calcularOperacion };
