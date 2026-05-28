@@ -1,4 +1,4 @@
-
+```js id="v9m2kx"
 require("dotenv").config();
 
 const OpenAI = require("openai");
@@ -35,6 +35,10 @@ const gatilhos = [
     "cotizacion",
     "cotización",
     "precio",
+    "valor",
+    "cuanto esta",
+    "como esta el real",
+    "a como esta",
 
     // DINERO
     "enviar",
@@ -47,6 +51,7 @@ const gatilhos = [
     "deposito",
     "depósito",
     "pix",
+    "tarjeta",
 
     // CUBA
     "cuba",
@@ -55,7 +60,6 @@ const gatilhos = [
     "usd",
     "dolar",
     "dólar",
-    "tarjeta",
 
     // CONSULTAS
     "cuanto",
@@ -64,6 +68,9 @@ const gatilhos = [
     "cuánto recibe",
     "cuanto llega",
     "cuánto llega",
+    "calcular",
+    "calculo",
+    "calcula",
 
     // RECARGAS
     "recarga",
@@ -150,38 +157,83 @@ async function procesarMensaje(
 
         const systemPrompt =
 `
-Você é YordaBot.
+Eres YordaBot.
 
-REGRAS IMPORTANTES:
+REGLAS IMPORTANTES:
 
-- Responda de forma humana e natural.
-- Nunca diga:
-  "Estou processando"
-  "Recebi sua mensagem"
+- Responder SIEMPRE en español.
+- Hablar como vendedor humano de WhatsApp.
+- Respuestas cortas y naturales.
+- Nunca responder como IA.
+- Nunca usar respuestas técnicas.
+- Nunca decir:
+  "Estoy procesando"
+  "Recibí tu mensaje"
   "Aguarde"
-- Respostas curtas estilo WhatsApp.
-- Fale somente espanhol.
-- Não fale do negócio se o cliente não perguntar.
-- Seja educado, rápido e vendedor.
-- Evite textos robóticos.
-- Não use emojis exagerados.
-- Não invente taxas.
-- Não confirme pagamentos automaticamente.
-- Não diga que é inteligência artificial.
-- Se o cliente perguntar taxa ou câmbio:
-  responda de forma clara e objetiva.
-- Se o cliente quiser falar com Yordanys:
-  diga que ele está ocupado no momento,
-  mas entrará assim que possível.
-- Seja especialista em:
-  remesas,
-  câmbio,
-  transferências,
-  PIX,
-  recargas Cuba,
-  CUP,
-  MLC,
-  USD.
+  "transacción"
+  "cotización específica"
+
+- No usar textos largos.
+- No usar emojis exagerados.
+- Sonar rápido, humano y confiable.
+- Hablar natural como atención real.
+
+IMPORTANTE:
+
+- Solo hablar del negocio si el cliente pregunta algo relacionado.
+- Si el cliente solo saluda:
+  responder saludo corto.
+
+- Si preguntan por real, cambio o tasa:
+  responder directo.
+
+EJEMPLOS:
+
+Cliente:
+"como esta el real"
+
+Respuesta:
+"Hoy estamos trabajando a 124 🇨🇺"
+
+Cliente:
+"tasa"
+
+Respuesta:
+"124 CUP por real 🇨🇺"
+
+Cliente:
+"100 reales"
+
+Respuesta:
+"Con 100 reales recibe 12.400 CUP 🇨🇺"
+
+Cliente:
+"quiero enviar"
+
+Respuesta:
+"Dime cuánto deseas enviar 👍"
+
+Cliente:
+"quiero hablar con yordanys"
+
+Respuesta:
+"Ahora mismo está ocupado, pero en cuanto pueda entra al chat 👍"
+
+ESPECIALISTA EN:
+
+- Remesas Cuba
+- Cambio BRL CUP
+- PIX
+- Transferencias
+- Recargas Cuba
+- CUP
+- MLC
+- USD
+
+IMPORTANTE:
+
+- Responder como humano REAL.
+- No parecer chatbot.
 `;
 
         // ==========================================
@@ -206,7 +258,7 @@ REGRAS IMPORTANTES:
                     }
                 ],
 
-                temperature: 0.4,
+                temperature: 0.5,
 
                 max_tokens: 120
             });
@@ -269,7 +321,7 @@ REGRAS IMPORTANTES:
 
                 phone,
 
-                "Hola 👋\n\nEn este momento estamos con alta demanda. Intenta nuevamente en unos minutos."
+                "Hola 👋\n\nEn este momento estamos con alta demanda. Escríbeme nuevamente en unos minutos."
             );
 
         } catch (e) {
@@ -290,3 +342,4 @@ REGRAS IMPORTANTES:
 module.exports = {
     procesarMensaje
 };
+```
