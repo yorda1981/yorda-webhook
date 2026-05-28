@@ -350,10 +350,12 @@ app.post(
 
             ) {
 
-                console.log( 
-                    "Cooldown activo" 
-                ); 
-                pendingMessages.delete(phone); 
+                console.log(
+                    "Cooldown activo"
+                );
+
+                pendingMessages.delete(phone);
+
                 return;
             }
 
@@ -395,14 +397,18 @@ app.post(
 
                     async () => {
 
-                        const mensaje = pendingMessages.get(phone); 
+                        const mensaje =
+                            pendingMessages.get(phone);
+
                         if (
-                            !mensaje 
-                        ) { 
-                            console.log( 
-                                "Mensaje vacío ignorado" 
+                            !mensaje
+                        ) {
+
+                            console.log(
+                                "Mensaje vacío ignorado"
                             );
-                            return; 
+
+                            return;
                         }
 
                         try {
@@ -411,20 +417,30 @@ app.post(
                                 `IA trabajando para ${phone}`
                             );
 
-                            await openaiService
-                                .procesarMensaje(
-                                    phone,
-                                    mensaje
+                            const respuesta =
+                                await openaiService
+                                    .procesarMensaje(
+                                        phone,
+                                        mensaje
+                                    );
+
+                            if (respuesta) {
+
+                                console.log(
+                                    "✅ Respuesta enviada"
                                 );
 
-                            console.log(
-                                "Respuesta enviada"
-                            );
+                                lastResponses.set(
+                                    phone,
+                                    Date.now()
+                                );
 
-                            lastResponses.set(
-                                phone,
-                                Date.now()
-                            );
+                            } else {
+
+                                console.log(
+                                    "🚫 Sin respuesta"
+                                );
+                            }
 
                         } catch (e) {
 
