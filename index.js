@@ -350,10 +350,10 @@ app.post(
 
             ) {
 
-                console.log(
-                    "Cooldown activo"
-                );
-
+                console.log( 
+                    "Cooldown activo" 
+                ); 
+                pendingMessages.delete(phone); 
                 return;
             }
 
@@ -395,8 +395,15 @@ app.post(
 
                     async () => {
 
-                        const mensaje =
-                            pendingMessages.get(phone);
+                        const mensaje = pendingMessages.get(phone); 
+                        if (
+                            !mensaje 
+                        ) { 
+                            console.log( 
+                                "Mensaje vacío ignorado" 
+                            );
+                            return; 
+                        }
 
                         try {
 
