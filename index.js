@@ -42,6 +42,9 @@ app.set(
 const buffers =
     new Map();
 
+const pendingMessages =
+    new Map();
+
 const lastResponses =
     new Map();
 
@@ -149,7 +152,7 @@ const verificarToken = (
     if (!secret) {
 
         console.error(
-            "⚠️ ADMIN_TOKEN no definido"
+            "ADMIN_TOKEN no definido"
         );
 
         return res
@@ -219,10 +222,7 @@ app.post(
             ) {
 
                 console.log(
-
-                    `🔕 Callback ignorado: ${
-                        body.type || "sin tipo"
-                    }`
+                    "Callback ignorado"
                 );
 
                 return;
@@ -241,7 +241,7 @@ app.post(
             ) {
 
                 console.log(
-                    "🚫 Mensaje propio ignorado"
+                    "Mensaje propio ignorado"
                 );
 
                 return;
@@ -260,7 +260,7 @@ app.post(
             ) {
 
                 console.log(
-                    "🚫 Grupo/Newsletter ignorado"
+                    "Grupo/Newsletter ignorado"
                 );
 
                 return;
@@ -287,7 +287,7 @@ app.post(
             if (!phone) {
 
                 console.log(
-                    "⚠️ Teléfono inválido"
+                    "Teléfono inválido"
                 );
 
                 return;
@@ -306,11 +306,15 @@ app.post(
             ) {
 
                 console.log(
-                    "🔕 Evento sin texto ignorado"
+                    "Evento sin texto ignorado"
                 );
 
                 return;
             }
+
+            // ==========================================
+            // VALIDAR OPENAI
+            // ==========================================
 
             if (
 
@@ -326,10 +330,32 @@ app.post(
             }
 
             console.log(
-                `📩 Mensaje de: ${
+                `Mensaje de: ${
                     body.senderName || phone
                 }`
             );
+
+            // ==========================================
+            // EVITAR DOBLE RESPUESTA
+            // ==========================================
+
+            const ultimaRespuesta =
+                lastResponses.get(phone);
+
+            if (
+
+                ultimaRespuesta &&
+
+                Date.now() - ultimaRespuesta < 8000
+
+            ) {
+
+                console.log(
+                    "Cooldown activo"
+                );
+
+                return;
+            }
 
             // ==========================================
             // GUARDAR ÚLTIMO MENSAJE
@@ -353,7 +379,7 @@ app.post(
                 );
 
                 console.log(
-                    `⏳ Buffer reiniciado para ${phone}`
+                    `Buffer reiniciado para ${phone}`
                 );
             }
 
@@ -375,7 +401,7 @@ app.post(
                         try {
 
                             console.log(
-                                `🤖 IA trabajando para ${phone}...`
+                                `IA trabajando para ${phone}`
                             );
 
                             await openaiService
@@ -384,10 +410,19 @@ app.post(
                                     mensaje
                                 );
 
-                            console.log( "✅ Respuesta enviada." ); lastResponses.set( phone, Date.now() ); } catch (e) {
+                            console.log(
+                                "Respuesta enviada"
+                            );
+
+                            lastResponses.set(
+                                phone,
+                                Date.now()
+                            );
+
+                        } catch (e) {
 
                             console.error(
-                                "💥 ERROR EN BUFFER:"
+                                "ERROR EN BUFFER"
                             );
 
                             console.error(e);
@@ -408,7 +443,7 @@ app.post(
         } catch (e) {
 
             console.error(
-                "💥 ERROR EN WEBHOOK:"
+                "ERROR EN WEBHOOK"
             );
 
             console.error(e);
@@ -815,7 +850,7 @@ const server =
         () => {
 
             console.log(
-                `✅ SERVER UP > Puerto ${PORT}`
+                `SERVER UP ${PORT}`
             );
         }
     );
@@ -829,7 +864,7 @@ const shutdown = (
 ) => {
 
     console.log(
-        `\n${signal} recibido. Cerrando servidor...`
+        `${signal} recibido`
     );
 
     for (
@@ -843,7 +878,7 @@ const shutdown = (
         clearTimeout(timer);
 
         console.log(
-            `🧹 Buffer cancelado para ${phone}`
+            `Buffer cancelado ${phone}`
         );
     }
 
@@ -854,7 +889,7 @@ const shutdown = (
     server.close(() => {
 
         console.log(
-            "✅ Servidor cerrado correctamente."
+            "Servidor cerrado"
         );
 
         process.exit(0);
@@ -863,7 +898,7 @@ const shutdown = (
     setTimeout(() => {
 
         console.error(
-            "⚠️ Cierre forzado"
+            "Cierre forzado"
         );
 
         process.exit(1);
