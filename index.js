@@ -13,6 +13,13 @@ require("dotenv").config();
 const openaiService =
     require("./src/services/openai");
 
+const {
+    obtenerPromo,
+    guardarPromo
+} = require(
+    "./src/servicios/promo"
+);
+
 // ==========================================
 // APP
 // ==========================================
@@ -22,9 +29,6 @@ const app = express();
 // ==========================================
 // RAILWAY / PROXY
 // ==========================================
-// Railway usa reverse proxy.
-// Esto evita errores de express-rate-limit
-// con X-Forwarded-For.
 
 app.set(
     "trust proxy",
@@ -79,7 +83,7 @@ const webhookLimiter =
         message: {
 
             error:
-                "Demasiadas solicitudes. Intenta más tarde."
+                "Demasiadas solicitudes"
         },
 
         standardHeaders:
@@ -101,7 +105,7 @@ const adminLimiter =
         message: {
 
             error:
-                "Demasiadas solicitudes admin."
+                "Demasiadas solicitudes admin"
         }
     });
 
@@ -166,7 +170,9 @@ const verificarToken = (
         return res
             .status(401)
             .json({
-                error: "No autorizado"
+
+                error:
+                    "No autorizado"
             });
     }
 
@@ -189,10 +195,6 @@ app.post(
         res
 
     ) => {
-
-        // ==========================================
-        // RESPUESTA INMEDIATA Z-API
-        // ==========================================
 
         res
             .status(200)
@@ -626,6 +628,101 @@ app.post(
                 .status(500)
                 .json({
                     success: false,
+                    error: e.message
+                });
+        }
+    }
+);
+
+// ==========================================
+// GET PROMO
+// ==========================================
+
+app.get(
+
+    "/admin/promo",
+
+    adminLimiter,
+
+    verificarToken,
+
+    (
+
+        req,
+        res
+
+    ) => {
+
+        try {
+
+            return res.json(
+                obtenerPromo()
+            );
+
+        } catch (e) {
+
+            console.error(
+                "Error GET promo"
+            );
+
+            console.error(e);
+
+            return res
+                .status(500)
+                .json({
+                    error: e.message
+                });
+        }
+    }
+);
+
+// ==========================================
+// POST PROMO
+// ==========================================
+
+app.post(
+
+    "/admin/promo",
+
+    adminLimiter,
+
+    verificarToken,
+
+    async (
+
+        req,
+        res
+
+    ) => {
+
+        try {
+
+            const ok =
+
+                await guardarPromo(
+
+                    req.body.promo
+                );
+
+            return res.json({
+
+                success: ok
+            });
+
+        } catch (e) {
+
+            console.error(
+                "Error POST promo"
+            );
+
+            console.error(e);
+
+            return res
+                .status(500)
+                .json({
+
+                    success: false,
+
                     error: e.message
                 });
         }
