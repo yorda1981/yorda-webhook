@@ -4,31 +4,30 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>YORDA-BOT | Premium Admin</title>
-    <link href="[https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap](https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap)" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
     <style>
         :root { --bg: #0b0e1a; --card: #161b33; --accent: #7c4dff; --text: #ffffff; }
         body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 20px; }
         .container { max-width: 1000px; margin: auto; }
         .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }
         .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-bottom: 40px; }
-        .stat-card { background: var(--card); padding: 25px; border-radius: 16px; border: 1px solid #2d355a; transition: transform 0.3s ease; }
-        .stat-card:hover { transform: translateY(-5px); border-color: var(--accent); }
+        .stat-card { background: var(--card); padding: 25px; border-radius: 16px; border: 1px solid #2d355a; transition: 0.3s; }
         .stat-card span { font-size: 12px; color: #8b949e; text-transform: uppercase; font-weight: 700; }
         .stat-card h2 { margin: 10px 0 0; color: var(--accent); font-size: 24px; }
-        .config-section { background: var(--card); padding: 35px; border-radius: 20px; border: 1px solid #2d355a; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        .config-section { background: var(--card); padding: 35px; border-radius: 20px; border: 1px solid #2d355a; }
         .grid-inputs { display: grid; grid-template-columns: repeat(2, 1fr); gap: 25px; }
         .input-group { display: flex; flex-direction: column; gap: 10px; }
         label { color: #94a3b8; font-size: 13px; font-weight: 600; }
-        input { background: #0b0e1a; border: 1px solid #2d355a; padding: 14px; border-radius: 12px; color: white; font-size: 16px; outline: none; transition: 0.2s; }
-        input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(124, 77, 255, 0.2); }
+        input { background: #0b0e1a; border: 1px solid #2d355a; padding: 14px; border-radius: 12px; color: white; font-size: 16px; outline: none; }
         .btn-save { background: var(--accent); color: white; border: none; padding: 18px; border-radius: 15px; width: 100%; cursor: pointer; font-weight: 800; font-size: 16px; margin-top: 30px; transition: 0.3s; }
-        .btn-save:hover { opacity: 0.9; box-shadow: 0 5px 20px rgba(124, 77, 255, 0.4); }
+        .btn-save:hover:not(:disabled) { opacity: 0.9; transform: translateY(-2px); }
+        .btn-save:disabled { opacity: 0.5; cursor: not-allowed; }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1 style="font-size: 28px;">🤖 YORDA-BOT Admin</h1>
+            <h1>🤖 YORDA-BOT Admin</h1>
             <div style="background: #1a2733; color: #4ade80; padding: 8px 20px; border-radius: 30px; font-size: 13px; font-weight: 700;">● Sistema Online</div>
         </div>
 
@@ -58,29 +57,48 @@
     </div>
 
     <script>
-        async function init() {
-            try {
-                const resT = await fetch("/admin/tasas");
-                const t = await resT.json();
-                document.getElementById("brl_0").value = t.brl_0;
-                document.getElementById("brl_100").value = t.brl_100;
-                document.getElementById("brl_500").value = t.brl_500;
-                document.getElementById("brl_1000").value = t.brl_1000;
-                document.getElementById("usd1").value = t.usd1;
-                document.getElementById("usd2").value = t.usd2;
+        const token = new URLSearchParams(window.location.search).get("token");
 
-                const resS = await fetch("/admin/stats");
+        async function init() {
+            if (!token) return alert("Falta el token de seguridad en la URL");
+            
+            try {
+                // CARGAR TASAS
+                const resT = await fetch(`/admin/tasas?token=${token}`);
+                const t = await resT.json();
+                
+                document.getElementById("brl_0").value = t.brl_0 || 0;
+                document.getElementById("brl_100").value = t.brl_100 || 0;
+                document.getElementById("brl_500").value = t.brl_500 || 0;
+                document.getElementById("brl_1000").value = t.brl_1000 || 0;
+                document.getElementById("usd1").value = t.usd1 || 0;
+                document.getElementById("usd2").value = t.usd2 || 0;
+
+                // CARGAR STATS
+                const resS = await fetch(`/admin/stats?token=${token}`);
                 const s = await resS.json();
-                document.getElementById("stat-clientes").innerText = s.clientes;
-                document.getElementById("stat-vip").innerText = s.vip;
-                document.getElementById("stat-ops").innerText = s.operaciones;
-                document.getElementById("stat-vol").innerText = Number(s.total || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-            } catch (e) { console.error("Error cargando datos", e); }
+                
+                document.getElementById("stat-clientes").innerText = s.clientes || 0;
+                document.getElementById("stat-vip").innerText = s.vip || 0;
+                document.getElementById("stat-ops").innerText = s.operaciones || 0;
+
+                document.getElementById("stat-vol").innerText =
+                    Number(s.total || 0).toLocaleString(
+                        'pt-BR',
+                        { style: 'currency', currency: 'BRL' }
+                    );
+
+            } catch (e) {
+                console.error("Error cargando datos:", e);
+                alert("Error cargando dashboard");
+            }
         }
 
         async function guardar() {
             const btn = document.getElementById("btnSave");
             btn.innerText = "Sincronizando...";
+            btn.disabled = true;
+
             try {
                 const data = {
                     brl_0: Number(document.getElementById("brl_0").value),
@@ -90,4 +108,32 @@
                     usd1: Number(document.getElementById("usd1").value),
                     usd2: Number(document.getElementById("usd2").value)
                 };
-                const
+
+                const req = await fetch(`/admin/tasas?token=${token}`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(data)
+                });
+
+                const res = await req.json();
+
+                if (res.success) {
+                    alert("✅ Tasas actualizadas");
+                    await init();
+                } else {
+                    alert("❌ Error guardando");
+                }
+
+            } catch (e) {
+                console.error(e);
+                alert("❌ Error de conexión");
+            } finally {
+                btn.innerText = "Guardar Cambios Globales";
+                btn.disabled = false;
+            }
+        }
+
+        init();
+    </script>
+</body>
+</html>
