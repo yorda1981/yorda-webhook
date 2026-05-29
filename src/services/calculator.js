@@ -1,36 +1,50 @@
-const fs = require("fs");
-const path = require("path");
-
-const TASAS_PATH = path.join(__dirname, "../config/tasas.json");
-
-function leerTasas() {
-    try {
-        if (!fs.existsSync(TASAS_PATH)) return null;
-        const raw = fs.readFileSync(TASAS_PATH, "utf8");
-        return JSON.parse(raw);
-    } catch (e) {
-        console.error("Error leyendo tasas.json:", e.message);
-        return null;
-    }
-}
-
 function calcularOperacion({ tipo, valor }) {
+
     const tasas = leerTasas();
     if (!tasas) return null;
 
     const monto = Number(valor);
 
     if (tipo === "brl_cup") {
-        const faixa = tasas.brl_cup.faixas.find(f => monto >= f.min && monto <= f.max);
-        if (!faixa) return null;
-        return { valor: monto, tasa: faixa.tasa, cup: Math.floor(monto * faixa.tasa) };
+
+        let tasa = 0;
+
+        if (monto < 100) {
+            tasa = tasas.brl_0;
+        } else if (monto < 500) {
+            tasa = tasas.brl_100;
+        } else if (monto < 1000) {
+            tasa = tasas.brl_500;
+        } else {
+            tasa = tasas.brl_1000;
+        }
+
+        return {
+            valor: monto,
+            tasa,
+            cup: Math.floor(monto * tasa)
+        };
     }
 
     if (tipo === "usd_clasica") {
-        return { valor: monto, tasa: tasas.usd_clasica.tasa, cup: Math.floor(monto * tasas.usd_clasica.tasa) };
+
+        return {
+            valor: monto,
+            tasa: tasas.usd1,
+            cup: Math.floor(monto * tasas.usd1)
+        };
+
+    }
+
+    if (tipo === "usd_prepago") {
+
+        return {
+            valor: monto,
+            tasa: tasas.usd2,
+            cup: Math.floor(monto * tasas.usd2)
+        };
+
     }
 
     return null;
 }
-
-module.exports = { calcularOperacion };
