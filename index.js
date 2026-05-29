@@ -68,7 +68,6 @@ const verificarToken = (req, res, next) => {
 // WEBHOOK PRINCIPAL (LÓGICA 10/10 - RESILIENTE)
 // ==========================================
 app.post("/webhook", webhookLimiter, async (req, res) => {
-    // Responder imediatamente à Z-API para evitar retentativas
     res.status(200).send("OK");
 
     try {
@@ -83,22 +82,16 @@ app.post("/webhook", webhookLimiter, async (req, res) => {
 
         if (!phone || !textMessage || typeof textMessage !== "string") return;
 
-        // ------------------------------------------
-        // 1. ACUMULAÇÃO (Sempre ouve, nunca ignora)
-        // ------------------------------------------
+        // 1. ACUMULAÇÃO
         const mensajeAnterior = pendingMessages.get(phone) || "";
         const mensajeAcumulado = mensajeAnterior 
             ? mensajeAnterior + "\n" + textMessage 
             : textMessage;
 
         pendingMessages.set(phone, mensajeAcumulado);
-
-        // Log de monitorização para o Railway
         console.log(`📩 Buffer acumulado (${phone}):\n${mensajeAcumulado}`);
 
-        // ------------------------------------------
-        // 2. GESTÃO DO TIMER (3 SEGUNDOS)
-        // ------------------------------------------
+        // 2. GESTÃO DO TIMER
         if (buffers.has(phone)) {
             clearTimeout(buffers.get(phone));
         }
@@ -107,9 +100,7 @@ app.post("/webhook", webhookLimiter, async (req, res) => {
             const mensajeParaEnviar = pendingMessages.get(phone);
             if (!mensajeParaEnviar) return;
 
-            // ------------------------------------------
-            // 3. COOLDOWN DE ENVIO (Proteção de saída)
-            // ------------------------------------------
+            // 3. COOLDOWN
             const ultimaRespuesta = lastResponses.get(phone);
             if (ultimaRespuesta && Date.now() - ultimaRespuesta < 3000) {
                 console.log("⏳ Cooldown activo: Aguardando janela de resposta.");
@@ -124,7 +115,6 @@ app.post("/webhook", webhookLimiter, async (req, res) => {
                     pushName
                 );
 
-                // SÓ APAGA SE TIVER RESPOSTA (RESILIÊNCIA)
                 if (respuesta) {
                     lastResponses.set(phone, Date.now());
                     pendingMessages.delete(phone); 
@@ -132,11 +122,8 @@ app.post("/webhook", webhookLimiter, async (req, res) => {
                 }
 
             } catch (e) {
-                // Se houver erro de rede ou API, o conteúdo de 'pendingMessages' 
-                // é preservado para a próxima tentativa ou próxima mensagem do cliente.
-                console.error(`❌ Erro OpenAI para ${phone} (Mensagem preservada):`, e.message);
+                console.error(`❌ Erro OpenAI para ${phone}:`, e.message);
             } finally {
-                // O buffer do timer é sempre limpo para permitir novos ciclos
                 buffers.delete(phone);
             }
         }, 3000);
@@ -149,7 +136,7 @@ app.post("/webhook", webhookLimiter, async (req, res) => {
 });
 
 // ==========================================
-// ROTAS ADMIN (TASAS & DASHBOARD)
+// ROTAS ADMIN (TASAS & PROMO)
 // ==========================================
 app.get("/admin/tasas", verificarToken, (req, res) => {
     try {
@@ -170,16 +157,24 @@ app.post("/admin/tasas", verificarToken, async (req, res) => {
     }
 });
 
-app.get("/", (req, res) => res.send("YordaBot Online ✅"));
+// ==========================================
+// DASHBOARD (NOVA ROTA)
+// ==========================================
+app.get("/dashboard", verificarToken, (req, res) => {
+    res.sendFile(
+        path.join(__dirname, "public", "dashboard.html")
+    );
+});
 
 // ==========================================
 // INICIALIZAÇÃO
 // ==========================================
+app.get("/", (req, res) => res.send("YordaBot Online ✅"));
+
 app.listen(PORT, "0.0.0.0", () => {
     console.log(`🚀 SERVER UP NA PORTA ${PORT}`);
 });
 
-// Encerramento limpo para evitar processos órfãos
 const shutdown = (signal) => {
     console.log(`${signal} recebido. A limpar buffers...`);
     for (const timer of buffers.values()) clearTimeout(timer);
