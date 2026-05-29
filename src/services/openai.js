@@ -151,8 +151,8 @@ async function procesarMensaje(phone, text, pushName = "") {
             if (resultado) {
                 guardarCliente({ phone, nombre: pushName, monto: valor, tipo: "brl_cup" });
                 const respuesta = esEspanol
-                    ? `${saludoCliente}💵 R$${valor} hoy rinden ${formatearNumero(resultado.cup)} CUP 🇨🇺\n\n✅ Transferencia rápida\n✅ Comprobante después del envío${vipExtra}\n\n¿Deseas realizar la operación ahora?`
-                    : `${saludoCliente}💵 R$${valor} hoje rendem ${formatearNumero(resultado.cup)} CUP 🇨🇺\n\n✅ Transferência rápida\n✅ Comprovante após envio${vipExtra}\n\nDeseja realizar o envio agora?`;
+                    ? `${saludoCliente}💵 R$${valor} hoy serian ${formatearNumero(resultado.cup)} CUP 🇨🇺\n\n✅ Transferencia rápida\n✅ Comprobante después del envío${vipExtra}\n\n¿Deseas realizar la operación ahora?`
+                    : `${saludoCliente}💵 R$${valor} hoje som ${formatearNumero(resultado.cup)} CUP 🇨🇺\n\n✅ Transferência rápida\n✅ Comprovante após envio${vipExtra}\n\nDeseja realizar o envio agora?`;
                 await enviarMensaje(phone, respuesta);
                 return respuesta;
             }
