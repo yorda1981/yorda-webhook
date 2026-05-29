@@ -9,7 +9,7 @@ require("dotenv").config();
 // IMPORTS
 // ==========================================
 const openaiService = require("./src/services/openai");
-const { obtenerPromo, guardarPromo } = require("./src/services/promo");
+const { obtenerTodos } = require("./src/services/customer-memory");
 
 const app = express();
 
@@ -33,7 +33,7 @@ app.use(express.json({ limit: "10mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
 // ==========================================
-// RATE LIMITING (SEGURANÇA WEBHOOK)
+// RATE LIMITERS (Segurança)
 // ==========================================
 const webhookLimiter = rateLimit({
     windowMs: 60 * 1000,
@@ -41,21 +41,24 @@ const webhookLimiter = rateLimit({
     message: { error: "Demasiadas solicitações" }
 });
 
+const adminLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 100,
+    message: "Acesso restrito"
+});
+
 // ==========================================
-// CONFIGURAÇÃO DE CAMINHOS
+// CAMINHOS & PROTEÇÃO
 // ==========================================
 const TASAS_PATH = path.join(__dirname, "src", "config", "tasas.json");
 
-// ==========================================
-// PROTEÇÃO ADMIN (TOKEN)
-// ==========================================
 const verificarToken = (req, res, next) => {
     const token = req.headers["x-admin-token"] || req.query.token;
     const secret = process.env.ADMIN_TOKEN?.trim();
 
     if (!secret) {
         console.error("❌ ADMIN_TOKEN não definido no ENV");
-        return res.status(500).send("<h1>Erro de configuração no servidor</h1>");
+        return res.status(500).send("<h1>Erro de configuração</h1>");
     }
 
     if (!token || token.trim() !== secret) {
@@ -65,7 +68,7 @@ const verificarToken = (req, res, next) => {
 };
 
 // ==========================================
-// WEBHOOK PRINCIPAL (LÓGICA 10/10 - RESILIENTE)
+// WEBHOOK PRINCIPAL (LÓGICA 10/10)
 // ==========================================
 app.post("/webhook", webhookLimiter, async (req, res) => {
     res.status(200).send("OK");
@@ -82,7 +85,7 @@ app.post("/webhook", webhookLimiter, async (req, res) => {
 
         if (!phone || !textMessage || typeof textMessage !== "string") return;
 
-        // 1. ACUMULAÇÃO
+        // 1. ACUMULAÇÃO (Sempre ouve)
         const mensajeAnterior = pendingMessages.get(phone) || "";
         const mensajeAcumulado = mensajeAnterior 
             ? mensajeAnterior + "\n" + textMessage 
@@ -91,7 +94,7 @@ app.post("/webhook", webhookLimiter, async (req, res) => {
         pendingMessages.set(phone, mensajeAcumulado);
         console.log(`📩 Buffer acumulado (${phone}):\n${mensajeAcumulado}`);
 
-        // 2. GESTÃO DO TIMER
+        // 2. GESTÃO DO TIMER (3 SEGUNDOS)
         if (buffers.has(phone)) {
             clearTimeout(buffers.get(phone));
         }
@@ -100,10 +103,10 @@ app.post("/webhook", webhookLimiter, async (req, res) => {
             const mensajeParaEnviar = pendingMessages.get(phone);
             if (!mensajeParaEnviar) return;
 
-            // 3. COOLDOWN
+            // 3. COOLDOWN DE ENVIO (Proteção de saída)
             const ultimaRespuesta = lastResponses.get(phone);
             if (ultimaRespuesta && Date.now() - ultimaRespuesta < 3000) {
-                console.log("⏳ Cooldown activo: Aguardando janela de resposta.");
+                console.log("⏳ Cooldown activo: Aguardando para processar.");
                 return;
             }
 
@@ -117,12 +120,12 @@ app.post("/webhook", webhookLimiter, async (req, res) => {
 
                 if (respuesta) {
                     lastResponses.set(phone, Date.now());
-                    pendingMessages.delete(phone); 
-                    console.log(`✅ Ciclo concluído com sucesso para ${phone}`);
+                    pendingMessages.delete(phone); // Só apaga se houver sucesso
+                    console.log(`✅ Ciclo concluído para ${phone}`);
                 }
 
             } catch (e) {
-                console.error(`❌ Erro OpenAI para ${phone}:`, e.message);
+                console.error(`❌ Erro OpenAI para ${phone} (Mensagem preservada):`, e.message);
             } finally {
                 buffers.delete(phone);
             }
@@ -136,34 +139,51 @@ app.post("/webhook", webhookLimiter, async (req, res) => {
 });
 
 // ==========================================
-// ROTAS ADMIN (TASAS & PROMO)
+// ROTAS ADMIN & STATS (CONEXÃO DASHBOARD)
 // ==========================================
-app.get("/admin/tasas", verificarToken, (req, res) => {
+
+// Obtener Tasas
+app.get("/admin/tasas", adminLimiter, verificarToken, (req, res) => {
     try {
         if (!fs.existsSync(TASAS_PATH)) return res.json({});
         const data = JSON.parse(fs.readFileSync(TASAS_PATH, "utf8"));
         res.json(data);
-    } catch (e) {
-        res.status(500).json({ error: e.message });
-    }
+    } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post("/admin/tasas", verificarToken, async (req, res) => {
+// Guardar Tasas
+app.post("/admin/tasas", adminLimiter, verificarToken, async (req, res) => {
     try {
         await fs.promises.writeFile(TASAS_PATH, JSON.stringify(req.body, null, 2));
         res.json({ success: true });
-    } catch (e) {
-        res.status(500).json({ success: false, error: e.message });
-    }
+    } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// Stats Globales (Basado en totalEnviado acumulativo)
+app.get("/admin/stats", adminLimiter, verificarToken, (req, res) => {
+    try {
+        const clientes = obtenerTodos();
+        res.json({
+            clientes: clientes.length,
+            vip: clientes.filter(c => c.vip).length,
+            operaciones: clientes.reduce((acc, c) => acc + (c.totalOperaciones || 0), 0),
+            total: clientes.reduce((acc, c) => acc + (c.totalEnviado || 0), 0)
+        });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Lista de Clientes (Para la tabla del Dashboard)
+app.get("/admin/clientes", adminLimiter, verificarToken, (req, res) => {
+    try {
+        res.json(obtenerTodos());
+    } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ==========================================
-// DASHBOARD (NOVA ROTA)
+// ROTA: DASHBOARD
 // ==========================================
-app.get("/dashboard", verificarToken, (req, res) => {
-    res.sendFile(
-        path.join(__dirname, "public", "dashboard.html")
-    );
+app.get("/dashboard", adminLimiter, verificarToken, (req, res) => {
+    res.sendFile(path.join(__dirname, "public", "dashboard.html"));
 });
 
 // ==========================================
@@ -176,7 +196,7 @@ app.listen(PORT, "0.0.0.0", () => {
 });
 
 const shutdown = (signal) => {
-    console.log(`${signal} recebido. A limpar buffers...`);
+    console.log(`${signal} recebido. Limpando buffers...`);
     for (const timer of buffers.values()) clearTimeout(timer);
     process.exit(0);
 };
