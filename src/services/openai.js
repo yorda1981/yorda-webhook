@@ -139,7 +139,7 @@ async function procesarMensaje(
         // DETECCIÓN DE INTENCIÓN: VOU FAZER AGORA
         // ==========================================
         if (
-            texto.includes("vou fazer agora") ||
+            texto.includes("vou hacer agora") ||
             texto.includes("voy hacer ahora") ||
             texto.includes("ya voy hacer") ||
             texto.includes("vou transferir")
@@ -157,7 +157,7 @@ async function procesarMensaje(
         }
 
         // ==========================================
-        // DETECCIÓN DE INTENCIÓN: YA TRANSFERÍ / PAGADO (CORREGIDO SIN "PAGO")
+        // DETECCIÓN DE INTENCIÓN: YA TRANSFERÍ / PAGADO
         // ==========================================
         if (
             texto.includes("ya transferi") ||
@@ -376,7 +376,38 @@ Con ${valor} USD prepago llegan ${formatearNumero(resultado.cup)} CUP 👍`;
         }
 
         // ==========================================
-        // PROMPT EXTRA
+        // CUP → BRL
+        // ==========================================
+
+        if (
+            valor &&
+            (
+                texto.includes("cup") ||
+                texto.includes("cuba")
+            )
+        ) {
+
+            const tasa = 125;
+
+            const reales =
+                Math.ceil(valor / tasa);
+
+            const respuesta =
+`Para recibir ${formatearNumero(valor)} CUP 🇨🇺 necesitas enviar aproximadamente R$${formatearNumero(reales)} 🇧🇷
+
+✅ Transferência rápida
+✅ Comprovante após envio`;
+
+            await enviarMensaje(
+                phone,
+                respuesta
+            );
+
+            return respuesta;
+        }
+
+        // ==========================================
+        // OPENAI
         // ==========================================
 
         let contextoCliente = "";
@@ -392,10 +423,6 @@ CLIENTE:
 - Tipo favorito: ${cliente.tipoFavorito || "No definido"}
 `;
         }
-
-        // ==========================================
-        // OPENAI
-        // ==========================================
 
         const systemPrompt =
 `
