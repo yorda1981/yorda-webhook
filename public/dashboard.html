@@ -9,42 +9,28 @@
         :root { --bg: #0b0e1a; --card: #161b33; --accent: #7c4dff; --text: #ffffff; --red: #ef4444; --green: #4ade80; --yellow: #fbbf24; }
         body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 20px; line-height: 1.6; }
         .container { max-width: 1100px; margin: auto; }
-        
-        /* Header */
         .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }
         .status-badge { background: #1a2733; color: var(--green); padding: 8px 20px; border-radius: 30px; font-size: 13px; font-weight: 700; border: 1px solid #2d355a; }
-        
-        /* Stats */
         .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 40px; }
         .stat-card { background: var(--card); padding: 25px; border-radius: 16px; border: 1px solid #2d355a; }
         .stat-card span { font-size: 12px; color: #8b949e; text-transform: uppercase; font-weight: 700; letter-spacing: 1px; }
         .stat-card h2 { margin: 10px 0 0; color: var(--accent); font-size: 28px; }
-
-        /* Urgent Section */
         .urgent-container { display: none; margin-bottom: 30px; }
         .urgent-card { background: #1c0f14; border: 2px solid var(--red); padding: 30px; border-radius: 20px; }
         .urgent-item { background: #2a1215; border: 1px solid #441a1e; padding: 15px; border-radius: 12px; display: flex; justify-content: space-between; align-items: center; margin-top: 10px; }
         .btn-wa { background: #25d366; color: white; text-decoration: none; padding: 10px 20px; border-radius: 10px; font-weight: bold; font-size: 13px; transition: 0.3s; }
-        .btn-wa:hover { opacity: 0.8; transform: scale(1.05); }
-
-        /* Sections */
         .config-section { background: var(--card); padding: 35px; border-radius: 20px; border: 1px solid #2d355a; margin-bottom: 30px; }
         .grid-inputs { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 25px; }
         .input-group { display: flex; flex-direction: column; gap: 10px; }
         label { color: #94a3b8; font-size: 13px; font-weight: 600; }
-        input { background: #0b0e1a; border: 1px solid #2d355a; padding: 14px; border-radius: 12px; color: white; font-size: 16px; outline: none; transition: 0.3s; }
-        input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(124, 77, 255, 0.2); }
-
-        /* Table */
+        input { background: #0b0e1a; border: 1px solid #2d355a; padding: 14px; border-radius: 12px; color: white; font-size: 16px; outline: none; }
         .table-wrapper { overflow-x: auto; }
         table { width: 100%; border-collapse: collapse; margin-top: 20px; }
         th { text-align: left; padding: 15px; color: #8b949e; font-size: 13px; border-bottom: 2px solid #2d355a; }
         td { padding: 15px; border-bottom: 1px solid #2d355a; font-size: 14px; }
         .badge-tipo { background: #1a2733; padding: 4px 10px; border-radius: 20px; font-size: 12px; border: 1px solid #2d355a; }
-
         .btn-save { background: var(--accent); color: white; border: none; padding: 18px; border-radius: 15px; width: 100%; cursor: pointer; font-weight: 800; font-size: 16px; margin-top: 30px; transition: 0.3s; }
         .btn-save:hover:not(:disabled) { opacity: 0.9; transform: translateY(-2px); }
-        .btn-save:disabled { opacity: 0.5; cursor: not-allowed; }
     </style>
 </head>
 <body>
@@ -57,7 +43,7 @@
         <div id="urgentContainer" class="urgent-container">
             <div class="urgent-card">
                 <h3 style="color:var(--red); margin:0;">🔴 Esperando Yordanys</h3>
-                <p style="color:#94a3b8; margin: 10px 0 20px; font-size: 14px;">Operaciones que requieren atención manual (Cuba → Brasil o dudas específicas).</p>
+                <p style="color:#94a3b8; margin: 10px 0 20px; font-size: 14px;">Atención manual requerida.</p>
                 <div id="urgentList"></div>
             </div>
         </div>
@@ -70,36 +56,32 @@
         </div>
 
         <div class="config-section">
-            <h3 style="margin-top: 0;">👥 Clientes Recientes</h3>
+            <h3 style="margin-top: 0;">👥 Ranking de Clientes (Volumen)</h3>
             <div class="table-wrapper">
                 <table>
                     <thead>
                         <tr>
                             <th>Nombre</th>
                             <th>Teléfono</th>
-                            <th>Monto</th>
-                            <th>Tipo</th>
+                            <th>Total Enviado</th>
+                            <th>Tipo Favorito</th>
                             <th>Status</th>
                         </tr>
                     </thead>
                     <tbody id="clientesTable">
-                        <tr><td colspan="5" style="text-align:center; padding:30px; color:#8b949e;">Cargando base de datos...</td></tr>
+                        <tr><td colspan="5" style="text-align:center; padding:30px; color:#8b949e;">Cargando...</td></tr>
                     </tbody>
                 </table>
             </div>
         </div>
 
         <div class="config-section">
-            <h3 style="margin-top: 0; margin-bottom: 25px;">💱 Configuración de Tasas (BRL → CUP)</h3>
+            <h3 style="margin-top: 0; margin-bottom: 25px;">💱 Configuración de Tasas</h3>
             <div class="grid-inputs">
                 <div class="input-group"><label>Menos de 100 BRL</label><input type="number" id="brl_0"></div>
                 <div class="input-group"><label>100 - 499 BRL</label><input type="number" id="brl_100"></div>
                 <div class="input-group"><label>500 - 999 BRL</label><input type="number" id="brl_500"></div>
                 <div class="input-group"><label>1000+ BRL</label><input type="number" id="brl_1000"></div>
-            </div>
-            
-            <h3 style="margin-top: 35px; margin-bottom: 25px;">💵 Tasas USD</h3>
-            <div class="grid-inputs">
                 <div class="input-group"><label>USD Clásica</label><input type="number" step="0.01" id="usd1"></div>
                 <div class="input-group"><label>USD Prepago</label><input type="number" step="0.01" id="usd2"></div>
             </div>
@@ -111,10 +93,9 @@
         const token = new URLSearchParams(window.location.search).get("token");
 
         async function init() {
-            if (!token) return alert("Falta el token de seguridad en la URL");
-            
+            if (!token) return alert("Falta token");
             try {
-                // 1. CARGAR TASAS
+                // 1. Cargar Tasas
                 const resT = await fetch(`/admin/tasas?token=${token}`);
                 const t = await resT.json();
                 document.getElementById("brl_0").value = t.brl_0 || 0;
@@ -124,29 +105,26 @@
                 document.getElementById("usd1").value = t.usd1 || 0;
                 document.getElementById("usd2").value = t.usd2 || 0;
 
-                // 2. CARGAR STATS Y CLIENTES
+                // 2. Cargar Clientes y Stats
                 const resC = await fetch(`/admin/clientes?token=${token}`);
                 const clientes = await resC.json();
                 const listaClientes = Object.values(clientes);
 
-                // Render Stats
+                // ORDENAR POR TOTAL ENVIADO
+                listaClientes.sort((a,b) => (b.totalEnviado || 0) - (a.totalEnviado || 0));
+
+                // STATS CON TOTAL ENVIADO
                 document.getElementById("stat-clientes").innerText = listaClientes.length;
                 document.getElementById("stat-vip").innerText = listaClientes.filter(c => c.vip).length;
                 document.getElementById("stat-ops").innerText = listaClientes.reduce((acc, c) => acc + (c.totalOperaciones || 0), 0);
-                const totalVol = listaClientes.reduce((acc, c) => acc + (c.monto || 0), 0);
+                const totalVol = listaClientes.reduce((acc, c) => acc + (c.totalEnviado || 0), 0);
                 document.getElementById("stat-vol").innerText = totalVol.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
-                // Render Table & Urgent
                 const tbody = document.getElementById("clientesTable");
                 const urgentList = document.getElementById("urgentList");
                 const urgentContainer = document.getElementById("urgentContainer");
-                
-                tbody.innerHTML = "";
-                urgentList.innerHTML = "";
+                tbody.innerHTML = ""; urgentList.innerHTML = "";
                 let tieneUrgentes = false;
-
-                // Ordenar por monto de mayor a menor
-                listaClientes.sort((a,b) => (b.monto || 0) - (a.monto || 0));
 
                 listaClientes.forEach(c => {
                     const statusHtml = 
@@ -155,44 +133,33 @@
                         c.status === "concluido" ? '<span style="color:var(--green); font-weight:bold;">🟢 Concluído</span>' :
                         '<span style="color:#8b949e;">⚪ Novo</span>';
 
-                    // Tabla Global
                     tbody.innerHTML += `
                         <tr>
-                            <td>${c.nombre || "Sin nombre"}</td>
+                            <td>${c.nombre || "Sin nombre"} ${c.vip ? '⭐' : ''}</td>
                             <td style="color:#8b949e;">${c.phone ? c.phone.split('@')[0] : "-"}</td>
-                            <td style="color:var(--green); font-weight:bold;">R$ ${Number(c.monto || 0).toLocaleString('pt-BR')}</td>
-                            <td><span class="badge-tipo">${c.tipo === "brl_cup" ? "🇧🇷 → 🇨🇺" : (c.tipo || "-")}</span></td>
+                            <td style="color:var(--green); font-weight:bold;">R$ ${Number(c.totalEnviado || 0).toLocaleString('pt-BR')}</td>
+                            <td><span class="badge-tipo">${c.tipoFavorito === "brl_cup" ? "🇧🇷 → 🇨🇺" : (c.tipoFavorito || "-")}</span></td>
                             <td>${statusHtml}</td>
                         </tr>
                     `;
 
-                    // Alerta Urgente
                     if (c.status === "humano") {
                         tieneUrgentes = true;
                         urgentList.innerHTML += `
                             <div class="urgent-item">
-                                <div>
-                                    <div style="font-weight:bold; font-size:16px;">${c.nombre || "Cliente Desconocido"}</div>
-                                    <div style="font-size:12px; color:var(--red);">Solicitó atención manual / Operación Cuba → Brasil</div>
-                                </div>
-                                <a href="https://wa.me/${c.phone.split('@')[0]}" target="_blank" class="btn-wa">RESPONDER WHATSAPP</a>
+                                <div><strong>${c.nombre || "Cliente"}</strong></div>
+                                <a href="https://wa.me/${c.phone.split('@')[0]}" target="_blank" class="btn-wa">RESPONDER</a>
                             </div>
                         `;
                     }
                 });
-
                 urgentContainer.style.display = tieneUrgentes ? "block" : "none";
-
-            } catch (e) {
-                console.error("Error en Dashboard:", e);
-            }
+            } catch (e) { console.error(e); }
         }
 
         async function guardar() {
             const btn = document.getElementById("btnSave");
-            btn.innerText = "Sincronizando...";
-            btn.disabled = true;
-
+            btn.innerText = "Sincronizando..."; btn.disabled = true;
             try {
                 const data = {
                     brl_0: Number(document.getElementById("brl_0").value),
@@ -202,25 +169,22 @@
                     usd1: Number(document.getElementById("usd1").value),
                     usd2: Number(document.getElementById("usd2").value)
                 };
-
-                const req = await fetch(`/admin/tasas?token=${token}`, {
+                
+                await fetch(`/admin/tasas?token=${token}`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify(data)
                 });
-
-                if (req.ok) {
-                    alert("✅ Tasas actualizadas correctamente.");
-                    init();
-                }
-            } catch (e) {
-                alert("❌ Error al guardar.");
-            } finally {
-                btn.innerText = "Guardar Cambios Globales";
-                btn.disabled = false;
+                
+                alert("✅ Actualizado correctamente"); 
+                init();
+            } catch (e) { 
+                alert("❌ Error al guardar"); 
+            } finally { 
+                btn.innerText = "Guardar Cambios Globales"; 
+                btn.disabled = false; 
             }
         }
-
         init();
     </script>
 </body>
