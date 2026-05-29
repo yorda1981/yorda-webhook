@@ -81,6 +81,17 @@ function guardarCliente({
   tarjeta = ""
 }) {
   try {
+
+    console.log(
+      "🔍 guardarCliente llamado",
+      {
+        phone,
+        nombre,
+        monto,
+        tipo
+      }
+    );
+
     if (!phone) {
       console.log("🚫 Phone inválido");
       return null;
