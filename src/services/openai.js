@@ -68,15 +68,15 @@ async function procesarMensaje(phone, text, pushName = "") {
         }
 
         // 3. BLINDAJE PRIORITARIO: ATENCIÓN HUMANA (Cuba -> Brasil)
-        // Regla de oro: Se activa antes que el PIX para evitar errores de tasa.
-        if (/yordanys|humano|asesor|tengo cup|dinero en cuba|enviar para brasil|vender cup|pesos cubanos|cambiar cup|cup por reales/i.test(texto)) {
+        // REGLA DE ORO: Esta validación va antes que el PIX para evitar errores en tasas manuales.
+        if (/yordanys|humano|asesor|tengo cup|tengo dinero en cuba|dinero en cuba|enviar para brasil|enviar desde cuba|vender cup|pesos cubanos|cambiar cup|cup por reales|cuba para brasil/i.test(texto)) {
             const respuesta = "Perfecto 😊\nYordanys te atenderá enseguida para ayudarte con esa operación. 👌";
             await enviarMensaje(phone, respuesta);
             return respuesta;
         }
 
-        // 4. LÓGICA DE ENVÍO DE PIX (Confirmación de alta intención)
-        if (/quiero hacerlo|voy a pagar|pasame el pix|pásame el pix|deseo continuar|quero fazer|vou pagar|passa o pix/i.test(texto)) {
+        // 4. LÓGICA DE ENVÍO DE PIX (Cierre de venta directo)
+        if (/pix|envia el pix|envía el pix|pasame el pix|pásame el pix|quiero hacerlo|voy a pagar|deseo continuar|quero fazer|vou pagar|passa o pix/i.test(texto)) {
             const llavePix = "8becaaf5-f296-4cbc-a115-46e3d23b042a";
             await enviarMensaje(phone, llavePix);
             return llavePix;
