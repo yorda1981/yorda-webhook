@@ -2,7 +2,6 @@ const express = require("express");
 const fs = require("fs");
 const path = require("path");
 const rateLimit = require("express-rate-limit");
-
 require("dotenv").config();
 
 // ==========================================
@@ -10,6 +9,7 @@ require("dotenv").config();
 // ==========================================
 const openaiService = require("./src/services/openai");
 const { obtenerTodos } = require("./src/services/customer-memory");
+const { obtenerTodas } = require("./src/services/operations"); // ← NUEVO
 
 const app = express();
 
@@ -64,6 +64,7 @@ const verificarToken = (req, res, next) => {
     if (!token || token.trim() !== secret) {
         return res.status(401).json({ error: "Não autorizado" });
     }
+
     next();
 };
 
@@ -75,6 +76,7 @@ app.post("/webhook", webhookLimiter, async (req, res) => {
 
     try {
         const body = req.body;
+
         if (!body || body.type !== "ReceivedCallback") return;
         if (body.fromMe === true || body.fromMe === "true") return;
         if (body.isGroup === true || body.isNewsletter === true) return;
@@ -87,8 +89,8 @@ app.post("/webhook", webhookLimiter, async (req, res) => {
 
         // 1. ACUMULAÇÃO (Sempre ouve)
         const mensajeAnterior = pendingMessages.get(phone) || "";
-        const mensajeAcumulado = mensajeAnterior 
-            ? mensajeAnterior + "\n" + textMessage 
+        const mensajeAcumulado = mensajeAnterior
+            ? mensajeAnterior + "\n" + textMessage
             : textMessage;
 
         pendingMessages.set(phone, mensajeAcumulado);
@@ -120,10 +122,9 @@ app.post("/webhook", webhookLimiter, async (req, res) => {
 
                 if (respuesta) {
                     lastResponses.set(phone, Date.now());
-                    pendingMessages.delete(phone); // Só apaga se houver sucesso
+                    pendingMessages.delete(phone);
                     console.log(`✅ Ciclo concluído para ${phone}`);
                 }
-
             } catch (e) {
                 console.error(`❌ Erro OpenAI para ${phone} (Mensagem preservada):`, e.message);
             } finally {
@@ -159,7 +160,7 @@ app.post("/admin/tasas", adminLimiter, verificarToken, async (req, res) => {
     } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
-// Stats Globales (Basado en totalEnviado acumulativo)
+// Stats Globales
 app.get("/admin/stats", adminLimiter, verificarToken, (req, res) => {
     try {
         const clientes = obtenerTodos();
@@ -172,10 +173,19 @@ app.get("/admin/stats", adminLimiter, verificarToken, (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Lista de Clientes (Para la tabla del Dashboard)
+// Lista de Clientes
 app.get("/admin/clientes", adminLimiter, verificarToken, (req, res) => {
     try {
         res.json(obtenerTodos());
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ==========================================
+// OPERACIONES  ← NUEVO
+// ==========================================
+app.get("/admin/operaciones", adminLimiter, verificarToken, (req, res) => {
+    try {
+        res.json(obtenerTodas());
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
