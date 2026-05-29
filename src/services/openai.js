@@ -13,7 +13,7 @@ const openai = new OpenAI({
 });
 
 // ==========================================
-// GATILHOS (Palabras clave para IA)
+// GATILHOS (Palabras clave para activar IA)
 // ==========================================
 const gatilhos = [
     "real", "reales", "envio", "cambio", "cambiar", "taxa", "tasa", 
@@ -24,7 +24,7 @@ const gatilhos = [
 ];
 
 // ==========================================
-// NORMALIZAR (Sin acentos para el Regex)
+// NORMALIZAR (Limpia texto para comparaciones)
 // ==========================================
 function normalizarTexto(texto) {
     return String(texto || "")
@@ -45,8 +45,8 @@ async function procesarMensaje(phone, text, pushName = "") {
         if (!text || !phone) return "";
         const texto = normalizarTexto(text);
 
-        // 1. DETECCIÓN DE IDIOMA
-        const esEspanol = /hola|buenas|buenos dias|buen dia|quiero|cuanto|enviar|mandar|giro|transferencia|dinero|cuba|pesos|cup|reales/i.test(texto);
+        // 1. DETECCIÓN DE IDIOMA (Regex optimizado)
+        const esEspanol = /hola|buenas|buenos dias|buen dia|quiero|cuanto|cuanto|enviar|mandar|giro|transferencia|dinero|cuba|pesos|cup|reales|usd|dolares|dolares/i.test(texto);
 
         // 2. MEMORIA DE CLIENTE & SALUDOS BILINGÜES
         const cliente = obtenerCliente(phone);
@@ -67,9 +67,8 @@ async function procesarMensaje(phone, text, pushName = "") {
                 : `Olá novamente ${cliente.nombre || ""} 👋\n\n`;
         }
 
-        // 3. BLINDAJE PRIORITARIO: ATENCIÓN HUMANA (Cuba -> Brasil)
-        // REGLA DE ORO: Esta validación va antes que el PIX para evitar errores en tasas manuales.
-        if (/yordanys|humano|asesor|tengo cup|tengo dinero en cuba|dinero en cuba|enviar para brasil|enviar desde cuba|vender cup|pesos cubanos|cambiar cup|cup por reales|cuba para brasil/i.test(texto)) {
+        // 3. BLINDAJE PRIORITARIO: ATENCIÓN HUMANA (Cuba -> Brasil / Riesgo)
+        if (/yordanys|humano|asesor|tengo cup|tengo dinero en cuba|dinero en cuba|enviar para brasil|enviar desde cuba|vender cup|pesos cubanos|cambiar cup|cup por reales|cuba para brasil|traer para brasil|traerlo para brasil/i.test(texto)) {
             const respuesta = "Perfecto 😊\nYordanys te atenderá enseguida para ayudarte con esa operación. 👌";
             await enviarMensaje(phone, respuesta);
             return respuesta;
@@ -106,20 +105,25 @@ async function procesarMensaje(phone, text, pushName = "") {
         const numeroDetectado = texto.match(/\d+/);
         const valor = numeroDetectado ? Number(numeroDetectado[0]) : null;
 
-        // 7. OPERACIÓN: BRL → CUP
-        if (valor && (texto.includes("real") || texto.includes("reales") || texto.includes("brl"))) {
-            const resultado = calcularOperacion({ tipo: "brl_cup", valor });
-            if (resultado) {
-                guardarCliente({ phone, nombre: pushName, monto: valor, tipo: "brl_cup" });
-                const respuesta = esEspanol
-                    ? `${saludoCliente}💵 R$${valor} hoy rinden ${formatearNumero(resultado.cup)} CUP 🇨🇺\n\n✅ Transferencia rápida\n✅ Comprobante después del envío${vipExtra}\n\n¿Deseas realizar la operación ahora?`
-                    : `${saludoCliente}💵 R$${valor} hoje rendem ${formatearNumero(resultado.cup)} CUP 🇨🇺\n\n✅ Transferência rápida\n✅ Comprovante após envio${vipExtra}\n\nDeseja realizar o envio agora?`;
-                await enviarMensaje(phone, respuesta);
-                return respuesta;
-            }
+        // ---------------------------------------------------------
+        // 7. BLOQUEO USD -> BRL / BRASIL (Arbitraje Manual / Riesgo)
+        // ---------------------------------------------------------
+        if (
+            valor && 
+            texto.includes("usd") && 
+            (texto.includes("real") || texto.includes("reales") || texto.includes("brl") || texto.includes("brasil"))
+        ) {
+            const respuesta = esEspanol
+                ? "Esta operación requiere cotización personalizada. Yordanys te atenderá enseguida. 👌"
+                : "Esta operação requer cotação personalizada. Yordanys irá atendê-lo em breve. 👌";
+
+            await enviarMensaje(phone, respuesta);
+            return respuesta;
         }
 
-        // 8. USD BILINGÜE
+        // ---------------------------------------------------------
+        // 8. PRIORIDAD USD -> CUP (Envío Estándar)
+        // ---------------------------------------------------------
         if (valor && texto.includes("usd")) {
             const tipoUsd = texto.includes("prepago") ? "usd_prepago" : "usd_clasica";
             const nombreUsd = tipoUsd === "usd_prepago" ? "USD Prepago" : "USD Clásica";
@@ -135,7 +139,26 @@ async function procesarMensaje(phone, text, pushName = "") {
             }
         }
 
-        // 9. CONSULTA GENERAL
+        // ---------------------------------------------------------
+        // 9. BRL → CUP (Candado !usd para evitar colisión)
+        // ---------------------------------------------------------
+        if (
+            valor && 
+            !texto.includes("usd") && 
+            (texto.includes("real") || texto.includes("reales") || texto.includes("brl"))
+        ) {
+            const resultado = calcularOperacion({ tipo: "brl_cup", valor });
+            if (resultado) {
+                guardarCliente({ phone, nombre: pushName, monto: valor, tipo: "brl_cup" });
+                const respuesta = esEspanol
+                    ? `${saludoCliente}💵 R$${valor} hoy rinden ${formatearNumero(resultado.cup)} CUP 🇨🇺\n\n✅ Transferencia rápida\n✅ Comprobante después del envío${vipExtra}\n\n¿Deseas realizar la operación ahora?`
+                    : `${saludoCliente}💵 R$${valor} hoje rendem ${formatearNumero(resultado.cup)} CUP 🇨🇺\n\n✅ Transferência rápida\n✅ Comprovante após envio${vipExtra}\n\nDeseja realizar o envio agora?`;
+                await enviarMensaje(phone, respuesta);
+                return respuesta;
+            }
+        }
+
+        // 10. CONSULTA GENERAL
         if (/cambio|tasa|cotizacion/i.test(texto)) {
             const respuesta = esEspanol
                 ? "Hoy estamos trabajando con muy buena tasa 👍\n\n¿Deseas calcular reales, USD clásica o USD prepago?"
@@ -144,7 +167,7 @@ async function procesarMensaje(phone, text, pushName = "") {
             return respuesta;
         }
 
-        // 10. OPENAI FALLBACK
+        // 11. OPENAI FALLBACK
         const systemPrompt = `Eres YordaBot. Responde corto y humano. Cliente: ${pushName}. VIP: ${cliente?.vip ? 'SI' : 'NO'}.`;
         const completion = await openai.chat.completions.create({
             model: "gpt-4o-mini",
@@ -152,6 +175,7 @@ async function procesarMensaje(phone, text, pushName = "") {
             temperature: 0.5,
             max_tokens: 120
         });
+
         const respuestaIA = completion?.choices?.[0]?.message?.content?.trim();
         if (respuestaIA) {
             await enviarMensaje(phone, respuestaIA);
@@ -159,7 +183,7 @@ async function procesarMensaje(phone, text, pushName = "") {
         }
 
     } catch (error) {
-        console.error("❌ Error:", error.message);
+        console.error("❌ Error en procesarMensaje:", error.message);
         return "";
     }
 }
