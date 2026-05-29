@@ -8,948 +8,183 @@ require("dotenv").config();
 // ==========================================
 // IMPORTS
 // ==========================================
-
-const openaiService =
-    require("./src/services/openai");
-
-const {
-    obtenerPromo,
-    guardarPromo
-} = require(
-    "./src/services/promo"
-);
-
-// ==========================================
-// APP
-// ==========================================
+const openaiService = require("./src/services/openai");
+const { obtenerPromo, guardarPromo } = require("./src/services/promo");
 
 const app = express();
 
 // ==========================================
-// RAILWAY / PROXY
+// CONFIGURAÇÃO INICIAL
 // ==========================================
-
-app.set(
-    "trust proxy",
-    1
-);
+const PORT = process.env.PORT || 8080;
+app.set("trust proxy", 1);
 
 // ==========================================
-// BUFFER ANTI-SPAM
+// MEMÓRIA TEMPORÁRIA (BUFFER & COOLDOWN)
 // ==========================================
-
-const buffers =
-    new Map();
-
-const pendingMessages =
-    new Map();
-
-const lastResponses =
-    new Map();
+const buffers = new Map();
+const pendingMessages = new Map();
+const lastResponses = new Map();
 
 // ==========================================
 // MIDDLEWARES
 // ==========================================
-
-app.use(
-
-    express.json({
-        limit: "10mb"
-    })
-);
-
-app.use(
-
-    express.static(
-
-        path.join(
-            __dirname,
-            "public"
-        )
-    )
-);
+app.use(express.json({ limit: "10mb" }));
+app.use(express.static(path.join(__dirname, "public")));
 
 // ==========================================
-// RATE LIMITING
+// RATE LIMITING (SEGURANÇA WEBHOOK)
 // ==========================================
-
-const webhookLimiter =
-    rateLimit({
-
-        windowMs:
-            60 * 1000,
-
-        max:
-            300,
-
-        message: {
-
-            error:
-                "Demasiadas solicitudes"
-        },
-
-        standardHeaders:
-            true,
-
-        legacyHeaders:
-            false
-    });
-
-const adminLimiter =
-    rateLimit({
-
-        windowMs:
-            15 * 60 * 1000,
-
-        max:
-            50,
-
-        message: {
-
-            error:
-                "Demasiadas solicitudes admin"
-        }
-    });
+const webhookLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 300,
+    message: { error: "Demasiadas solicitações" }
+});
 
 // ==========================================
-// CONFIG
+// CONFIGURAÇÃO DE CAMINHOS
 // ==========================================
-
-const TASAS_PATH =
-    path.join(
-
-        __dirname,
-
-        "src",
-        "config",
-        "tasas.json"
-    );
+const TASAS_PATH = path.join(__dirname, "src", "config", "tasas.json");
 
 // ==========================================
-// PROTECCIÓN ADMIN
+// PROTEÇÃO ADMIN (TOKEN)
 // ==========================================
-
-const verificarToken = (
-
-    req,
-    res,
-    next
-
-) => {
-
-    const token =
-
-        req.headers["x-admin-token"]
-
-        ||
-
-        req.query.token;
-
-    const secret =
-        process.env.ADMIN_TOKEN?.trim();
+const verificarToken = (req, res, next) => {
+    const token = req.headers["x-admin-token"] || req.query.token;
+    const secret = process.env.ADMIN_TOKEN?.trim();
 
     if (!secret) {
-
-        console.error(
-            "ADMIN_TOKEN no definido"
-        );
-
-        return res
-            .status(500)
-            .send(
-                "<h1>Error configuración servidor</h1>"
-            );
+        console.error("❌ ADMIN_TOKEN não definido no ENV");
+        return res.status(500).send("<h1>Erro de configuração no servidor</h1>");
     }
 
-    if (
-
-        !token ||
-
-        token.trim() !== secret
-
-    ) {
-
-        return res
-            .status(401)
-            .json({
-
-                error:
-                    "No autorizado"
-            });
+    if (!token || token.trim() !== secret) {
+        return res.status(401).json({ error: "Não autorizado" });
     }
-
     next();
 };
 
 // ==========================================
-// WEBHOOK
+// WEBHOOK PRINCIPAL (LÓGICA 10/10 - RESILIENTE)
 // ==========================================
-
-app.post(
-
-    "/webhook",
-
-    webhookLimiter,
-
-    async (
-
-        req,
-        res
-
-    ) => {
-
-        res
-            .status(200)
-            .send("OK");
-
-        try {
-
-            const body =
-                req.body;
-
-            if (!body) return;
-
-            // ==========================================
-            // SOLO MENSAJES REALES
-            // ==========================================
-
-            if (
-
-                body.type !==
-                "ReceivedCallback"
-
-            ) {
-
-                console.log(
-                    "🚫 Callback ignorado"
-                );
-
-                return;
-            }
-
-            // ==========================================
-            // IGNORAR MENSAJES PROPIOS
-            // ==========================================
-
-            if (
-
-                body.fromMe === true ||
-
-                body.fromMe === "true"
-
-            ) {
-
-                console.log(
-                    "🚫 Mensaje propio ignorado"
-                );
-
-                return;
-            }
-
-            // ==========================================
-            // IGNORAR GRUPOS
-            // ==========================================
-
-            if (
-
-                body.isGroup === true ||
-
-                body.isNewsletter === true
-
-            ) {
-
-                console.log(
-                    "🚫 Grupo/Newsletter ignorado"
-                );
-
-                return;
-            }
-
-            // ==========================================
-            // DATOS
-            // ==========================================
-
-            const phone =
-
-                body.phone ||
-
-                body.from;
-
-            const textMessage =
-
-                body.text?.message ||
-
-                body.body ||
-
-                body.message ||
-
-                "";
-
-            const pushName =
-
-                body.senderName ||
-
-                body.sender?.pushName ||
-
-                "Cliente";
-
-            // ==========================================
-            // VALIDAR TELÉFONO
-            // ==========================================
-
-            if (!phone) {
-
-                console.log(
-                    "🚫 Teléfono inválido"
-                );
-
-                return;
-            }
-
-            // ==========================================
-            // IGNORAR EVENTOS SIN TEXTO
-            // ==========================================
-
-            if (
-
-                !textMessage ||
-
-                typeof textMessage !== "string"
-
-            ) {
-
-                console.log(
-                    "🚫 Evento sin texto"
-                );
-
-                return;
-            }
-
-            // ==========================================
-            // VALIDAR OPENAI
-            // ==========================================
-
-            if (
-
-                typeof
-                openaiService.procesarMensaje
-                !== "function"
-
-            ) {
-
-                throw new Error(
-                    "procesarMensaje no exportado"
-                );
-            }
-
-            console.log(
-                `📩 ${pushName}: ${textMessage}`
-            );
-
-            // ==========================================
-            // COOLDOWN
-            // ==========================================
-
-            const ultimaRespuesta =
-                lastResponses.get(phone);
-
-            if (
-
-                ultimaRespuesta &&
-
-                Date.now() - ultimaRespuesta < 8000
-
-            ) {
-
-                console.log(
-                    "⏳ Cooldown activo"
-                );
-
-                pendingMessages.delete(phone);
-
-                return;
-            }
-
-            // ==========================================
-            // GUARDAR MENSAJE
-            // ==========================================
-
-            pendingMessages.set(
-                phone,
-                textMessage
-            );
-
-            // ==========================================
-            // LIMPIAR BUFFER
-            // ==========================================
-
-            if (
-                buffers.has(phone)
-            ) {
-
-                clearTimeout(
-                    buffers.get(phone)
-                );
-
-                console.log(
-                    `🔄 Buffer reiniciado ${phone}`
-                );
-            }
-
-            // ==========================================
-            // TIMER
-            // ==========================================
-
-            buffers.set(
-
-                phone,
-
-                setTimeout(
-
-                    async () => {
-
-                        const mensaje =
-                            pendingMessages.get(phone);
-
-                        if (
-                            !mensaje
-                        ) {
-
-                            console.log(
-                                "🚫 Mensaje vacío"
-                            );
-
-                            return;
-                        }
-
-                        try {
-
-                            console.log(
-                                `🧠 IA trabajando para ${phone}`
-                            );
-
-                            const respuesta =
-                                await openaiService
-                                    .procesarMensaje(
-
-                                        phone,
-
-                                        mensaje,
-
-                                        pushName
-                                    );
-
-                            if (respuesta) {
-
-                                console.log(
-                                    "✅ Respuesta enviada"
-                                );
-
-                                lastResponses.set(
-                                    phone,
-                                    Date.now()
-                                );
-
-                            } else {
-
-                                console.log(
-                                    "🚫 Sin respuesta"
-                                );
-                            }
-
-                        } catch (e) {
-
-                            console.error(
-                                "❌ ERROR EN BUFFER"
-                            );
-
-                            console.error(e);
-
-                        } finally {
-
-                            buffers.delete(phone);
-
-                            pendingMessages.delete(phone);
-                        }
-
-                    },
-
-                    6000
-                )
-            );
-
-        } catch (e) {
-
-            console.error(
-                "❌ ERROR EN WEBHOOK"
-            );
-
-            console.error(e);
+app.post("/webhook", webhookLimiter, async (req, res) => {
+    // Responder imediatamente à Z-API para evitar retentativas
+    res.status(200).send("OK");
+
+    try {
+        const body = req.body;
+        if (!body || body.type !== "ReceivedCallback") return;
+        if (body.fromMe === true || body.fromMe === "true") return;
+        if (body.isGroup === true || body.isNewsletter === true) return;
+
+        const phone = body.phone || body.from;
+        const textMessage = body.text?.message || body.body || body.message || "";
+        const pushName = body.senderName || body.sender?.pushName || "Cliente";
+
+        if (!phone || !textMessage || typeof textMessage !== "string") return;
+
+        // ------------------------------------------
+        // 1. ACUMULAÇÃO (Sempre ouve, nunca ignora)
+        // ------------------------------------------
+        const mensajeAnterior = pendingMessages.get(phone) || "";
+        const mensajeAcumulado = mensajeAnterior 
+            ? mensajeAnterior + "\n" + textMessage 
+            : textMessage;
+
+        pendingMessages.set(phone, mensajeAcumulado);
+
+        // Log de monitorização para o Railway
+        console.log(`📩 Buffer acumulado (${phone}):\n${mensajeAcumulado}`);
+
+        // ------------------------------------------
+        // 2. GESTÃO DO TIMER (3 SEGUNDOS)
+        // ------------------------------------------
+        if (buffers.has(phone)) {
+            clearTimeout(buffers.get(phone));
         }
-    }
-);
 
-// ==========================================
-// ADMIN STATS
-// ==========================================
+        const timer = setTimeout(async () => {
+            const mensajeParaEnviar = pendingMessages.get(phone);
+            if (!mensajeParaEnviar) return;
 
-app.get(
-
-    "/admin/stats",
-
-    adminLimiter,
-
-    verificarToken,
-
-    async (
-
-        req,
-        res
-
-    ) => {
-
-        try {
-
-            const stats = {
-
-                clientes: 0,
-                vip: 0,
-                operaciones: 0,
-                total: 0
-            };
-
-            return res.json(stats);
-
-        } catch (e) {
-
-            console.error(
-                "Error /admin/stats"
-            );
-
-            console.error(e);
-
-            return res
-                .status(500)
-                .json({
-                    error: e.message
-                });
-        }
-    }
-);
-
-// ==========================================
-// GET TASAS
-// ==========================================
-
-app.get(
-
-    "/admin/tasas",
-
-    adminLimiter,
-
-    verificarToken,
-
-    (
-
-        req,
-        res
-
-    ) => {
-
-        try {
-
-            if (
-
-                !fs.existsSync(
-                    TASAS_PATH
-                )
-
-            ) {
-
-                return res.json({});
+            // ------------------------------------------
+            // 3. COOLDOWN DE ENVIO (Proteção de saída)
+            // ------------------------------------------
+            const ultimaRespuesta = lastResponses.get(phone);
+            if (ultimaRespuesta && Date.now() - ultimaRespuesta < 3000) {
+                console.log("⏳ Cooldown activo: Aguardando janela de resposta.");
+                return;
             }
 
-            const data =
-                JSON.parse(
-
-                    fs.readFileSync(
-                        TASAS_PATH,
-                        "utf8"
-                    )
+            try {
+                console.log(`🧠 IA a trabalhar para ${phone}...`);
+                const respuesta = await openaiService.procesarMensaje(
+                    phone,
+                    mensajeParaEnviar,
+                    pushName
                 );
 
-            return res.json({
-
-                brl_0:
-                    data.brl_cup?.faixas?.[0]?.tasa || 0,
-
-                brl_100:
-                    data.brl_cup?.faixas?.[1]?.tasa || 0,
-
-                brl_500:
-                    data.brl_cup?.faixas?.[2]?.tasa || 0,
-
-                brl_1000:
-                    data.brl_cup?.faixas?.[3]?.tasa || 0,
-
-                usd1:
-                    data.usd_clasica?.tasa || 0,
-
-                usd2:
-                    data.usd_prepago?.tasa || 0
-            });
-
-        } catch (e) {
-
-            console.error(
-                "Error GET tasas"
-            );
-
-            console.error(e);
-
-            return res
-                .status(500)
-                .json({
-                    error: e.message
-                });
-        }
-    }
-);
-
-// ==========================================
-// POST TASAS
-// ==========================================
-
-app.post(
-
-    "/admin/tasas",
-
-    adminLimiter,
-
-    verificarToken,
-
-    async (
-
-        req,
-        res
-
-    ) => {
-
-        try {
-
-            const {
-
-                brl_0,
-                brl_100,
-                brl_500,
-                brl_1000,
-                usd1,
-                usd2
-
-            } = req.body;
-
-            const nuevasTasas = {
-
-                brl_cup: {
-
-                    faixas: [
-
-                        {
-                            min: 0,
-                            max: 99,
-                            tasa: Number(brl_0)
-                        },
-
-                        {
-                            min: 100,
-                            max: 499,
-                            tasa: Number(brl_100)
-                        },
-
-                        {
-                            min: 500,
-                            max: 999,
-                            tasa: Number(brl_500)
-                        },
-
-                        {
-                            min: 1000,
-                            max: 999999,
-                            tasa: Number(brl_1000)
-                        }
-                    ]
-                },
-
-                usd_clasica: {
-                    tasa: Number(usd1)
-                },
-
-                usd_prepago: {
-                    tasa: Number(usd2)
+                // SÓ APAGA SE TIVER RESPOSTA (RESILIÊNCIA)
+                if (respuesta) {
+                    lastResponses.set(phone, Date.now());
+                    pendingMessages.delete(phone); 
+                    console.log(`✅ Ciclo concluído com sucesso para ${phone}`);
                 }
-            };
 
-            await fs.promises.writeFile(
+            } catch (e) {
+                // Se houver erro de rede ou API, o conteúdo de 'pendingMessages' 
+                // é preservado para a próxima tentativa ou próxima mensagem do cliente.
+                console.error(`❌ Erro OpenAI para ${phone} (Mensagem preservada):`, e.message);
+            } finally {
+                // O buffer do timer é sempre limpo para permitir novos ciclos
+                buffers.delete(phone);
+            }
+        }, 3000);
 
-                TASAS_PATH,
+        buffers.set(phone, timer);
 
-                JSON.stringify(
-                    nuevasTasas,
-                    null,
-                    2
-                )
-            );
-
-            return res.json({
-                success: true
-            });
-
-        } catch (e) {
-
-            console.error(
-                "Error POST tasas"
-            );
-
-            console.error(e);
-
-            return res
-                .status(500)
-                .json({
-                    success: false,
-                    error: e.message
-                });
-        }
+    } catch (e) {
+        console.error("❌ Erro fatal no Webhook:", e);
     }
-);
+});
 
 // ==========================================
-// GET PROMO
+// ROTAS ADMIN (TASAS & DASHBOARD)
 // ==========================================
-
-app.get(
-
-    "/admin/promo",
-
-    adminLimiter,
-
-    verificarToken,
-
-    (
-
-        req,
-        res
-
-    ) => {
-
-        try {
-
-            return res.json(
-                obtenerPromo()
-            );
-
-        } catch (e) {
-
-            console.error(
-                "Error GET promo"
-            );
-
-            console.error(e);
-
-            return res
-                .status(500)
-                .json({
-                    error: e.message
-                });
-        }
+app.get("/admin/tasas", verificarToken, (req, res) => {
+    try {
+        if (!fs.existsSync(TASAS_PATH)) return res.json({});
+        const data = JSON.parse(fs.readFileSync(TASAS_PATH, "utf8"));
+        res.json(data);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
     }
-);
+});
 
-// ==========================================
-// POST PROMO
-// ==========================================
-
-app.post(
-
-    "/admin/promo",
-
-    adminLimiter,
-
-    verificarToken,
-
-    async (
-
-        req,
-        res
-
-    ) => {
-
-        try {
-
-            const ok =
-
-                await guardarPromo(
-
-                    req.body.promo
-                );
-
-            return res.json({
-
-                success: ok
-            });
-
-        } catch (e) {
-
-            console.error(
-                "Error POST promo"
-            );
-
-            console.error(e);
-
-            return res
-                .status(500)
-                .json({
-
-                    success: false,
-
-                    error: e.message
-                });
-        }
+app.post("/admin/tasas", verificarToken, async (req, res) => {
+    try {
+        await fs.promises.writeFile(TASAS_PATH, JSON.stringify(req.body, null, 2));
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
     }
-);
+});
+
+app.get("/", (req, res) => res.send("YordaBot Online ✅"));
 
 // ==========================================
-// DASHBOARD
+// INICIALIZAÇÃO
 // ==========================================
+app.listen(PORT, "0.0.0.0", () => {
+    console.log(`🚀 SERVER UP NA PORTA ${PORT}`);
+});
 
-app.get(
-
-    "/dashboard",
-
-    adminLimiter,
-
-    verificarToken,
-
-    (
-
-        req,
-        res
-
-    ) => {
-
-        res.sendFile(
-
-            path.join(
-
-                __dirname,
-
-                "public",
-                "dashboard.html"
-            )
-        );
-    }
-);
-
-// ==========================================
-// HOME
-// ==========================================
-
-app.get(
-
-    "/",
-
-    (
-
-        req,
-        res
-
-    ) => {
-
-        res.send(
-            "YordaBot Online"
-        );
-    }
-);
-
-// ==========================================
-// SERVER
-// ==========================================
-
-const PORT =
-    process.env.PORT ||
-    8080;
-
-const server =
-    app.listen(
-
-        PORT,
-
-        "0.0.0.0",
-
-        () => {
-
-            console.log(
-                `🚀 SERVER UP ${PORT}`
-            );
-        }
-    );
-
-// ==========================================
-// SHUTDOWN
-// ==========================================
-
-const shutdown = (
-    signal
-) => {
-
-    console.log(
-        `${signal} recibido`
-    );
-
-    for (
-
-        const [phone, timer]
-
-        of buffers.entries()
-
-    ) {
-
-        clearTimeout(timer);
-
-        console.log(
-            `🛑 Buffer cancelado ${phone}`
-        );
-    }
-
-    buffers.clear();
-
-    pendingMessages.clear();
-
-    server.close(() => {
-
-        console.log(
-            "Servidor cerrado"
-        );
-
-        process.exit(0);
-    });
-
-    setTimeout(() => {
-
-        console.error(
-            "Cierre forzado"
-        );
-
-        process.exit(1);
-
-    }, 10000);
+// Encerramento limpo para evitar processos órfãos
+const shutdown = (signal) => {
+    console.log(`${signal} recebido. A limpar buffers...`);
+    for (const timer of buffers.values()) clearTimeout(timer);
+    process.exit(0);
 };
 
-process.on(
-    "SIGTERM",
-    () => shutdown("SIGTERM")
-);
-
-process.on(
-    "SIGINT",
-    () => shutdown("SIGINT")
-);
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
