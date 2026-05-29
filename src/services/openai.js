@@ -1,4 +1,3 @@
-
 require("dotenv").config();
 
 const OpenAI = require("openai");
@@ -22,9 +21,7 @@ const {
 
 const openai =
     new OpenAI({
-
-        apiKey:
-            process.env.OPENAI_API_KEY
+        apiKey: process.env.OPENAI_API_KEY
     });
 
 // ==========================================
@@ -32,7 +29,6 @@ const openai =
 // ==========================================
 
 const gatilhos = [
-
     "real",
     "reales",
     "brl",
@@ -72,7 +68,6 @@ const gatilhos = [
 // ==========================================
 
 function normalizarTexto(texto) {
-
     return String(texto || "")
         .toLowerCase()
         .normalize("NFD")
@@ -84,7 +79,6 @@ function normalizarTexto(texto) {
 // ==========================================
 
 function formatearNumero(numero) {
-
     return Number(numero)
         .toLocaleString("es-ES");
 }
@@ -98,9 +92,7 @@ async function procesarMensaje(
     text,
     pushName = ""
 ) {
-
     try {
-
         console.log(
             `🧠 Procesando mensaje para ${phone}: ${text}`
         );
@@ -113,18 +105,28 @@ async function procesarMensaje(
             normalizarTexto(text);
 
         // ==========================================
-        // GUARDAR CLIENTE
+        // MEMORIA DE CLIENTE & SALUDOS DINÁMICOS
         // ==========================================
-
-        guardarCliente({
-
-            phone,
-
-            nombre: pushName
-        });
-
         const cliente =
             obtenerCliente(phone);
+
+        let saludoCliente = "";
+
+        if (
+            cliente &&
+            cliente.totalOperaciones >= 3
+        ) {
+            saludoCliente =
+                "Bienvenido nuevamente 👍\n\n";
+        }
+
+        if (
+            cliente &&
+            cliente.vip
+        ) {
+            saludoCliente =
+                "🔥 Cliente VIP 🔥\n\n";
+        }
 
         // ==========================================
         // ACTIVAR SOLO MENSAJES COMERCIALES
@@ -132,20 +134,16 @@ async function procesarMensaje(
 
         const activarIA =
             gatilhos.some(
-
                 g =>
-
                     texto.includes(
                         normalizarTexto(g)
                     )
             );
 
         if (!activarIA) {
-
             console.log(
                 "🚫 Mensaje ignorado"
             );
-
             return "";
         }
 
@@ -166,40 +164,29 @@ async function procesarMensaje(
         // ==========================================
 
         if (
-
             valor &&
-
             (
                 texto.includes("real") ||
                 texto.includes("reales") ||
                 texto.includes("brl")
             )
-
         ) {
-
             const resultado =
                 calcularOperacion({
-
                     tipo: "brl_cup",
-
                     valor
                 });
 
             if (resultado) {
-
                 guardarCliente({
-
                     phone,
-
                     nombre: pushName,
-
                     monto: valor,
-
                     tipo: "brl_cup"
                 });
 
                 const respuesta =
-`Hoy estamos trabajando a ${resultado.tasa} CUP por real 🇨🇺
+`${saludoCliente}Hoy estamos trabajando a ${resultado.tasa} CUP por real 🇨🇺
 
 Con ${valor} reales llegan ${formatearNumero(resultado.cup)} CUP 👍`;
 
@@ -217,41 +204,29 @@ Con ${valor} reales llegan ${formatearNumero(resultado.cup)} CUP 👍`;
         // ==========================================
 
         if (
-
             valor &&
-
             texto.includes("usd") &&
-
             (
                 texto.includes("clasica") ||
                 texto.includes("clásica")
             )
-
         ) {
-
             const resultado =
                 calcularOperacion({
-
                     tipo: "usd_clasica",
-
                     valor
                 });
 
             if (resultado) {
-
                 guardarCliente({
-
                     phone,
-
                     nombre: pushName,
-
                     monto: valor,
-
                     tipo: "usd_clasica"
                 });
 
                 const respuesta =
-`La USD clásica hoy está en ${resultado.tasa} CUP 🇨🇺
+`${saludoCliente}La USD clásica hoy está en ${resultado.tasa} CUP 🇨🇺
 
 Con ${valor} USD clásica llegan ${formatearNumero(resultado.cup)} CUP 👍`;
 
@@ -269,38 +244,26 @@ Con ${valor} USD clásica llegan ${formatearNumero(resultado.cup)} CUP 👍`;
         // ==========================================
 
         if (
-
             valor &&
-
             texto.includes("usd") &&
-
             texto.includes("prepago")
-
         ) {
-
             const resultado =
                 calcularOperacion({
-
                     tipo: "usd_prepago",
-
                     valor
                 });
 
             if (resultado) {
-
                 guardarCliente({
-
                     phone,
-
                     nombre: pushName,
-
                     monto: valor,
-
                     tipo: "usd_prepago"
                 });
 
                 const respuesta =
-`La USD prepago hoy está en ${resultado.tasa} CUP 🇨🇺
+`${saludoCliente}La USD prepago hoy está en ${resultado.tasa} CUP 🇨🇺
 
 Con ${valor} USD prepago llegan ${formatearNumero(resultado.cup)} CUP 👍`;
 
@@ -318,22 +281,15 @@ Con ${valor} USD prepago llegan ${formatearNumero(resultado.cup)} CUP 👍`;
         // ==========================================
 
         if (
-
             texto.includes("cambio") ||
-
             texto.includes("tasa") ||
-
             texto.includes("cotizacion") ||
-
             texto.includes("cotización")
-
         ) {
-
             let respuesta =
 "Hoy estamos trabajando con muy buena tasa 👍\n\n¿Deseas calcular reales, USD clásica o USD prepago?";
 
             if (cliente?.vip) {
-
                 respuesta +=
 "\n\n🔥 Cliente VIP detectado.";
             }
@@ -351,15 +307,10 @@ Con ${valor} USD prepago llegan ${formatearNumero(resultado.cup)} CUP 👍`;
         // ==========================================
 
         if (
-
             texto.includes("yordanys") ||
-
             texto.includes("humano") ||
-
             texto.includes("asesor")
-
         ) {
-
             const respuesta =
 "Yordanys ahora mismo está ocupado 👌\n\nApenas pueda entra al chat.";
 
@@ -378,11 +329,9 @@ Con ${valor} USD prepago llegan ${formatearNumero(resultado.cup)} CUP 👍`;
         let contextoCliente = "";
 
         if (cliente) {
-
             contextoCliente +=
 `
 CLIENTE:
-
 - Nombre: ${cliente.nombre || "No definido"}
 - Total operaciones: ${cliente.totalOperaciones || 0}
 - Total enviado: ${cliente.totalEnviado || 0}
@@ -402,7 +351,6 @@ Eres YordaBot.
 ${contextoCliente}
 
 REGLAS:
-
 - Responder siempre en español.
 - Sonar humano.
 - Respuestas cortas estilo WhatsApp.
@@ -426,24 +374,18 @@ REGLAS:
 
         const completion =
             await openai.chat.completions.create({
-
                 model: "gpt-4o-mini",
-
                 messages: [
-
                     {
                         role: "system",
                         content: systemPrompt
                     },
-
                     {
                         role: "user",
                         content: text
                     }
                 ],
-
                 temperature: 0.5,
-
                 max_tokens: 120
             });
 
@@ -454,11 +396,9 @@ REGLAS:
                 ?.trim();
 
         if (!respuesta) {
-
             console.log(
                 "❌ OpenAI vacío"
             );
-
             return "";
         }
 
@@ -478,26 +418,19 @@ REGLAS:
         return respuesta;
 
     } catch (error) {
-
         console.error(
             "❌ Error en procesarMensaje:"
         );
-
         console.error(
             error.message
         );
 
         try {
-
             await enviarMensaje(
-
                 phone,
-
                 "Hola 👋\n\nAhora mismo estamos con muchas solicitudes. Escríbeme nuevamente en unos minutos."
             );
-
         } catch (e) {
-
             console.error(
                 "❌ Error enviando fallback"
             );
