@@ -31,7 +31,7 @@ const openai =
 const gatilhos = [
     "real",
     "reales",
-    "brl",
+    "envio",
     "cambio",
     "cambiar",
     "taxa",
@@ -53,7 +53,7 @@ const gatilhos = [
     "tarjeta",
     "recarga",
     "saldo",
-    "internet",
+    "cubanos",
     "nauta",
     "clasica",
     "clásica",
