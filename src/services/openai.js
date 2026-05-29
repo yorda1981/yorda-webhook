@@ -60,7 +60,12 @@ const gatilhos = [
     "prepago",
     "yordanys",
     "asesor",
-    "humano"
+    "humano",
+    "paguei",
+    "ja paguei",
+    "já paguei",
+    "comprovante",
+    "comprobante"
 ];
 
 // ==========================================
@@ -111,27 +116,72 @@ async function procesarMensaje(
             obtenerCliente(phone);
 
         let saludoCliente = "";
-
-        if (
-            cliente &&
-            cliente.totalOperaciones >= 3
-        ) {
-            saludoCliente =
-                "Bienvenido nuevamente 👍\n\n";
-        }
+        let vipExtra = "";
 
         if (
             cliente &&
             cliente.vip
         ) {
             saludoCliente =
-                "🔥 Cliente VIP 🔥\n\n";
+                `🔥 Cliente VIP 🔥\nOlá novamente ${cliente.nombre || ""} 👋\n\n`;
+            vipExtra = 
+                "\n🔥 Atendimento prioritário para clientes VIP";
+        }
+        else if (
+            cliente &&
+            cliente.totalOperaciones >= 3
+        ) {
+            saludoCliente =
+                `Olá novamente ${cliente.nombre || ""} 👋\n\n`;
         }
 
         // ==========================================
-        // ACTIVAR SOLO MENSAJES COMERCIALES
+        // DETECCIÓN DE INTENCIÓN: VOU FAZER AGORA
         // ==========================================
+        if (
+            texto.includes("vou fazer agora") ||
+            texto.includes("voy hacer ahora") ||
+            texto.includes("ya voy hacer") ||
+            texto.includes("vou transferir")
+        ) {
+            const respuesta =
+                "Perfeito 👍\n\nQuando tiver o comprovante pode enviar por aqui e seguimos o processo.";
 
+            guardarCliente({
+                phone,
+                nombre: pushName
+            });
+
+            await enviarMensaje(phone, respuesta);
+            return respuesta;
+        }
+
+        // ==========================================
+        // DETECCIÓN DE INTENCIÓN: YA TRANSFERÍ / PAGADO (CORREGIDO SIN "PAGO")
+        // ==========================================
+        if (
+            texto.includes("ya transferi") ||
+            texto.includes("ya transferí") ||
+            texto.includes("ja transferi") ||
+            texto.includes("comprovante") ||
+            texto.includes("comprobante") ||
+            texto.includes("ja paguei") ||
+            texto.includes("já paguei") ||
+            texto.includes("paguei") ||
+            texto.includes("pagado") ||
+            texto.includes("pix feito") ||
+            texto.includes("pix realizado")
+        ) {
+            const respuesta =
+                "Perfeito 👍\n\nRecebemos sua mensagem. Assim que a transferência for confirmada enviaremos o comprovante.";
+
+            await enviarMensaje(phone, respuesta);
+            return respuesta;
+        }
+
+        // ==========================================
+        // ACTIVAR IA SOLO PARA MENSAJES COMERCIALES
+        // ==========================================
         const activarIA =
             gatilhos.some(
                 g =>
@@ -160,7 +210,7 @@ async function procesarMensaje(
                 : null;
 
         // ==========================================
-        // BRL → CUP
+        // BRL → CUP 
         // ==========================================
 
         if (
@@ -186,9 +236,12 @@ async function procesarMensaje(
                 });
 
                 const respuesta =
-`${saludoCliente}Hoy estamos trabajando a ${resultado.tasa} CUP por real 🇨🇺
+`${saludoCliente}💵 R$${valor} hoje rendem ${formatearNumero(resultado.cup)} CUP 🇨🇺
 
-Con ${valor} reales llegan ${formatearNumero(resultado.cup)} CUP 👍`;
+✅ Transferência rápida
+✅ Comprovante após envio${vipExtra}
+
+Deseja realizar o envio agora?`;
 
                 await enviarMensaje(
                     phone,
@@ -312,7 +365,7 @@ Con ${valor} USD prepago llegan ${formatearNumero(resultado.cup)} CUP 👍`;
             texto.includes("asesor")
         ) {
             const respuesta =
-"Yordanys ahora mismo está ocupado 👌\n\nApenas pueda entra al chat.";
+                "Yordanys ahora mismo está ocupado 👌\n\nApenas pueda entra al chat.";
 
             await enviarMensaje(
                 phone,
