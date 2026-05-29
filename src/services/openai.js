@@ -62,5 +62,3 @@ async function procesarMensaje(phone, text, pushName = "") {
             await enviarMensaje(phone, respuesta);
             return respuesta;
         }
-
-        // ... rest of the code (Gatilhos, BRL->CUP, USD, Fallback OpenAI) ...
