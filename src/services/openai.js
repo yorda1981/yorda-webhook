@@ -85,9 +85,7 @@ async function procesarMensaje(phone, text, pushName = "") {
         const numeroDetectado = texto.match(/\d+/);
         const valor = numeroDetectado ? Number(numeroDetectado[0]) : null;
 
-        // ---------------------------------------------------------
         // 6. ACTUALIZACIÓN POR MONTO SUELTO (Ej: Cliente escribe solo "300")
-        // ---------------------------------------------------------
         if (valor && !texto.includes("usd") && !texto.includes("cup") && cliente) {
             const resultado = calcularOperacion({ tipo: "brl_cup", valor });
             if (resultado) {
@@ -98,7 +96,7 @@ async function procesarMensaje(phone, text, pushName = "") {
             }
         }
 
-        // 7. CONSULTA DEL ÚLTIMO MONTO (Contexto por palabras: "¿Cuánto sería?")
+        // 7. CONSULTA DEL ÚLTIMO MONTO (Contexto por palabras)
         if (/seria cuanto cup|seria cuantos cup|cuanto cup|cuantos cup|cuanto recibe|cuanto seria|cuanto da/i.test(texto)) {
             if (cliente && cliente.ultimoMonto > 0) {
                 const resultado = calcularOperacion({ tipo: cliente.tipoFavorito || "brl_cup", valor: cliente.ultimoMonto });
@@ -137,5 +135,50 @@ async function procesarMensaje(phone, text, pushName = "") {
             }
         }
 
-        // ---------------------------------------------------------
-        // 10. REFU
+        // 10. REFUERZO DE ÚLTIMO MONTO (Mensajes sin número pero con "cup")
+        if (texto.includes("cup") && cliente && cliente.ultimoMonto > 0 && !valor) {
+            const resultado = calcularOperacion({ tipo: "brl_cup", valor: cliente.ultimoMonto });
+            const respuesta = `💵 R$${cliente.ultimoMonto} hoy serían ${formatearNumero(resultado.cup)} CUP 🇨🇺\n\n✅ Transferencia rápida\n✅ Comprobante después del envío\n\n¿Deseas realizar la operación ahora?`;
+            await enviarMensaje(phone, respuesta);
+            return respuesta;
+        }
+
+        // 11. CONSULTA GENERAL
+        if (/cambio|tasa|cotizacion/i.test(texto)) {
+            const respuesta = esEspanol
+                ? "Hoy estamos trabajando con muy buena tasa 👍\n\n¿Deseas calcular reales o USD?"
+                : "Hoje estamos trabalhando com uma taxa excelente 👍\n\nVocê deseja calcular reais ou USD?";
+            await enviarMensaje(phone, respuesta);
+            return respuesta;
+        }
+
+        // 12. OPENAI FALLBACK
+        const activarIA = gatilhos.some(g => texto.includes(normalizarTexto(g)));
+        if (!activarIA) return "";
+
+        console.log("⚠️ FALLBACK OPENAI:", texto);
+        const completion = await openai.chat.completions.create({
+            model: "gpt-4o-mini",
+            messages: [
+                { role: "system", content: "Eres YordaBot. Responde corto y profesional." },
+                { role: "user", content: text }
+            ],
+            temperature: 0.5,
+            max_tokens: 120
+        });
+
+        const respuestaIA = completion?.choices?.[0]?.message?.content?.trim();
+        if (respuestaIA) {
+            await enviarMensaje(phone, respuestaIA);
+            return respuestaIA;
+        }
+
+    } catch (error) {
+        console.error("❌ Error en procesarMensaje:", error.message);
+        return "";
+    }
+}
+
+module.exports = {
+    procesarMensaje
+};
