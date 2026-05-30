@@ -1,7 +1,6 @@
 const express = require("express");
 const fs = require("fs");
 const path = require("path");
-const rateLimit = require("express-rate-limit");
 
 require("dotenv").config();
 
@@ -21,28 +20,24 @@ const PORT = process.env.PORT || 8080;
 app.set("trust proxy", 1);
 
 // ==========================================
-// MEMORIA VOLÁTIL
+// CONFIGURACIÓN Y MEMORIA
 // ==========================================
 const buffers = new Map();
 const pendingMessages = new Map();
-const lastResponses = new Map();
 const pausasHumanas = new Map();
 const mapaNombresATelefono = new Map();
 const mensajesProcesados = new Set();
 
-const MINUTOS_PAUSA = 5; 
+const MINUTOS_PAUSA = 30; 
 
 // ==========================================
 // FUNCIONES DE CONTROL
 // ==========================================
 function activarPausaHumana(phone) {
     const finActual = pausasHumanas.get(phone);
-    if (finActual && finActual > Date.now()) {
-        console.log(`⏸️ Pausa ya activa para ${phone}. No se reinicia el tiempo.`);
-        return;
-    }
+    if (finActual && finActual > Date.now()) return;
     pausasHumanas.set(phone, Date.now() + (MINUTOS_PAUSA * 60 * 1000));
-    console.log(`⏸️ Pausa humana activada por ${MINUTOS_PAUSA} min para ${phone}`);
+    console.log(`⏸️ Pausa humana: ${MINUTOS_PAUSA} min para ${phone}`);
 }
 
 function enPausaHumana(phone) {
@@ -71,73 +66,98 @@ const verificarToken = (req, res, next) => {
 const TASAS_PATH = path.join(__dirname, "src", "config", "tasas.json");
 
 // ==========================================
-// WEBHOOK PRINCIPAL
+// WEBHOOK PRINCIPAL (VERSIÓN ROBUSTA)
 // ==========================================
 app.post("/webhook", async (req, res) => {
     res.status(200).send("OK");
     try {
         const body = req.body;
-        if (!body || body.type !== "ReceivedCallback") return;
+        if (!body) return;
 
-        const messageId = body.messageId || body.id || body.message?.id || body.zeId;
+        // 🔍 AUDITORÍA DE WEBHOOK
+        console.log("📥 WEBHOOK RECEIVED:", JSON.stringify({
+            type: body.type,
+            messageType: body.messageType,
+            text: body.text?.message || body.body || "No text",
+            hasImage: !!(body.image || body.type === "image" || body.messageType === "image"),
+            hasDoc: !!(body.document || body.type === "document" || body.messageType === "document")
+        }, null, 2));
+
+        // Validación de entrada flexibilizada (Acepta disparos directos de multimedia)
+        const tiposValidos = ["ReceivedCallback", "image", "document", "audio", "video"];
+        if (!tiposValidos.includes(body.type)) return;
+
+        // Evitar duplicados (messageId es el más fiable en Z-API)
+        const messageId = body.messageId || body.id || body.zeId;
         if (messageId && mensajesProcesados.has(messageId)) return;
-
         if (messageId) {
             mensajesProcesados.add(messageId);
             setTimeout(() => mensajesProcesados.delete(messageId), 300000); 
         }
 
-        const chatName = body.chatName;
         const phoneRaw = body.phone || body.from;
-        const textMessage = body.text?.message || body.body || body.message || "";
-        const pushName = body.senderName || body.sender?.pushName || "Cliente";
+        const chatName = body.chatName;
+        const pushName = body.senderName || "Cliente";
 
-        if (!body.fromMe && !body.isGroup && !body.isNewsletter && phoneRaw && chatName && !phoneRaw.includes("@lid")) {
-            if (!mapaNombresATelefono.has(chatName)) {
-                mapaNombresATelefono.set(chatName, phoneRaw);
-                console.log(`🔗 VÍNCULO CREADO: [${chatName}] -> ${phoneRaw}`);
-            }
-        }
+        // Filtro DDD 55 (Solo Brasil)
+        if (!phoneRaw || !phoneRaw.startsWith("55")) return;
 
+        // Registro de salida humana (Pausa)
         if ((body.fromMe === true || body.fromMe === "true") && body.fromApi !== true) {
+            if (!mapaNombresATelefono.has(chatName)) mapaNombresATelefono.set(chatName, phoneRaw);
             const phoneReal = mapaNombresATelefono.get(chatName);
             if (phoneReal) activarPausaHumana(phoneReal);
             return;
         }
 
-        if (body.fromMe === true || body.fromMe === "true") return;
-        if (body.isGroup === true || body.isNewsletter === true) return;
-        if (!phoneRaw || !textMessage || typeof textMessage !== "string") return;
+        if (body.fromMe === true || body.isGroup || body.isNewsletter) return;
+        if (enPausaHumana(phoneRaw)) return;
 
-        if (enPausaHumana(phoneRaw)) {
-            console.log(`⏸️ Bot silenciado por pausa humana: ${phoneRaw}`);
-            return;
+        // 🛠️ DETECCIÓN MULTIMEDIA ROBUSTA
+        const esMultimedia = 
+            body.messageType === "image" || 
+            body.messageType === "document" || 
+            body.type === "image" || 
+            body.type === "document" || 
+            body.image || 
+            body.document;
+
+        const textMessage = body.text?.message || body.body || body.caption || "";
+
+        if (esMultimedia) {
+            console.log(`📸 Multimedia (comprobante) de ${phoneRaw}. Caption: "${textMessage || 'comprobante'}"`);
+            try {
+                // Priorizamos el caption (subtítulo) para capturar montos escritos junto a la imagen
+                await openaiService.procesarMensaje(phoneRaw, textMessage || "comprobante", pushName);
+            } catch (e) {
+                console.error("❌ Error en multimedia:", e.message);
+            }
+            return; 
         }
 
+        if (!textMessage) return;
+
+        // BUFFER DE TEXTO (Espera 3.5s para agrupar mensajes)
         const mensajeAnterior = pendingMessages.get(phoneRaw) || "";
-        const mensajeAcumulado = mensajeAnterior ? mensajeAnterior + "\n" + textMessage : textMessage;
-        pendingMessages.set(phoneRaw, mensajeAcumulado);
+        pendingMessages.set(phoneRaw, mensajeAnterior ? mensajeAnterior + "\n" + textMessage : textMessage);
 
         if (buffers.has(phoneRaw)) clearTimeout(buffers.get(phoneRaw));
         const timer = setTimeout(async () => {
-            const mensajeParaEnviar = pendingMessages.get(phoneRaw);
-            if (!mensajeParaEnviar) return;
+            const msgFinal = pendingMessages.get(phoneRaw);
+            if (!msgFinal) return;
             try {
-                const respuesta = await openaiService.procesarMensaje(phoneRaw, mensajeParaEnviar, pushName);
-                if (respuesta) {
-                    lastResponses.set(phoneRaw, Date.now());
-                    pendingMessages.delete(phoneRaw);
-                }
+                await openaiService.procesarMensaje(phoneRaw, msgFinal, pushName);
+                pendingMessages.delete(phoneRaw);
             } catch (e) {
                 console.error(`❌ Error OpenAI:`, e.message);
             } finally {
                 buffers.delete(phoneRaw);
             }
-        }, 3000);
+        }, 3500); 
         buffers.set(phoneRaw, timer);
 
     } catch (e) {
-        console.error("❌ Error fatal en Webhook:", e);
+        console.error("❌ Error en Webhook:", e);
     }
 });
 
@@ -159,34 +179,22 @@ app.post("/admin/tasas", verificarToken, async (req, res) => {
 });
 
 app.get("/admin/clientes", verificarToken, (req, res) => {
-    try {
-        res.json(obtenerTodos());
-    } catch (e) { res.status(500).json({ error: e.message }); }
+    try { res.json(obtenerTodos()); } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.get("/admin/operaciones", verificarToken, (req, res) => {
-    try {
-        res.json(obtenerTodas());
-    } catch (e) {
-        res.status(500).json({ error: e.message });
-    }
+    try { res.json(obtenerTodas()); } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.get("/admin/stats", verificarToken, (req, res) => {
-    try {
-        res.json(obtenerEstadisticas());
-    } catch (e) {
-        res.status(500).json({ error: e.message });
-    }
+    try { res.json(obtenerEstadisticas()); } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post("/admin/confirmar-operacion/:id", verificarToken, (req, res) => {
     try {
         const ok = confirmarOperacion(req.params.id);
         res.json({ success: ok });
-    } catch (e) {
-        res.status(500).json({ success: false, error: e.message });
-    }
+    } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
 app.get("/dashboard", verificarToken, (req, res) => {
@@ -195,9 +203,6 @@ app.get("/dashboard", verificarToken, (req, res) => {
 
 app.get("/", (req, res) => res.send("YordaBot Online ✅"));
 
-// ==========================================
-// INICIO
-// ==========================================
 app.listen(PORT, "0.0.0.0", () => {
-    console.log(`🚀 YORDABOT UP EN PUERTO ${PORT}`);
+    console.log(`🚀 SERVIDOR BLINDADO EN PUERTO ${PORT}`);
 });
