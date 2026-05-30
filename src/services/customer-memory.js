@@ -1,7 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 
-console.log("🔥 customer-memory cargado (Versión Limpia)");
+console.log("🔥 customer-memory cargado (Versión Actualizada)");
 
 const DB_PATH = path.join(__dirname, "../data/customers.json");
 
@@ -50,7 +50,9 @@ function guardarCliente({
     monto = 0,
     tipo = "brl_cup",
     banco = "",
-    tarjeta = ""
+    tarjeta = "",
+    estado = null,
+    fechaEstado = null
 }) {
     try {
         if (!phone) return null;
@@ -62,6 +64,8 @@ function guardarCliente({
             bancoFavorito: "",
             tarjetaFrecuente: "",
             ultimaConsulta: null,
+            estado: null,
+            fechaEstado: null,
             vip: false, // Ahora el VIP se gestionará por operaciones reales
             createdAt: new Date().toISOString()
         };
@@ -76,6 +80,16 @@ function guardarCliente({
 
         actual.bancoFavorito = banco || actual.bancoFavorito;
         actual.tarjetaFrecuente = tarjeta || actual.tarjetaFrecuente;
+
+        // Actualización de estado (Paso 1)
+        if (estado !== null) {
+            actual.estado = estado;
+        }
+
+        if (fechaEstado !== null) {
+            actual.fechaEstado = fechaEstado;
+        }
+
         actual.ultimaConsulta = new Date().toISOString();
         actual.updatedAt = new Date().toISOString();
 
