@@ -11,11 +11,10 @@ const openai = new OpenAI({
 });
 
 // ==========================================
-// GATILHOS (Solo para soporte humano)
+// CONFIGURACIONES DE SEGURIDAD (9.5/10)
 // ==========================================
-const gatilhos = [
-    "yordanys", "asesor", "humano", "ayuda", "informacion", "contacto"
-];
+const DOS_HORAS = 2 * 60 * 60 * 1000;
+const gatilhos = ["yordanys", "asesor", "humano", "ayuda", "informacion", "contacto"];
 
 function normalizarTexto(texto) {
     return String(texto || "")
@@ -39,7 +38,7 @@ async function procesarMensaje(phone, text, pushName = "") {
         // 2. MEMORIA DE CLIENTE
         const cliente = obtenerCliente(phone);
 
-        // 3. ATENCIÓN HUMANA / CASOS ESPECIALES (Arbitraje, CUP o MLC)
+        // 3. ATENCIÓN HUMANA / CASOS ESPECIALES
         if (
             /yordanys|humano|asesor|tengo cup|dinero en cuba|enviar para brasil|traer para brasil|vender cup|cup por reales/i.test(texto) ||
             ((texto.includes("usd") || texto.includes("dolar") || texto.includes("dolares")) && (texto.includes("real") || texto.includes("brl") || texto.includes("brasil"))) ||
@@ -53,21 +52,65 @@ async function procesarMensaje(phone, text, pushName = "") {
             return respuesta;
         }
 
-        // 4. LÓGICA DE ENVÍO DE PIX
+        // ---------------------------------------------------------
+        // 4. LÓGICA DE ENVÍO DE PIX (Paso 2: Cotización -> PIX)
+        // ---------------------------------------------------------
         if (/pix|envia el pix|envía el pix|pasame el pix|pásame el pix|quiero hacerlo|voy a pagar/i.test(texto)) {
+            
+            // Verificación A: ¿Tiene un monto cotizado?
+            if (!cliente || !cliente.ultimoMonto || cliente.ultimoMonto <= 0) {
+                const msg = esEspanol
+                    ? "Primero indícame el monto que deseas enviar para darte la cotización exacta. 😊"
+                    : "Primeiro informe o valor que deseja enviar para eu te passar a cotação exata. 😊";
+                await enviarMensaje(phone, msg);
+                return msg;
+            }
+
+            // Verificación B: ¿La cotización es reciente? (Evita usar tasas de hace días)
+            const ahora = Date.now();
+            const fechaRef = cliente.fechaEstado || cliente.updatedAt;
+            if (ahora - new Date(fechaRef).getTime() > DOS_HORAS) {
+                const msgVencido = esEspanol
+                    ? "La cotización anterior ha vencido. Por favor, dime nuevamente el monto para actualizar la tasa. 📈"
+                    : "A cotação anterior expirou. Por favor, informe novamente o valor para atualizar a taxa. 📈";
+                await enviarMensaje(phone, msgVencido);
+                return msgVencido;
+            }
+
             const llavePix = "8becaaf5-f296-4cbc-a115-46e3d23b042a";
+
+            // Activamos el estado crítico de espera de pago
+            guardarCliente({
+                phone,
+                estado: "aguardando_comprovante",
+                fechaEstado: new Date().toISOString()
+            });
+
             await enviarMensaje(phone, llavePix);
             return llavePix;
         }
 
         // ---------------------------------------------------------
-        // 5. INTENCIÓN: COMPROBANTES (Con protección anti-duplicados)
+        // 5. INTENCIÓN: COMPROBANTES (Paso 3: Seguridad Total)
         // ---------------------------------------------------------
         if (/paguei|pague|comprovante|comprobante|feito|realizado|ya envie|ya mande/i.test(texto)) {
             
-            if (cliente && cliente.ultimoMonto > 0) {
+            // FILTRO 1: ¿El cliente realmente está en el flujo de pago?
+            if (!cliente || cliente.estado !== "aguardando_comprovante") {
+                console.log(`⚠️ Comprobante ignorado de ${phone}: no estaba aguardando comprobante.`);
+                return ""; 
+            }
+
+            // FILTRO 2: ¿El PIX se envió hace más de 2 horas? (Vencimiento de sesión)
+            const ahora = Date.now();
+            if (ahora - new Date(cliente.fechaEstado).getTime() > DOS_HORAS) {
+                console.log(`⏰ Sesión de pago vencida para ${phone}. Resetando estado.`);
+                guardarCliente({ phone, estado: null, fechaEstado: null });
+                return ""; 
+            }
+
+            if (cliente.ultimoMonto > 0) {
                 const operaciones = obtenerTodas();
-                // Verificamos si ya existe una operación pendiente idéntica
                 const yaExistePendiente = operaciones.find(op => 
                     op.phone === phone && 
                     op.status === "pendiente" &&
@@ -77,9 +120,16 @@ async function procesarMensaje(phone, text, pushName = "") {
                 if (!yaExistePendiente) {
                     agregarOperacion({
                         phone: phone,
-                        nombre: pushName || cliente.nombre,
+                        nombre: pushName || cliente.nombre || "Cliente",
                         monto: cliente.ultimoMonto,
                         tipo: cliente.tipoFavorito
+                    });
+
+                    // Limpiamos el estado para cerrar el ciclo de seguridad
+                    guardarCliente({
+                        phone,
+                        estado: "comprovante_recibido",
+                        fechaEstado: new Date().toISOString()
                     });
                 }
             }
@@ -104,7 +154,14 @@ async function procesarMensaje(phone, text, pushName = "") {
             
             const resultado = calcularOperacion({ tipo: tipoUsd, valor });
             if (resultado) {
-                guardarCliente({ phone, nombre: pushName, monto: valor, tipo: tipoUsd });
+                guardarCliente({ 
+                    phone, 
+                    nombre: pushName, 
+                    monto: valor, 
+                    tipo: tipoUsd,
+                    estado: "cotizacion_realizada",
+                    fechaEstado: new Date().toISOString()
+                });
                 const respuesta = `💵 ${valor} USD (${nombreTarjeta}) hoy rinden ${formatearNumero(resultado.cup)} CUP 🇨🇺\n\n¿Deseas continuar?`;
                 await enviarMensaje(phone, respuesta);
                 return respuesta;
@@ -112,7 +169,7 @@ async function procesarMensaje(phone, text, pushName = "") {
         }
 
         // ---------------------------------------------------------
-        // 7. CÁLCULO BRL -> CUP (Candados de exclusión totales)
+        // 7. CÁLCULO BRL -> CUP
         // ---------------------------------------------------------
         if (
             valor && 
@@ -121,7 +178,14 @@ async function procesarMensaje(phone, text, pushName = "") {
         ) {
             const resultado = calcularOperacion({ tipo: "brl_cup", valor });
             if (resultado) {
-                guardarCliente({ phone, nombre: pushName, monto: valor, tipo: "brl_cup" });
+                guardarCliente({ 
+                    phone, 
+                    nombre: pushName, 
+                    monto: valor, 
+                    tipo: "brl_cup",
+                    estado: "cotizacion_realizada",
+                    fechaEstado: new Date().toISOString()
+                });
                 const respuesta = `💵 R$${valor} hoy serían ${formatearNumero(resultado.cup)} CUP 🇨🇺\n\n¿Deseas realizar la operación ahora?`;
                 await enviarMensaje(phone, respuesta);
                 return respuesta;
@@ -129,12 +193,9 @@ async function procesarMensaje(phone, text, pushName = "") {
         }
 
         // 8. BLOQUEO PREVENTIVO
-        if (valor) {
-            console.log("⚠️ Monto no reconocido, silencio preventivo:", texto);
-            return ""; 
-        }
+        if (valor) return ""; 
 
-        // 9. OPENAI FALLBACK (Solo soporte)
+        // 9. OPENAI FALLBACK (Soporte)
         const activarIA = gatilhos.some(g => texto.includes(normalizarTexto(g)));
         if (!activarIA) return "";
 
