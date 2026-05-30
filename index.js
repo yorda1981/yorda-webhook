@@ -75,7 +75,7 @@ const verificarToken = (req, res, next) => {
 };
 
 // ==========================================
-// WEBHOOK PRINCIPAL (CORREGIDO)
+// WEBHOOK PRINCIPAL (LOG COMPLETO DE BODY)
 // ==========================================
 app.post("/webhook", webhookLimiter, async (req, res) => {
     res.status(200).send("OK");
@@ -89,12 +89,11 @@ app.post("/webhook", webhookLimiter, async (req, res) => {
         const pushName = body.senderName || body.sender?.pushName || "Cliente";
 
         // 👨‍💼 FILTRO DE INTERVENCIÓN HUMANA
-        // Solo activa la pausa si el mensaje es de la cuenta (fromMe) 
-        // Y NO fue enviado por la API (fromApi !== true)
+        // Cambiado para imprimir el BODY completo y no ocultar campos
         if ((body.fromMe === true || body.fromMe === "true") && body.fromApi !== true) {
             console.log(
-                "👨‍💼 INTERVENCIÓN HUMANA DETECTADA:",
-                JSON.stringify({ phone, textMessage }, null, 2)
+                "👨‍💼 INTERVENCIÓN HUMANA DETECTADA (BODY COMPLETO):",
+                JSON.stringify(body, null, 2)
             );
 
             if (phone) {
@@ -103,13 +102,13 @@ app.post("/webhook", webhookLimiter, async (req, res) => {
             return;
         }
 
-        // Ignorar si el mensaje es de la cuenta pero viene de la API (es el bot respondiendo)
+        // Ignorar si el mensaje es de la cuenta pero viene de la API
         if (body.fromMe === true || body.fromMe === "true") return;
 
         if (body.isGroup === true || body.isNewsletter === true) return;
         if (!phone || !textMessage || typeof textMessage !== "string") return;
 
-        // Verificar si la conversación está en pausa para el bot
+        // Verificar pausa
         if (enPausaHumana(phone)) {
             console.log(`⏸️ Conversa ignorada (Pausa Humana Activa): ${phone}`);
             return;
@@ -160,7 +159,7 @@ app.post("/webhook", webhookLimiter, async (req, res) => {
 });
 
 // ==========================================
-// ROTAS ADMIN
+// RESTO DE RUTAS (ADMIN, DASHBOARD, ETC)
 // ==========================================
 app.get("/admin/tasas", adminLimiter, verificarToken, (req, res) => {
     try {
