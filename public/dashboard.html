@@ -12,24 +12,35 @@
         .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }
         .status-badge { background: #1a2733; color: var(--green); padding: 8px 20px; border-radius: 30px; font-size: 13px; font-weight: 700; border: 1px solid #2d355a; }
         
+        /* Stats */
         .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 40px; }
         .stat-card { background: var(--card); padding: 25px; border-radius: 16px; border: 1px solid #2d355a; }
         .stat-card span { font-size: 12px; color: #8b949e; text-transform: uppercase; font-weight: 700; letter-spacing: 1px; }
         .stat-card h2 { margin: 10px 0 0; color: var(--accent); font-size: 28px; }
 
+        /* Sections */
         .config-section { background: var(--card); padding: 30px; border-radius: 20px; border: 1px solid #2d355a; margin-bottom: 30px; }
+        h3 { margin-top: 0; margin-bottom: 20px; display: flex; align-items: center; gap: 10px; }
+
+        /* Tables */
         .table-wrapper { overflow-x: auto; }
-        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        table { width: 100%; border-collapse: collapse; }
         th { text-align: left; padding: 12px; color: #8b949e; font-size: 12px; border-bottom: 2px solid #2d355a; text-transform: uppercase; }
         td { padding: 12px; border-bottom: 1px solid #2d355a; font-size: 14px; }
 
+        /* Actions */
         .btn-confirm { background: var(--green); color: #0b0e1a; border: none; padding: 8px 15px; border-radius: 8px; font-weight: bold; cursor: pointer; transition: 0.2s; }
         .btn-confirm:hover { transform: scale(1.05); }
         
-        .grid-inputs { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; }
-        .input-group { display: flex; flex-direction: column; gap: 5px; }
-        input { background: #0b0e1a; border: 1px solid #2d355a; padding: 12px; border-radius: 10px; color: white; outline: none; }
-        .btn-save { background: var(--accent); color: white; border: none; padding: 15px; border-radius: 12px; width: 100%; cursor: pointer; font-weight: 800; margin-top: 20px; }
+        /* Inputs & Tasas */
+        .grid-inputs { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 20px; }
+        .input-group { display: flex; flex-direction: column; gap: 8px; }
+        label { font-size: 13px; color: #94a3b8; font-weight: 600; }
+        input { background: #0b0e1a; border: 1px solid #2d355a; padding: 14px; border-radius: 12px; color: white; font-size: 16px; outline: none; transition: 0.3s; }
+        input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(124, 77, 255, 0.2); }
+        
+        .btn-save { background: var(--accent); color: white; border: none; padding: 18px; border-radius: 15px; width: 100%; cursor: pointer; font-weight: 800; font-size: 16px; margin-top: 30px; transition: 0.3s; }
+        .btn-save:hover { opacity: 0.9; transform: translateY(-2px); }
     </style>
 </head>
 <body>
@@ -41,10 +52,193 @@
 
         <div class="stats-grid">
             <div class="stat-card"><span>Clientes</span><h2 id="stat-clientes">0</h2></div>
-            <div class="stat-card"><span>Operações Conf.</span><h2 id="stat-ops">0</h2></div>
+            <div class="stat-card"><span>Ops. Confirmadas</span><h2 id="stat-ops">0</h2></div>
             <div class="stat-card"><span>Volumen Total</span><h2 id="stat-vol">R$ 0</h2></div>
-            <div class="stat-card"><span>Pendentes</span><h2 id="stat-pend" style="color: var(--yellow);">0</h2></div>
+            <div class="stat-card"><span>Pendientes</span><h2 id="stat-pend" style="color: var(--yellow);">0</h2></div>
         </div>
 
-        <div class="config-section" style="border-color: var(--yellow);">
-            <h3 style="margin-top: 0; color: var(--yellow);">⏳ Operações Pendentes (Ver
+        <div class="config-section" style="border-left: 5px solid var(--yellow);">
+            <h3 style="color: var(--yellow);">⏳ Operaciones Pendientes</h3>
+            <div class="table-wrapper">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Fecha</th>
+                            <th>Cliente</th>
+                            <th>Monto</th>
+                            <th>Tipo</th>
+                            <th>Acción</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tablaPendientes">
+                        <tr><td colspan="5" style="text-align:center; padding:20px; color:#8b949e;">Buscando nuevos pagos...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="config-section">
+            <h3>🏆 Ranking de Clientes (Confirmados)</h3>
+            <div class="table-wrapper">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Nombre</th>
+                            <th>Teléfono</th>
+                            <th>Total Real</th>
+                            <th>Frecuencia</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="clientesTable">
+                        <tr><td colspan="5" style="text-align:center; padding:20px; color:#8b949e;">Cargando historial...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="config-section" id="seccionTasas">
+            <h3>💱 Configuración de Tasas</h3>
+            <div class="grid-inputs" id="tasasForm">
+                <div class="input-group">
+                    <label>Menos de 100 BRL</label>
+                    <input type="number" id="brl_0" placeholder="Ej: 45">
+                </div>
+                <div class="input-group">
+                    <label>100 - 499 BRL</label>
+                    <input type="number" id="brl_100" placeholder="Ej: 50">
+                </div>
+                <div class="input-group">
+                    <label>500 - 999 BRL</label>
+                    <input type="number" id="brl_500" placeholder="Ej: 55">
+                </div>
+                <div class="input-group">
+                    <label>1000+ BRL</label>
+                    <input type="number" id="brl_1000" placeholder="Ej: 60">
+                </div>
+                <div class="input-group">
+                    <label>USD Clásica (Tasa)</label>
+                    <input type="number" step="0.01" id="usd1" placeholder="Ej: 320.50">
+                </div>
+                <div class="input-group">
+                    <label>USD Prepago (Tasa)</label>
+                    <input type="number" step="0.01" id="usd2" placeholder="Ej: 315.00">
+                </div>
+            </div>
+            <button class="btn-save" onclick="guardarTasas()">Guardar Cambios de Tasas</button>
+        </div>
+    </div>
+
+    <script>
+        const token = new URLSearchParams(window.location.search).get("token");
+
+        async function refreshData() {
+            if (!token) return alert("Error: Token de acceso no válido.");
+            
+            try {
+                // Fetch de todas las fuentes
+                const [resTasas, resClientes, resStats, resOps] = await Promise.all([
+                    fetch(`/admin/tasas?token=${token}`),
+                    fetch(`/admin/clientes?token=${token}`),
+                    fetch(`/admin/stats?token=${token}`),
+                    fetch(`/admin/operaciones?token=${token}`)
+                ]);
+
+                const tasas = await resTasas.json();
+                const clientes = await resClientes.json();
+                const stats = await resStats.json();
+                const operaciones = await resOps.json();
+
+                // 1. Llenar Tasas
+                Object.keys(tasas).forEach(key => {
+                    const input = document.getElementById(key);
+                    if(input) input.value = tasas[key];
+                });
+
+                // 2. Cards Superiores
+                const listaClientes = Array.isArray(clientes) ? clientes : Object.values(clientes);
+                document.getElementById("stat-clientes").innerText = listaClientes.length;
+                document.getElementById("stat-ops").innerText = stats.totalOperaciones || 0;
+                document.getElementById("stat-vol").innerText = Number(stats.volumenTotal || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+                document.getElementById("stat-pend").innerText = stats.pendientes || 0;
+
+                // 3. Tabla de Pendientes
+                const tablaPendientes = document.getElementById("tablaPendientes");
+                const pendientes = operaciones.filter(o => o.status === "pendiente");
+                tablaPendientes.innerHTML = "";
+                
+                if(pendientes.length === 0) {
+                    tablaPendientes.innerHTML = '<tr><td colspan="5" style="text-align:center; color:#8b949e;">Todo al día. No hay pagos pendientes.</td></tr>';
+                } else {
+                    pendientes.forEach(op => {
+                        tablaPendientes.innerHTML += `
+                            <tr>
+                                <td>${new Date(op.id).toLocaleTimeString()}</td>
+                                <td><strong>${op.nombre}</strong></td>
+                                <td style="color:var(--yellow); font-weight:700;">R$ ${op.monto}</td>
+                                <td><small>${op.tipo}</small></td>
+                                <td><button class="btn-confirm" onclick="confirmar('${op.id}')">VERIFICADO</button></td>
+                            </tr>
+                        `;
+                    });
+                }
+
+                // 4. Ranking de Clientes
+                const tbodyCli = document.getElementById("clientesTable");
+                tbodyCli.innerHTML = "";
+                const confirmadas = operaciones.filter(o => o.status === "confirmada");
+
+                const ranking = listaClientes.map(c => {
+                    const totalConfirmado = confirmadas
+                        .filter(o => o.phone === c.phone)
+                        .reduce((acc, o) => acc + Number(o.monto), 0);
+                    return { ...c, totalReal: totalConfirmado };
+                }).sort((a,b) => b.totalReal - a.totalReal);
+
+                ranking.forEach(c => {
+                    tbodyCli.innerHTML += `
+                        <tr>
+                            <td>${c.nombre || "Desconocido"} ${c.totalReal >= 1000 ? '⭐' : ''}</td>
+                            <td style="color:#8b949e;">${c.phone ? c.phone.split('@')[0] : "-"}</td>
+                            <td style="color:var(--green); font-weight:bold;">R$ ${c.totalReal.toLocaleString('pt-BR')}</td>
+                            <td>${c.tipoFavorito || "-"}</td>
+                            <td>${c.totalReal >= 1000 ? '<b style="color:var(--green)">VIP</b>' : 'Estándar'}</td>
+                        </tr>
+                    `;
+                });
+
+            } catch (e) {
+                console.error("Error en carga de datos:", e);
+            }
+        }
+
+        async function confirmar(id) {
+            if(!confirm("¿Has verificado este pago en tu cuenta bancaria?")) return;
+            const res = await fetch(`/admin/confirmar-operacion/${id}?token=${token}`, { method: 'POST' });
+            const data = await res.json();
+            if(data.success) refreshData();
+        }
+
+        async function guardarTasas() {
+            const btn = document.querySelector(".btn-save");
+            btn.innerText = "Guardando...";
+            const data = {};
+            document.querySelectorAll('#tasasForm input').forEach(i => data[i.id] = Number(i.value));
+            
+            try {
+                await fetch(`/admin/tasas?token=${token}`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(data)
+                });
+                alert("✅ Tasas actualizadas globalmente.");
+                refreshData();
+            } catch (e) { alert("Error al guardar."); }
+            finally { btn.innerText = "Guardar Cambios de Tasas"; }
+        }
+
+        refreshData();
+        setInterval(refreshData, 30000); // Auto-update cada 30 segundos
+    </script>
+</body>
+</html>
