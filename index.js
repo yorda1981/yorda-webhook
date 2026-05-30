@@ -28,9 +28,17 @@ const mensajesProcesados = new Set();
 const MINUTOS_PAUSA = 5; 
 
 // ==========================================
-// FUNCIONES DE CONTROL
+// FUNCIONES DE CONTROL (OPTIMIZADA)
 // ==========================================
 function activarPausaHumana(phone) {
+    const finActual = pausasHumanas.get(phone);
+
+    // Si ya existe una pausa y aún no ha expirado, no la sobrescribimos
+    if (finActual && finActual > Date.now()) {
+        console.log(`⏸️ Pausa ya activa para ${phone}. No se reinicia el tiempo.`);
+        return;
+    }
+
     pausasHumanas.set(phone, Date.now() + (MINUTOS_PAUSA * 60 * 1000));
     console.log(`⏸️ Pausa humana activada por ${MINUTOS_PAUSA} min para ${phone}`);
 }
@@ -38,6 +46,7 @@ function activarPausaHumana(phone) {
 function enPausaHumana(phone) {
     const fin = pausasHumanas.get(phone);
     if (!fin) return false;
+    
     if (Date.now() > fin) {
         pausasHumanas.delete(phone);
         return false;
@@ -61,7 +70,7 @@ const verificarToken = (req, res, next) => {
 const TASAS_PATH = path.join(__dirname, "src", "config", "tasas.json");
 
 // ==========================================
-// WEBHOOK PRINCIPAL (LÓGICA BLINDADA)
+// WEBHOOK PRINCIPAL
 // ==========================================
 app.post("/webhook", async (req, res) => {
     res.status(200).send("OK");
@@ -70,24 +79,15 @@ app.post("/webhook", async (req, res) => {
         const body = req.body;
         if (!body || body.type !== "ReceivedCallback") return;
 
-        // 🔍 1. CAPTURA Y AUDITORÍA DE IDs (Anti-duplicados)
+        // 🔍 1. CAPTURA DE IDs (Anti-duplicados)
         const messageId = body.messageId || body.id || body.message?.id || body.zeId;
         
-        console.log("🔍 DEBUG IDs:", { 
-            messageId, 
-            rawId: body.id, 
-            zeId: body.zeId,
-            msgIdInternal: body.message?.id 
-        });
-
         if (messageId && mensajesProcesados.has(messageId)) {
-            console.log(`🚫 Duplicado bloqueado: ${messageId}`);
-            return;
+            return; // Silencio para duplicados
         }
 
         if (messageId) {
             mensajesProcesados.add(messageId);
-            // Retención de 5 minutos contra reintentos de red
             setTimeout(() => mensajesProcesados.delete(messageId), 300000); 
         }
 
@@ -97,7 +97,6 @@ app.post("/webhook", async (req, res) => {
         const pushName = body.senderName || body.sender?.pushName || "Cliente";
 
         // 2. VÍNCULO DE IDENTIDAD (ChatName -> Phone)
-        // Solo para mensajes entrantes de clientes reales (no grupos/lid)
         if (
             !body.fromMe && 
             !body.isGroup && 
@@ -112,15 +111,10 @@ app.post("/webhook", async (req, res) => {
             }
         }
 
-        // 3. DETECTAR INTERVENCIÓN HUMANA (Manual desde App/Web)
+        // 3. DETECTAR INTERVENCIÓN HUMANA
         if ((body.fromMe === true || body.fromMe === "true") && body.fromApi !== true) {
             const phoneReal = mapaNombresATelefono.get(chatName);
             
-            console.log("👨‍💼 INTERVENCIÓN MANUAL:", JSON.stringify({
-                chatName,
-                phoneReal: phoneReal || "Sin vínculo previo"
-            }, null, 2));
-
             if (phoneReal) {
                 activarPausaHumana(phoneReal);
             }
