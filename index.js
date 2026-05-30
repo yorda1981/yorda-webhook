@@ -25,15 +25,18 @@ app.set("trust proxy", 1);
 const buffers = new Map();
 const pendingMessages = new Map();
 const lastResponses = new Map();
-const pausasHumanas = new Map(); // Nueva memoria para pausas
+const pausasHumanas = new Map();
+
+// Configuración de tiempo de pausa (Fácil de cambiar)
+const MINUTOS_PAUSA = 5; 
 
 // ==========================================
 // FUNCIONES DE PAUSA HUMANA
 // ==========================================
 function activarPausaHumana(phone) {
-    // Activa una pausa de 30 minutos
-    pausasHumanas.set(phone, Date.now() + (30 * 60 * 1000));
-    console.log(`⏸️ Pausa humana activada para ${phone}`);
+    // Activa una pausa de 5 minutos desde el momento actual
+    pausasHumanas.set(phone, Date.now() + (MINUTOS_PAUSA * 60 * 1000));
+    console.log(`⏸️ Pausa humana activada por ${MINUTOS_PAUSA} min para ${phone}`);
 }
 
 function enPausaHumana(phone) {
@@ -102,7 +105,7 @@ app.post("/webhook", webhookLimiter, async (req, res) => {
         const textMessage = body.text?.message || body.body || body.message || "";
         const pushName = body.senderName || body.sender?.pushName || "Cliente";
 
-        // 1. DETECTAR INTERVENCIÓN MANUAL (fromMe)
+        // 1. DETECTAR INTERVENCIÓN MANUAL (Tú escribes)
         if (body.fromMe === true || body.fromMe === "true") {
             if (phone) {
                 activarPausaHumana(phone);
@@ -113,7 +116,7 @@ app.post("/webhook", webhookLimiter, async (req, res) => {
         if (body.isGroup === true || body.isNewsletter === true) return;
         if (!phone || !textMessage || typeof textMessage !== "string") return;
 
-        // 2. VERIFICAR SI ESTÁ EN PAUSA HUMANA
+        // 2. VERIFICAR SI ESTÁ EN PAUSA HUMANA (El bot guarda silencio)
         if (enPausaHumana(phone)) {
             console.log(`⏸️ Conversa em pausa humana: ${phone}`);
             return;
@@ -126,9 +129,8 @@ app.post("/webhook", webhookLimiter, async (req, res) => {
             : textMessage;
 
         pendingMessages.set(phone, mensajeAcumulado);
-        console.log(`📩 Buffer acumulado (${phone}):\n${mensajeAcumulado}`);
 
-        // 4. GESTIÓN DEL TIMER (3 SEGUNDOS)
+        // 4. GESTIÓN DEL TIMER (3 SEGUNDOS PARA RESPONDER)
         if (buffers.has(phone)) {
             clearTimeout(buffers.get(phone));
         }
@@ -140,12 +142,10 @@ app.post("/webhook", webhookLimiter, async (req, res) => {
             // 5. COOLDOWN DE RESPUESTA
             const ultimaRespuesta = lastResponses.get(phone);
             if (ultimaRespuesta && Date.now() - ultimaRespuesta < 3000) {
-                console.log("⏳ Cooldown activo.");
                 return;
             }
 
             try {
-                console.log(`🧠 IA procesando para ${phone}...`);
                 const respuesta = await openaiService.procesarMensaje(
                     phone,
                     mensajeParaEnviar,
@@ -155,7 +155,6 @@ app.post("/webhook", webhookLimiter, async (req, res) => {
                 if (respuesta) {
                     lastResponses.set(phone, Date.now());
                     pendingMessages.delete(phone);
-                    console.log(`✅ Ciclo concluído para ${phone}`);
                 }
 
             } catch (e) {
@@ -176,7 +175,6 @@ app.post("/webhook", webhookLimiter, async (req, res) => {
 // ROTAS ADMIN & DASHBOARD
 // ==========================================
 
-// Obtener Tasas
 app.get("/admin/tasas", adminLimiter, verificarToken, (req, res) => {
     try {
         if (!fs.existsSync(TASAS_PATH)) return res.json({});
@@ -184,7 +182,6 @@ app.get("/admin/tasas", adminLimiter, verificarToken, (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Guardar Tasas
 app.post("/admin/tasas", adminLimiter, verificarToken, async (req, res) => {
     try {
         await fs.promises.writeFile(TASAS_PATH, JSON.stringify(req.body, null, 2));
@@ -192,27 +189,12 @@ app.post("/admin/tasas", adminLimiter, verificarToken, async (req, res) => {
     } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
-// Stats para Dashboard
-app.get("/admin/stats", adminLimiter, verificarToken, (req, res) => {
-    try {
-        const clientes = obtenerTodos();
-        res.json({
-            clientes: clientes.length,
-            vip: clientes.filter(c => c.vip).length,
-            operaciones: clientes.reduce((acc, c) => acc + (c.totalOperaciones || 0), 0),
-            total: clientes.reduce((acc, c) => acc + (c.totalEnviado || 0), 0)
-        });
-    } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Lista de Clientes
 app.get("/admin/clientes", adminLimiter, verificarToken, (req, res) => {
     try {
         res.json(obtenerTodos());
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Ruta del Dashboard
 app.get("/dashboard", adminLimiter, verificarToken, (req, res) => {
     res.sendFile(path.join(__dirname, "public", "dashboard.html"));
 });
