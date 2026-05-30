@@ -1,12 +1,8 @@
 {
-  "brl_cup": {
-    "faixas": [
-      { "min": 0, "max": 99, "tasa": 120 },
-      { "min": 100, "max": 499, "tasa": 125 },
-      { "min": 500, "max": 999, "tasa": 130 },
-      { "min": 1000, "max": 999999, "tasa": 135 }
-    ]
-  },
-  "usd_clasica": { "tasa": 300 },
-  "usd_prepago": { "tasa": 310 }
+  "brl_0": 120,
+  "brl_100": 125,
+  "brl_500": 130,
+  "brl_1000": 135,
+  "usd1": 300,
+  "usd2": 310
 }
