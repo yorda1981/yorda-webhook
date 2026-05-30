@@ -1,6 +1,48 @@
+const fs = require("fs");
+const path = require("path");
+
+const TASAS_PATH = path.join(
+    __dirname,
+    "../config/tasas.json"
+);
+
+function leerTasas() {
+    try {
+
+        if (!fs.existsSync(TASAS_PATH)) {
+            console.error("❌ tasas.json no encontrado");
+            return null;
+        }
+
+        const raw = fs.readFileSync(
+            TASAS_PATH,
+            "utf8"
+        );
+
+        const data = JSON.parse(raw);
+
+        console.log(
+            "📊 TASAS CARGADAS:",
+            JSON.stringify(data, null, 2)
+        );
+
+        return data;
+
+    } catch (e) {
+
+        console.error(
+            "❌ Error leyendo tasas.json:",
+            e.message
+        );
+
+        return null;
+    }
+}
+
 function calcularOperacion({ tipo, valor }) {
 
     const tasas = leerTasas();
+
     if (!tasas) return null;
 
     const monto = Number(valor);
@@ -27,6 +69,7 @@ function calcularOperacion({ tipo, valor }) {
     }
 
     if (tipo === "usd_clasica") {
+
         return {
             valor: monto,
             tasa: Number(tasas.usd1),
@@ -35,6 +78,7 @@ function calcularOperacion({ tipo, valor }) {
     }
 
     if (tipo === "usd_prepago") {
+
         return {
             valor: monto,
             tasa: Number(tasas.usd2),
