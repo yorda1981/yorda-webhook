@@ -19,22 +19,17 @@ const app = express();
 const PORT = process.env.PORT || 8080;
 app.set("trust proxy", 1);
 
-// ==========================================
-// MEMÓRIA TEMPORÁRIA (BUFFER, COOLDOWN & PAUSA)
-// ==========================================
 const buffers = new Map();
 const pendingMessages = new Map();
 const lastResponses = new Map();
 const pausasHumanas = new Map();
 
-// Configuración de tiempo de pausa (Fácil de cambiar)
 const MINUTOS_PAUSA = 5; 
 
 // ==========================================
 // FUNCIONES DE PAUSA HUMANA
 // ==========================================
 function activarPausaHumana(phone) {
-    // Activa una pausa de 5 minutos desde el momento actual
     pausasHumanas.set(phone, Date.now() + (MINUTOS_PAUSA * 60 * 1000));
     console.log(`⏸️ Pausa humana activada por ${MINUTOS_PAUSA} min para ${phone}`);
 }
@@ -56,9 +51,6 @@ function enPausaHumana(phone) {
 app.use(express.json({ limit: "10mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
-// ==========================================
-// RATE LIMITERS (Segurança)
-// ==========================================
 const webhookLimiter = rateLimit({
     windowMs: 60 * 1000,
     max: 300,
@@ -71,20 +63,11 @@ const adminLimiter = rateLimit({
     message: "Acesso restrito"
 });
 
-// ==========================================
-// CAMINHOS & PROTEÇÃO
-// ==========================================
 const TASAS_PATH = path.join(__dirname, "src", "config", "tasas.json");
 
 const verificarToken = (req, res, next) => {
     const token = req.headers["x-admin-token"] || req.query.token;
     const secret = process.env.ADMIN_TOKEN?.trim();
-
-    if (!secret) {
-        console.error("❌ ADMIN_TOKEN não definido no ENV");
-        return res.status(500).send("<h1>Erro de configuração</h1>");
-    }
-
     if (!token || token.trim() !== secret) {
         return res.status(401).json({ error: "Não autorizado" });
     }
@@ -92,7 +75,7 @@ const verificarToken = (req, res, next) => {
 };
 
 // ==========================================
-// WEBHOOK PRINCIPAL (LÓGICA RESILIENTE)
+// WEBHOOK PRINCIPAL (CON LOG DE AUDITORÍA)
 // ==========================================
 app.post("/webhook", webhookLimiter, async (req, res) => {
     res.status(200).send("OK");
@@ -105,8 +88,13 @@ app.post("/webhook", webhookLimiter, async (req, res) => {
         const textMessage = body.text?.message || body.body || body.message || "";
         const pushName = body.senderName || body.sender?.pushName || "Cliente";
 
-        // 1. DETECTAR INTERVENCIÓN MANUAL (Tú escribes)
+        // 🚨 BLOQUE DE AUDITORÍA PARA DEPURAR EL AUTO-BLOQUEO
         if (body.fromMe === true || body.fromMe === "true") {
+            console.log(
+                "🚨 MENSAJE PROPIO DETECTADO:",
+                JSON.stringify(body, null, 2)
+            );
+
             if (phone) {
                 activarPausaHumana(phone);
             }
@@ -116,13 +104,12 @@ app.post("/webhook", webhookLimiter, async (req, res) => {
         if (body.isGroup === true || body.isNewsletter === true) return;
         if (!phone || !textMessage || typeof textMessage !== "string") return;
 
-        // 2. VERIFICAR SI ESTÁ EN PAUSA HUMANA (El bot guarda silencio)
         if (enPausaHumana(phone)) {
             console.log(`⏸️ Conversa em pausa humana: ${phone}`);
             return;
         }
 
-        // 3. ACUMULACIÓN (Buffer)
+        // --- Lógica de Buffer y Respuesta ---
         const mensajeAnterior = pendingMessages.get(phone) || "";
         const mensajeAcumulado = mensajeAnterior 
             ? mensajeAnterior + "\n" + textMessage 
@@ -130,7 +117,6 @@ app.post("/webhook", webhookLimiter, async (req, res) => {
 
         pendingMessages.set(phone, mensajeAcumulado);
 
-        // 4. GESTIÓN DEL TIMER (3 SEGUNDOS PARA RESPONDER)
         if (buffers.has(phone)) {
             clearTimeout(buffers.get(phone));
         }
@@ -139,11 +125,8 @@ app.post("/webhook", webhookLimiter, async (req, res) => {
             const mensajeParaEnviar = pendingMessages.get(phone);
             if (!mensajeParaEnviar) return;
 
-            // 5. COOLDOWN DE RESPUESTA
             const ultimaRespuesta = lastResponses.get(phone);
-            if (ultimaRespuesta && Date.now() - ultimaRespuesta < 3000) {
-                return;
-            }
+            if (ultimaRespuesta && Date.now() - ultimaRespuesta < 3000) return;
 
             try {
                 const respuesta = await openaiService.procesarMensaje(
@@ -156,7 +139,6 @@ app.post("/webhook", webhookLimiter, async (req, res) => {
                     lastResponses.set(phone, Date.now());
                     pendingMessages.delete(phone);
                 }
-
             } catch (e) {
                 console.error(`❌ Erro OpenAI:`, e.message);
             } finally {
@@ -172,9 +154,8 @@ app.post("/webhook", webhookLimiter, async (req, res) => {
 });
 
 // ==========================================
-// ROTAS ADMIN & DASHBOARD
+// ROTAS ADMIN
 // ==========================================
-
 app.get("/admin/tasas", adminLimiter, verificarToken, (req, res) => {
     try {
         if (!fs.existsSync(TASAS_PATH)) return res.json({});
@@ -199,20 +180,8 @@ app.get("/dashboard", adminLimiter, verificarToken, (req, res) => {
     res.sendFile(path.join(__dirname, "public", "dashboard.html"));
 });
 
-// ==========================================
-// INICIALIZAÇÃO
-// ==========================================
 app.get("/", (req, res) => res.send("YordaBot Online ✅"));
 
 app.listen(PORT, "0.0.0.0", () => {
     console.log(`🚀 SERVER UP NA PORTA ${PORT}`);
 });
-
-const shutdown = (signal) => {
-    console.log(`${signal} recebido. Limpando buffers...`);
-    for (const timer of buffers.values()) clearTimeout(timer);
-    process.exit(0);
-};
-
-process.on("SIGTERM", () => shutdown("SIGTERM"));
-process.on("SIGINT", () => shutdown("SIGINT"));
