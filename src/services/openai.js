@@ -4,6 +4,7 @@ const OpenAI = require("openai");
 const { enviarMensaje } = require("./zapi");
 const { calcularOperacion } = require("./calculator");
 const { guardarCliente, obtenerCliente } = require("./customer-memory");
+const { agregarOperacion, obtenerTodas } = require("./operations");
 
 const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY
@@ -32,14 +33,13 @@ async function procesarMensaje(phone, text, pushName = "") {
         if (!text || !phone) return "";
         const texto = normalizarTexto(text);
 
-        // 1. DETECCIÓN DE IDIOMA (Regex optimizado)
+        // 1. DETECCIÓN DE IDIOMA
         const esEspanol = /hola|buenas|buenos dias|buen dia|quiero|cuanto|enviar|mandar|giro|transferencia|dinero|cuba|pesos|cup|reales|usd|dolares|dolar/i.test(texto);
 
         // 2. MEMORIA DE CLIENTE
         const cliente = obtenerCliente(phone);
 
         // 3. ATENCIÓN HUMANA / CASOS ESPECIALES (Arbitraje, CUP o MLC)
-        // Corregido: Detección consistente de dolar/dolares/usd para arbitraje
         if (
             /yordanys|humano|asesor|tengo cup|dinero en cuba|enviar para brasil|traer para brasil|vender cup|cup por reales/i.test(texto) ||
             ((texto.includes("usd") || texto.includes("dolar") || texto.includes("dolares")) && (texto.includes("real") || texto.includes("brl") || texto.includes("brasil"))) ||
@@ -60,11 +60,34 @@ async function procesarMensaje(phone, text, pushName = "") {
             return llavePix;
         }
 
-        // 5. INTENCIÓN: COMPROBANTES
+        // ---------------------------------------------------------
+        // 5. INTENCIÓN: COMPROBANTES (Con protección anti-duplicados)
+        // ---------------------------------------------------------
         if (/paguei|pague|comprovante|comprobante|feito|realizado|ya envie|ya mande/i.test(texto)) {
+            
+            if (cliente && cliente.ultimoMonto > 0) {
+                const operaciones = obtenerTodas();
+                // Verificamos si ya existe una operación pendiente idéntica
+                const yaExistePendiente = operaciones.find(op => 
+                    op.phone === phone && 
+                    op.status === "pendiente" &&
+                    op.monto === cliente.ultimoMonto
+                );
+
+                if (!yaExistePendiente) {
+                    agregarOperacion({
+                        phone: phone,
+                        nombre: pushName || cliente.nombre,
+                        monto: cliente.ultimoMonto,
+                        tipo: cliente.tipoFavorito
+                    });
+                }
+            }
+
             const respuesta = esEspanol
                 ? "Perfecto 😊\nRecibimos tu comprobante. Vamos a verificar el pago y procesaremos tu envío enseguida."
                 : "Perfeito 😊\nRecebemos seu comprovante. Vamos verificar o pagamento e processaremos seu envio imediatamente.";
+            
             await enviarMensaje(phone, respuesta);
             return respuesta;
         }
@@ -73,7 +96,7 @@ async function procesarMensaje(phone, text, pushName = "") {
         const valor = numeroDetectado ? Number(numeroDetectado[0]) : null;
 
         // ---------------------------------------------------------
-        // 6. CÁLCULO USD -> CUP (Detección completa de variantes)
+        // 6. CÁLCULO USD -> CUP
         // ---------------------------------------------------------
         if (valor && (texto.includes("usd") || texto.includes("dolar") || texto.includes("dolares")) && !texto.includes("real") && !texto.includes("brl")) {
             const tipoUsd = texto.includes("prepago") ? "usd_prepago" : "usd_clasica";
@@ -89,7 +112,7 @@ async function procesarMensaje(phone, text, pushName = "") {
         }
 
         // ---------------------------------------------------------
-        // 7. CÁLCULO BRL -> CUP (Monto suelto o Reales)
+        // 7. CÁLCULO BRL -> CUP (Candados de exclusión totales)
         // ---------------------------------------------------------
         if (
             valor && 
