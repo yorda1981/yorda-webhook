@@ -2,6 +2,7 @@ const express = require("express");
 const fs = require("fs");
 const path = require("path");
 const rateLimit = require("express-rate-limit");
+
 require("dotenv").config();
 
 // ==========================================
@@ -9,7 +10,6 @@ require("dotenv").config();
 // ==========================================
 const openaiService = require("./src/services/openai");
 const { obtenerTodos } = require("./src/services/customer-memory");
-const { obtenerTodas } = require("./src/services/operations"); // ← NUEVO
 
 const app = express();
 
@@ -20,11 +20,32 @@ const PORT = process.env.PORT || 8080;
 app.set("trust proxy", 1);
 
 // ==========================================
-// MEMÓRIA TEMPORÁRIA (BUFFER & COOLDOWN)
+// MEMÓRIA TEMPORÁRIA (BUFFER, COOLDOWN & PAUSA)
 // ==========================================
 const buffers = new Map();
 const pendingMessages = new Map();
 const lastResponses = new Map();
+const pausasHumanas = new Map(); // Nueva memoria para pausas
+
+// ==========================================
+// FUNCIONES DE PAUSA HUMANA
+// ==========================================
+function activarPausaHumana(phone) {
+    // Activa una pausa de 30 minutos
+    pausasHumanas.set(phone, Date.now() + (30 * 60 * 1000));
+    console.log(`⏸️ Pausa humana activada para ${phone}`);
+}
+
+function enPausaHumana(phone) {
+    const fin = pausasHumanas.get(phone);
+    if (!fin) return false;
+
+    if (Date.now() > fin) {
+        pausasHumanas.delete(phone);
+        return false;
+    }
+    return true;
+}
 
 // ==========================================
 // MIDDLEWARES
@@ -64,39 +85,50 @@ const verificarToken = (req, res, next) => {
     if (!token || token.trim() !== secret) {
         return res.status(401).json({ error: "Não autorizado" });
     }
-
     next();
 };
 
 // ==========================================
-// WEBHOOK PRINCIPAL (LÓGICA 10/10)
+// WEBHOOK PRINCIPAL (LÓGICA RESILIENTE)
 // ==========================================
 app.post("/webhook", webhookLimiter, async (req, res) => {
     res.status(200).send("OK");
 
     try {
         const body = req.body;
-
         if (!body || body.type !== "ReceivedCallback") return;
-        if (body.fromMe === true || body.fromMe === "true") return;
-        if (body.isGroup === true || body.isNewsletter === true) return;
 
         const phone = body.phone || body.from;
         const textMessage = body.text?.message || body.body || body.message || "";
         const pushName = body.senderName || body.sender?.pushName || "Cliente";
 
+        // 1. DETECTAR INTERVENCIÓN MANUAL (fromMe)
+        if (body.fromMe === true || body.fromMe === "true") {
+            if (phone) {
+                activarPausaHumana(phone);
+            }
+            return;
+        }
+
+        if (body.isGroup === true || body.isNewsletter === true) return;
         if (!phone || !textMessage || typeof textMessage !== "string") return;
 
-        // 1. ACUMULAÇÃO (Sempre ouve)
+        // 2. VERIFICAR SI ESTÁ EN PAUSA HUMANA
+        if (enPausaHumana(phone)) {
+            console.log(`⏸️ Conversa em pausa humana: ${phone}`);
+            return;
+        }
+
+        // 3. ACUMULACIÓN (Buffer)
         const mensajeAnterior = pendingMessages.get(phone) || "";
-        const mensajeAcumulado = mensajeAnterior
-            ? mensajeAnterior + "\n" + textMessage
+        const mensajeAcumulado = mensajeAnterior 
+            ? mensajeAnterior + "\n" + textMessage 
             : textMessage;
 
         pendingMessages.set(phone, mensajeAcumulado);
         console.log(`📩 Buffer acumulado (${phone}):\n${mensajeAcumulado}`);
 
-        // 2. GESTÃO DO TIMER (3 SEGUNDOS)
+        // 4. GESTIÓN DEL TIMER (3 SEGUNDOS)
         if (buffers.has(phone)) {
             clearTimeout(buffers.get(phone));
         }
@@ -105,15 +137,15 @@ app.post("/webhook", webhookLimiter, async (req, res) => {
             const mensajeParaEnviar = pendingMessages.get(phone);
             if (!mensajeParaEnviar) return;
 
-            // 3. COOLDOWN DE ENVIO (Proteção de saída)
+            // 5. COOLDOWN DE RESPUESTA
             const ultimaRespuesta = lastResponses.get(phone);
             if (ultimaRespuesta && Date.now() - ultimaRespuesta < 3000) {
-                console.log("⏳ Cooldown activo: Aguardando para processar.");
+                console.log("⏳ Cooldown activo.");
                 return;
             }
 
             try {
-                console.log(`🧠 IA a trabalhar para ${phone}...`);
+                console.log(`🧠 IA procesando para ${phone}...`);
                 const respuesta = await openaiService.procesarMensaje(
                     phone,
                     mensajeParaEnviar,
@@ -125,8 +157,9 @@ app.post("/webhook", webhookLimiter, async (req, res) => {
                     pendingMessages.delete(phone);
                     console.log(`✅ Ciclo concluído para ${phone}`);
                 }
+
             } catch (e) {
-                console.error(`❌ Erro OpenAI para ${phone} (Mensagem preservada):`, e.message);
+                console.error(`❌ Erro OpenAI:`, e.message);
             } finally {
                 buffers.delete(phone);
             }
@@ -140,15 +173,14 @@ app.post("/webhook", webhookLimiter, async (req, res) => {
 });
 
 // ==========================================
-// ROTAS ADMIN & STATS (CONEXÃO DASHBOARD)
+// ROTAS ADMIN & DASHBOARD
 // ==========================================
 
 // Obtener Tasas
 app.get("/admin/tasas", adminLimiter, verificarToken, (req, res) => {
     try {
         if (!fs.existsSync(TASAS_PATH)) return res.json({});
-        const data = JSON.parse(fs.readFileSync(TASAS_PATH, "utf8"));
-        res.json(data);
+        res.json(JSON.parse(fs.readFileSync(TASAS_PATH, "utf8")));
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -160,7 +192,7 @@ app.post("/admin/tasas", adminLimiter, verificarToken, async (req, res) => {
     } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
-// Stats Globales
+// Stats para Dashboard
 app.get("/admin/stats", adminLimiter, verificarToken, (req, res) => {
     try {
         const clientes = obtenerTodos();
@@ -180,18 +212,7 @@ app.get("/admin/clientes", adminLimiter, verificarToken, (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ==========================================
-// OPERACIONES  ← NUEVO
-// ==========================================
-app.get("/admin/operaciones", adminLimiter, verificarToken, (req, res) => {
-    try {
-        res.json(obtenerTodas());
-    } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// ==========================================
-// ROTA: DASHBOARD
-// ==========================================
+// Ruta del Dashboard
 app.get("/dashboard", adminLimiter, verificarToken, (req, res) => {
     res.sendFile(path.join(__dirname, "public", "dashboard.html"));
 });
