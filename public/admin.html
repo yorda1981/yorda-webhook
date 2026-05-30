@@ -1,111 +1,120 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>YORDA-BOT | Admin Panel</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
-    <style>
-        :root { --bg: #0f172a; --card: #1e293b; --accent: #8b5cf6; --text: #f8fafc; }
-        body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); margin: 0; display: flex; min-height: 100vh; }
-        
-        /* Sidebar */
-        .sidebar { width: 260px; background: #020617; padding: 30px 20px; border-right: 1px solid #1e293b; }
-        .logo { font-size: 24px; font-weight: 800; color: var(--accent); margin-bottom: 40px; display: flex; align-items: center; gap: 10px; }
-        .nav-btn { width: 100%; padding: 12px; background: transparent; border: none; color: #94a3b8; text-align: left; cursor: pointer; border-radius: 8px; margin-bottom: 5px; font-weight: 600; }
-        .nav-btn.active { background: var(--accent); color: white; }
+<script>
+        const token = new URLSearchParams(window.location.search).get("token");
+        const labelsTipo = {
+            brl_cup: "🇧🇷 BRL → 🇨🇺 CUP",
+            usd_clasica: "💵 USD Clássica",
+            usd_prepago: "💳 USD Prepago"
+        };
 
-        /* Main Content */
-        .main { flex: 1; padding: 40px; }
-        .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-bottom: 40px; }
-        .stat-card { background: var(--card); padding: 25px; border-radius: 16px; border: 1px solid #334155; }
-        .stat-card span { color: #94a3b8; font-size: 14px; font-weight: 600; }
-        .stat-card h2 { margin: 10px 0 0; font-size: 28px; }
+        // 🟢 Mejora 1: Control de concurrencia
+        let actualizando = false;
 
-        /* Form */
-        .config-card { background: var(--card); padding: 30px; border-radius: 20px; border: 1px solid #334155; }
-        .grid-inputs { display: grid; grid-template-columns: repeat(2, 1fr); gap: 25px; margin-top: 20px; }
-        .input-group { display: flex; flex-direction: column; gap: 8px; }
-        label { color: #94a3b8; font-size: 13px; font-weight: 600; }
-        input { background: #0f172a; border: 1px solid #334155; padding: 12px; border-radius: 10px; color: white; font-size: 16px; outline: none; }
-        input:focus { border-color: var(--accent); }
-        .btn-save { background: var(--accent); color: white; border: none; padding: 15px 30px; border-radius: 12px; font-weight: 700; cursor: pointer; margin-top: 30px; width: 100%; transition: 0.3s; }
-        .btn-save:hover { opacity: 0.9; transform: translateY(-2px); }
-    </style>
-</head>
-<body>
-    <aside class="sidebar">
-        <div class="logo">🤖 YORDA-BOT</div>
-        <button class="nav-btn active">Dashboard</button>
-        <button class="nav-btn">Tasas</button>
-        <button class="nav-btn" onclick="location.reload()">Salir</button>
-    </aside>
+        async function refresh() {
+            if (!token || actualizando) return;
+            actualizando = true;
 
-    <main class="main">
-        <div class="stats-grid">
-            <div class="stat-card"><span>Clientes</span><h2 id="stat-clientes">0</h2></div>
-            <div class="stat-card"><span>VIP</span><h2 id="stat-vip">0</h2></div>
-            <div class="stat-card"><span>Operaciones</span><h2 id="stat-ops">0</h2></div>
-            <div class="stat-card"><span>Total Enviado</span><h2 id="stat-total">R$ 0</h2></div>
-        </div>
+            try {
+                const [rStats, rTasas, rOps, rClis] = await Promise.all([
+                    fetch(`/admin/stats?token=${token}`),
+                    fetch(`/admin/tasas?token=${token}`),
+                    fetch(`/admin/operaciones?token=${token}`),
+                    fetch(`/admin/clientes?token=${token}`)
+                ]);
 
-        <div class="config-card">
-            <h3>⚙️ Configuración de Tasas (CUP)</h3>
-            <div class="grid-inputs">
-                <div class="input-group"><label>BRL < 100</label><input type="number" id="brl_0"></div>
-                <div class="input-group"><label>BRL 100 - 499</label><input type="number" id="brl_100"></div>
-                <div class="input-group"><label>BRL 500 - 999</label><input type="number" id="brl_500"></div>
-                <div class="input-group"><label>BRL 1000+</label><input type="number" id="brl_1000"></div>
-                <div class="input-group"><label>USD Clásica</label><input type="number" step="0.01" id="usd1"></div>
-                <div class="input-group"><label>USD Prepago</label><input type="number" step="0.01" id="usd2"></div>
-            </div>
-            <button class="btn-save" id="btnSave" onclick="guardar()">Guardar Cambios</button>
-        </div>
-    </main>
+                const stats = await rStats.json();
+                const tasas = await rTasas.json();
+                const operaciones = await rOps.json();
+                const clientesData = await rClis.json();
+                const listaTodosClientes = Array.isArray(clientesData) ? clientesData : Object.values(clientesData);
 
-    <script>
-        async function init() {
-            // Cargar Stats
-            const resS = await fetch("/admin/stats");
-            const stats = await resS.json();
-            document.getElementById("stat-clientes").innerText = stats.clientes;
-            document.getElementById("stat-vip").innerText = stats.vip;
-            document.getElementById("stat-ops").innerText = stats.operaciones;
-            document.getElementById("stat-total").innerText = `R$ ${stats.total.toLocaleString('pt-BR')}`;
+                // 1. Stats Cards
+                document.getElementById("stat-clientes").innerText = listaTodosClientes.length;
+                document.getElementById("stat-ops").innerText = stats.totalOperaciones || 0;
+                document.getElementById("stat-total").innerText = Number(stats.volumenTotal || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+                document.getElementById("stat-pend").innerText = stats.pendientes || 0;
 
-            // Cargar Tasas
-            const resT = await fetch("/admin/tasas");
-            const tasas = await resT.json();
-            document.getElementById("brl_0").value = tasas.brl_0;
-            document.getElementById("brl_100").value = tasas.brl_100;
-            document.getElementById("brl_500").value = tasas.brl_500;
-            document.getElementById("brl_1000").value = tasas.brl_1000;
-            document.getElementById("usd1").value = tasas.usd1;
-            document.getElementById("usd2").value = tasas.usd2;
+                // 2. Taxas
+                Object.keys(tasas).forEach(id => { if(document.getElementById(id)) document.getElementById(id).value = tasas[id] });
+
+                // 3. Tabela Pendentes (🟢 Mejora 2: Ordenado por fecha descendente)
+                const tPend = document.getElementById("tablaPendientes");
+                const pendientes = operaciones
+                    .filter(o => o.status === "pendiente")
+                    .sort((a, b) => new Date(b.fecha || b.id) - new Date(a.fecha || a.id));
+
+                tPend.innerHTML = pendientes.length ? "" : '<tr><td colspan="5" style="text-align:center; color:#94a3b8; padding:20px;">Sem operações pendentes</td></tr>';
+                
+                pendientes.forEach(op => {
+                    const dataFormat = op.fecha ? new Date(op.fecha).toLocaleString('pt-BR') : new Date(op.id).toLocaleString('pt-BR');
+                    const tipoFormat = labelsTipo[op.tipo] || op.tipo;
+
+                    tPend.innerHTML += `
+                        <tr>
+                            <td>${dataFormat}</td>
+                            <td><strong>${op.nombre || "Sem nome"}</strong></td>
+                            <td style="color:var(--yellow); font-weight:700">R$ ${Number(op.monto).toLocaleString('pt-BR')}</td>
+                            <td><small>${tipoFormat}</small></td>
+                            <td><button class="btn-confirm" onclick="confirmar('${op.id}')">CONFIRMAR ✅</button></td>
+                        </tr>`;
+                });
+
+                // 4. Ranking
+                const tCli = document.getElementById("clientesTable");
+                const confirmadas = operaciones.filter(o => o.status === "confirmada");
+                
+                const ranking = listaTodosClientes
+                    .map(c => {
+                        const totalReal = confirmadas.filter(o => o.phone === c.phone).reduce((acc, curr) => acc + Number(curr.monto), 0);
+                        return { ...c, totalReal: totalReal };
+                    })
+                    .filter(c => c.totalReal > 0)
+                    .sort((a, b) => b.totalReal - a.totalReal);
+
+                tCli.innerHTML = ranking.length ? "" : '<tr><td colspan="4" style="text-align:center; color:#94a3b8; padding:20px;">Nenhuma confirmação ainda</td></tr>';
+
+                ranking.forEach(c => {
+                    const phoneClean = (c.phone || "").replace("@s.whatsapp.net", "");
+                    const isVip = c.totalReal >= 5000;
+                    tCli.innerHTML += `
+                        <tr>
+                            <td>${c.nombre || "Sem nome"}</td>
+                            <td style="color:#94a3b8">${phoneClean}</td>
+                            <td style="font-weight:700; color:var(--green)">R$ ${c.totalReal.toLocaleString('pt-BR')}</td>
+                            <td>${isVip ? '<span class="badge badge-vip">VIP ⭐</span>' : '<span class="badge" style="background:#334155">CLIENTE</span>'}</td>
+                        </tr>`;
+                });
+
+            } catch (e) { 
+                console.error("Refresh error:", e); 
+            } finally {
+                actualizando = false; // 🟢 Libera el bloqueo siempre, incluso si falla
+            }
         }
 
-        async function guardar() {
+        async function confirmar(id) {
+            if(!confirm("¿Confirmas que el dinero ya está en la cuenta?")) return;
+            const res = await fetch(`/admin/confirmar-operacion/${id}?token=${token}`, { method: 'POST' });
+            if((await res.json()).success) refresh();
+        }
+
+        async function guardarTasas() {
             const btn = document.getElementById("btnSave");
             btn.innerText = "Guardando...";
-            const data = {
-                brl_0: Number(document.getElementById("brl_0").value),
-                brl_100: Number(document.getElementById("brl_100").value),
-                brl_500: Number(document.getElementById("brl_500").value),
-                brl_1000: Number(document.getElementById("brl_1000").value),
-                usd1: Number(document.getElementById("usd1").value),
-                usd2: Number(document.getElementById("usd2").value)
-            };
-
-            await fetch("/admin/tasas", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(data)
-            });
-            btn.innerText = "Guardar Cambios";
-            alert("✅ Tasas actualizadas correctamente");
+            const data = {};
+            document.querySelectorAll('#tasasForm input').forEach(i => data[i.id] = Number(i.value));
+            try {
+                await fetch(`/admin/tasas?token=${token}`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(data)
+                });
+                alert("✅ Tasas actualizadas!");
+                refresh();
+            } catch (e) { alert("Error al guardar."); }
+            finally { btn.innerText = "Sincronizar Taxas Globais"; }
         }
 
-        init();
+        // Ejecución inicial y ciclo de 10s
+        refresh();
+        setInterval(refresh, 10000); 
     </script>
-</body>
-</html>
