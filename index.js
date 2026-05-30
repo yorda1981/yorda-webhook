@@ -5,29 +5,28 @@ const rateLimit = require("express-rate-limit");
 
 require("dotenv").config();
 
-// ==========================================
-// IMPORTS
-// ==========================================
 const openaiService = require("./src/services/openai");
 const { obtenerTodos } = require("./src/services/customer-memory");
 
 const app = express();
-
-// ==========================================
-// CONFIGURAÇÃO INICIAL
-// ==========================================
 const PORT = process.env.PORT || 8080;
 app.set("trust proxy", 1);
 
+// ==========================================
+// MEMORIA DE SEGUIMIENTO
+// ==========================================
 const buffers = new Map();
 const pendingMessages = new Map();
 const lastResponses = new Map();
 const pausasHumanas = new Map();
 
+// NUEVO: Mapa para vincular Nombre de Chat -> Teléfono Real
+const mapaNombresATelefono = new Map();
+
 const MINUTOS_PAUSA = 5; 
 
 // ==========================================
-// FUNCIONES DE PAUSA HUMANA
+// FUNCIONES DE CONTROL
 // ==========================================
 function activarPausaHumana(phone) {
     pausasHumanas.set(phone, Date.now() + (MINUTOS_PAUSA * 60 * 1000));
@@ -37,7 +36,6 @@ function activarPausaHumana(phone) {
 function enPausaHumana(phone) {
     const fin = pausasHumanas.get(phone);
     if (!fin) return false;
-
     if (Date.now() > fin) {
         pausasHumanas.delete(phone);
         return false;
@@ -46,147 +44,132 @@ function enPausaHumana(phone) {
 }
 
 // ==========================================
-// MIDDLEWARES
+// MIDDLEWARES & SEGURIDAD
 // ==========================================
 app.use(express.json({ limit: "10mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
-const webhookLimiter = rateLimit({
-    windowMs: 60 * 1000,
-    max: 300,
-    message: { error: "Demasiadas solicitações" }
-});
-
-const adminLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 100,
-    message: "Acesso restrito"
-});
-
-const TASAS_PATH = path.join(__dirname, "src", "config", "tasas.json");
-
 const verificarToken = (req, res, next) => {
     const token = req.headers["x-admin-token"] || req.query.token;
     const secret = process.env.ADMIN_TOKEN?.trim();
-    if (!token || token.trim() !== secret) {
-        return res.status(401).json({ error: "Não autorizado" });
-    }
+    if (!token || token.trim() !== secret) return res.status(401).json({ error: "No autorizado" });
     next();
 };
 
+const TASAS_PATH = path.join(__dirname, "src", "config", "tasas.json");
+
 // ==========================================
-// WEBHOOK PRINCIPAL (LOG COMPLETO DE BODY)
+// WEBHOOK PRINCIPAL (CON VÍNCULO DE IDENTIDAD)
 // ==========================================
-app.post("/webhook", webhookLimiter, async (req, res) => {
+app.post("/webhook", async (req, res) => {
     res.status(200).send("OK");
 
     try {
         const body = req.body;
         if (!body || body.type !== "ReceivedCallback") return;
 
-        const phone = body.phone || body.from;
+        const chatName = body.chatName;
+        const phoneRaw = body.phone || body.from;
         const textMessage = body.text?.message || body.body || body.message || "";
         const pushName = body.senderName || body.sender?.pushName || "Cliente";
 
-        // 👨‍💼 FILTRO DE INTERVENCIÓN HUMANA
-        // Cambiado para imprimir el BODY completo y no ocultar campos
-        if ((body.fromMe === true || body.fromMe === "true") && body.fromApi !== true) {
-            console.log(
-                "👨‍💼 INTERVENCIÓN HUMANA DETECTADA (BODY COMPLETO):",
-                JSON.stringify(body, null, 2)
-            );
+        // 1. REGISTRO DE IDENTIDAD (Cuando el cliente escribe normal)
+        if (!body.fromMe && phoneRaw && chatName && !phoneRaw.includes("@lid")) {
+            mapaNombresATelefono.set(chatName, phoneRaw);
+            console.log(`🔗 VÍNCULO CREADO: [${chatName}] -> ${phoneRaw}`);
+        }
 
-            if (phone) {
-                activarPausaHumana(phone);
+        // 2. DETECTAR INTERVENCIÓN HUMANA (Manejando el LID de Z-API)
+        if ((body.fromMe === true || body.fromMe === "true") && body.fromApi !== true) {
+            
+            // Intentamos recuperar el teléfono real usando el nombre del chat
+            const phoneReal = mapaNombresATelefono.get(chatName);
+            
+            console.log("👨‍💼 MENSAJE MANUAL DETECTADO:", JSON.stringify({
+                chatName,
+                phoneRecibido: phoneRaw,
+                phoneRealViculado: phoneReal || "No encontrado aún"
+            }, null, 2));
+
+            if (phoneReal) {
+                activarPausaHumana(phoneReal);
+            } else {
+                console.log(`⚠️ No se pudo pausar: No hay vínculo para el chat [${chatName}]`);
             }
             return;
         }
 
-        // Ignorar si el mensaje es de la cuenta pero viene de la API
+        // 3. FILTROS BÁSICOS
         if (body.fromMe === true || body.fromMe === "true") return;
-
         if (body.isGroup === true || body.isNewsletter === true) return;
-        if (!phone || !textMessage || typeof textMessage !== "string") return;
+        if (!phoneRaw || !textMessage || typeof textMessage !== "string") return;
 
-        // Verificar pausa
-        if (enPausaHumana(phone)) {
-            console.log(`⏸️ Conversa ignorada (Pausa Humana Activa): ${phone}`);
+        // 4. VERIFICAR PAUSA HUMANA
+        if (enPausaHumana(phoneRaw)) {
+            console.log(`⏸️ Conversa en pausa humana (Bot callado): ${phoneRaw}`);
             return;
         }
 
-        // --- Lógica de Acumulación y Respuesta ---
-        const mensajeAnterior = pendingMessages.get(phone) || "";
-        const mensajeAcumulado = mensajeAnterior 
-            ? mensajeAnterior + "\n" + textMessage 
-            : textMessage;
+        // --- Lógica de Buffer (Acumulación de mensajes) ---
+        const mensajeAnterior = pendingMessages.get(phoneRaw) || "";
+        const mensajeAcumulado = mensajeAnterior ? mensajeAnterior + "\n" + textMessage : textMessage;
+        pendingMessages.set(phoneRaw, mensajeAcumulado);
 
-        pendingMessages.set(phone, mensajeAcumulado);
-
-        if (buffers.has(phone)) {
-            clearTimeout(buffers.get(phone));
-        }
+        if (buffers.has(phoneRaw)) clearTimeout(buffers.get(phoneRaw));
 
         const timer = setTimeout(async () => {
-            const mensajeParaEnviar = pendingMessages.get(phone);
+            const mensajeParaEnviar = pendingMessages.get(phoneRaw);
             if (!mensajeParaEnviar) return;
 
-            const ultimaRespuesta = lastResponses.get(phone);
-            if (ultimaRespuesta && Date.now() - ultimaRespuesta < 3000) return;
-
             try {
-                const respuesta = await openaiService.procesarMensaje(
-                    phone,
-                    mensajeParaEnviar,
-                    pushName
-                );
-
+                const respuesta = await openaiService.procesarMensaje(phoneRaw, mensajeParaEnviar, pushName);
                 if (respuesta) {
-                    lastResponses.set(phone, Date.now());
-                    pendingMessages.delete(phone);
+                    lastResponses.set(phoneRaw, Date.now());
+                    pendingMessages.delete(phoneRaw);
                 }
             } catch (e) {
-                console.error(`❌ Erro OpenAI:`, e.message);
+                console.error(`❌ Error OpenAI:`, e.message);
             } finally {
-                buffers.delete(phone);
+                buffers.delete(phoneRaw);
             }
         }, 3000);
 
-        buffers.set(phone, timer);
+        buffers.set(phoneRaw, timer);
 
     } catch (e) {
-        console.error("❌ Erro fatal no Webhook:", e);
+        console.error("❌ Error fatal en Webhook:", e);
     }
 });
 
 // ==========================================
-// RESTO DE RUTAS (ADMIN, DASHBOARD, ETC)
+// RUTAS ADMINISTRATIVAS
 // ==========================================
-app.get("/admin/tasas", adminLimiter, verificarToken, (req, res) => {
+app.get("/admin/tasas", verificarToken, (req, res) => {
     try {
         if (!fs.existsSync(TASAS_PATH)) return res.json({});
         res.json(JSON.parse(fs.readFileSync(TASAS_PATH, "utf8")));
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post("/admin/tasas", adminLimiter, verificarToken, async (req, res) => {
+app.post("/admin/tasas", verificarToken, async (req, res) => {
     try {
         await fs.promises.writeFile(TASAS_PATH, JSON.stringify(req.body, null, 2));
         res.json({ success: true });
     } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
-app.get("/admin/clientes", adminLimiter, verificarToken, (req, res) => {
+app.get("/admin/clientes", verificarToken, (req, res) => {
     try {
         res.json(obtenerTodos());
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get("/dashboard", adminLimiter, verificarToken, (req, res) => {
+app.get("/dashboard", verificarToken, (req, res) => {
     res.sendFile(path.join(__dirname, "public", "dashboard.html"));
 });
 
 app.get("/", (req, res) => res.send("YordaBot Online ✅"));
 
 app.listen(PORT, "0.0.0.0", () => {
-    console.log(`🚀 SERVER UP NA PORTA ${PORT}`);
+    console.log(`🚀 SERVER UP EN PUERTO ${PORT}`);
 });
