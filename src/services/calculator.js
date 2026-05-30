@@ -1,121 +1,48 @@
-const fs = require("fs");
-const path = require("path");
-
-const TASAS_PATH = path.join(__dirname, "../config/tasas.json");
-
-function leerTasas() {
-    try {
-        if (!fs.existsSync(TASAS_PATH)) {
-            console.error("❌ tasas.json no existe");
-            return null;
-        }
-
-        const raw = fs.readFileSync(TASAS_PATH, "utf8");
-
-        if (!raw || raw.trim() === "") {
-            console.error("❌ tasas.json vacío");
-            return null;
-        }
-
-        const data = JSON.parse(raw);
-
-        console.log(
-            "📊 TASAS CARGADAS:",
-            JSON.stringify(data, null, 2)
-        );
-
-        return data;
-
-    } catch (e) {
-        console.error(
-            "❌ Error leyendo tasas.json:",
-            e.message
-        );
-        return null;
-    }
-}
-
 function calcularOperacion({ tipo, valor }) {
 
     const tasas = leerTasas();
-
-    if (!tasas) {
-        console.error("❌ No se pudieron cargar las tasas");
-        return null;
-    }
+    if (!tasas) return null;
 
     const monto = Number(valor);
 
-    // ==========================
-    // BRL -> CUP
-    // ==========================
-    if (
-        tipo === "brl_cup" &&
-        tasas.brl_cup &&
-        Array.isArray(tasas.brl_cup.faixas)
-    ) {
+    if (tipo === "brl_cup") {
 
-        const faixa = tasas.brl_cup.faixas.find(
-            f => monto >= f.min && monto <= f.max
-        );
+        let tasa = 0;
 
-        if (!faixa) {
-            console.error(
-                "❌ No se encontró faixa para:",
-                monto
-            );
-            return null;
+        if (monto < 100) {
+            tasa = Number(tasas.brl_0);
+        } else if (monto < 500) {
+            tasa = Number(tasas.brl_100);
+        } else if (monto < 1000) {
+            tasa = Number(tasas.brl_500);
+        } else {
+            tasa = Number(tasas.brl_1000);
         }
 
         return {
             valor: monto,
-            tasa: faixa.tasa,
-            cup: Math.floor(monto * faixa.tasa)
+            tasa,
+            cup: Math.floor(monto * tasa)
         };
     }
 
-    // ==========================
-    // USD CLÁSICA
-    // ==========================
-    if (
-        tipo === "usd_clasica" &&
-        tasas.usd_clasica
-    ) {
+    if (tipo === "usd_clasica") {
 
         return {
             valor: monto,
-            tasa: tasas.usd_clasica.tasa,
-            cup: Math.floor(
-                monto * tasas.usd_clasica.tasa
-            )
+            tasa: Number(tasas.usd1),
+            cup: Math.floor(monto * Number(tasas.usd1))
         };
     }
 
-    // ==========================
-    // USD PREPAGO
-    // ==========================
-    if (
-        tipo === "usd_prepago" &&
-        tasas.usd_prepago
-    ) {
+    if (tipo === "usd_prepago") {
 
         return {
             valor: monto,
-            tasa: tasas.usd_prepago.tasa,
-            cup: Math.floor(
-                monto * tasas.usd_prepago.tasa
-            )
+            tasa: Number(tasas.usd2),
+            cup: Math.floor(monto * Number(tasas.usd2))
         };
     }
-
-    console.error(
-        "❌ Tipo de operación no soportado:",
-        tipo
-    );
 
     return null;
 }
-
-module.exports = {
-    calcularOperacion
-};
