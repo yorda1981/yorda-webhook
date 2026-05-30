@@ -27,7 +27,6 @@ function calcularOperacion({ tipo, valor }) {
     }
 
     if (tipo === "usd_clasica") {
-
         return {
             valor: monto,
             tasa: Number(tasas.usd1),
@@ -36,7 +35,6 @@ function calcularOperacion({ tipo, valor }) {
     }
 
     if (tipo === "usd_prepago") {
-
         return {
             valor: monto,
             tasa: Number(tasas.usd2),
@@ -45,4 +43,8 @@ function calcularOperacion({ tipo, valor }) {
     }
 
     return null;
+}
+
+module.exports = {
+    calcularOperacion
 };
