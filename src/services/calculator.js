@@ -45,4 +45,4 @@ function calcularOperacion({ tipo, valor }) {
     }
 
     return null;
-}
+};
