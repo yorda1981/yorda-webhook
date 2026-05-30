@@ -13,7 +13,7 @@ const openai = new OpenAI({
 });
 
 // ==========================================
-// GATILHOS (Palabras clave para activar IA)
+// GATILHOS (Palabras clave para IA)
 // ==========================================
 const gatilhos = [
     "real", "reales", "envio", "cambio", "cambiar", "taxa", "tasa", 
@@ -24,7 +24,7 @@ const gatilhos = [
 ];
 
 // ==========================================
-// NORMALIZAR (Limpia texto para comparaciones)
+// NORMALIZAR (Sin acentos para el Regex)
 // ==========================================
 function normalizarTexto(texto) {
     return String(texto || "")
@@ -45,8 +45,8 @@ async function procesarMensaje(phone, text, pushName = "") {
         if (!text || !phone) return "";
         const texto = normalizarTexto(text);
 
-        // 1. DETECCIÓN DE IDIOMA (Regex optimizado)
-        const esEspanol = /hola|buenas|buenos dias|buen dia|quiero|cuanto|cuanto|enviar|mandar|giro|transferencia|dinero|cuba|pesos|cup|reales|usd|dolares|dolares/i.test(texto);
+        // 1. DETECCIÓN DE IDIOMA
+        const esEspanol = /hola|buenas|buenos dias|buen dia|quiero|cuanto|enviar|mandar|giro|transferencia|dinero|cuba|pesos|cup|reales|usd|dolares/i.test(texto);
 
         // 2. MEMORIA DE CLIENTE & SALUDOS BILINGÜES
         const cliente = obtenerCliente(phone);
@@ -67,14 +67,14 @@ async function procesarMensaje(phone, text, pushName = "") {
                 : `Olá novamente ${cliente.nombre || ""} 👋\n\n`;
         }
 
-        // 3. BLINDAJE PRIORITARIO: ATENCIÓN HUMANA (Cuba -> Brasil / Riesgo)
-        if (/yordanys|humano|asesor|tengo cup|tengo dinero en cuba|dinero en cuba|enviar para brasil|enviar desde cuba|vender cup|pesos cubanos|cambiar cup|cup por reales|cuba para brasil|traer para brasil|traerlo para brasil/i.test(texto)) {
+        // 3. BLINDAJE PRIORITARIO: ATENCIÓN HUMANA (Cuba -> Brasil)
+        if (/yordanys|humano|asesor|tengo cup|tengo dinero en cuba|dinero en cuba|enviar para brasil|enviar desde cuba|vender cup|pesos cubanos|cambiar cup|cup por reales|cuba para brasil|traer para brasil/i.test(texto)) {
             const respuesta = "Perfecto 😊\nYordanys te atenderá enseguida para ayudarte con esa operación. 👌";
             await enviarMensaje(phone, respuesta);
             return respuesta;
         }
 
-        // 4. LÓGICA DE ENVÍO DE PIX (Cierre de venta directo)
+        // 4. LÓGICA DE ENVÍO DE PIX
         if (/pix|envia el pix|envía el pix|pasame el pix|pásame el pix|quiero hacerlo|voy a pagar|deseo continuar|quero fazer|vou pagar|passa o pix/i.test(texto)) {
             const llavePix = "8becaaf5-f296-4cbc-a115-46e3d23b042a";
             await enviarMensaje(phone, llavePix);
@@ -106,24 +106,38 @@ async function procesarMensaje(phone, text, pushName = "") {
         const valor = numeroDetectado ? Number(numeroDetectado[0]) : null;
 
         // ---------------------------------------------------------
-        // 7. BLOQUEO USD -> BRL / BRASIL (Arbitraje Manual / Riesgo)
+        // 7. CONSULTA DEL ÚLTIMO MONTO (Punto solicitado)
         // ---------------------------------------------------------
         if (
-            valor && 
-            texto.includes("usd") && 
-            (texto.includes("real") || texto.includes("reales") || texto.includes("brl") || texto.includes("brasil"))
+            /seria cuanto cup|seria cuantos cup|cuanto cup|cuantos cup|cuanto recibe|cuanto seria|cuanto da/i.test(texto)
         ) {
+            if (cliente && cliente.ultimoMonto > 0) {
+                const resultado = calcularOperacion({
+                    tipo: cliente.tipoFavorito || "brl_cup",
+                    valor: cliente.ultimoMonto
+                });
+
+                if (resultado) {
+                    const respuesta = esEspanol
+                        ? `💵 R$${cliente.ultimoMonto} hoy serían ${formatearNumero(resultado.cup)} CUP 🇨🇺\n\n✅ Transferencia rápida\n✅ Comprobante después del envío\n\n¿Deseas realizar la operación ahora?`
+                        : `💵 R$${cliente.ultimoMonto} hoje seriam ${formatearNumero(resultado.cup)} CUP 🇨🇺\n\n✅ Transferência rápida\n✅ Comprovante após envio\n\nDeseja realizar o envio agora?`;
+
+                    await enviarMensaje(phone, respuesta);
+                    return respuesta;
+                }
+            }
+        }
+
+        // 8. BLOQUEO USD -> BRL / BRASIL (Arbitraje Manual)
+        if (valor && texto.includes("usd") && (texto.includes("real") || texto.includes("brl") || texto.includes("brasil"))) {
             const respuesta = esEspanol
                 ? "Esta operación requiere cotización personalizada. Yordanys te atenderá enseguida. 👌"
                 : "Esta operação requer cotação personalizada. Yordanys irá atendê-lo em breve. 👌";
-
             await enviarMensaje(phone, respuesta);
             return respuesta;
         }
 
-        // ---------------------------------------------------------
-        // 8. PRIORIDAD USD -> CUP (Envío Estándar)
-        // ---------------------------------------------------------
+        // 9. PRIORIDAD USD -> CUP
         if (valor && texto.includes("usd")) {
             const tipoUsd = texto.includes("prepago") ? "usd_prepago" : "usd_clasica";
             const nombreUsd = tipoUsd === "usd_prepago" ? "USD Prepago" : "USD Clásica";
@@ -139,26 +153,20 @@ async function procesarMensaje(phone, text, pushName = "") {
             }
         }
 
-        // ---------------------------------------------------------
-        // 9. BRL → CUP (Candado !usd para evitar colisión)
-        // ---------------------------------------------------------
-        if (
-            valor && 
-            !texto.includes("usd") && 
-            (texto.includes("real") || texto.includes("reales") || texto.includes("brl"))
-        ) {
+        // 10. BRL → CUP (Detección directa "200 reales" + candado !usd)
+        if (valor && !texto.includes("usd") && (texto.includes("real") || texto.includes("reales") || texto.includes("brl") || /^\d+\s*(real|reales|brl)$/i.test(texto))) {
             const resultado = calcularOperacion({ tipo: "brl_cup", valor });
             if (resultado) {
                 guardarCliente({ phone, nombre: pushName, monto: valor, tipo: "brl_cup" });
                 const respuesta = esEspanol
-                    ? `${saludoCliente}💵 R$${valor} hoy serian ${formatearNumero(resultado.cup)} CUP 🇨🇺\n\n✅ Transferencia rápida\n✅ Comprobante después del envío${vipExtra}\n\n¿Deseas realizar la operación ahora?`
-                    : `${saludoCliente}💵 R$${valor} hoje som ${formatearNumero(resultado.cup)} CUP 🇨🇺\n\n✅ Transferência rápida\n✅ Comprovante após envio${vipExtra}\n\nDeseja realizar o envio agora?`;
+                    ? `${saludoCliente}💵 R$${valor} hoy serían ${formatearNumero(resultado.cup)} CUP 🇨🇺\n\n✅ Transferencia rápida\n✅ Comprobante después del envío${vipExtra}\n\n¿Deseas realizar la operación ahora?`
+                    : `${saludoCliente}💵 R$${valor} hoje seriam ${formatearNumero(resultado.cup)} CUP 🇨🇺\n\n✅ Transferência rápida\n✅ Comprovante após envio${vipExtra}\n\nDeseja realizar o envio agora?`;
                 await enviarMensaje(phone, respuesta);
                 return respuesta;
             }
         }
 
-        // 10. CONSULTA GENERAL
+        // 11. CONSULTA GENERAL
         if (/cambio|tasa|cotizacion/i.test(texto)) {
             const respuesta = esEspanol
                 ? "Hoy estamos trabajando con muy buena tasa 👍\n\n¿Deseas calcular reales, USD clásica o USD prepago?"
@@ -167,7 +175,8 @@ async function procesarMensaje(phone, text, pushName = "") {
             return respuesta;
         }
 
-        // 11. OPENAI FALLBACK
+        // 12. OPENAI FALLBACK (Con Log de auditoría)
+        console.log("⚠️ FALLBACK OPENAI:", texto);
         const systemPrompt = `Eres YordaBot. Responde corto y humano. Cliente: ${pushName}. VIP: ${cliente?.vip ? 'SI' : 'NO'}.`;
         const completion = await openai.chat.completions.create({
             model: "gpt-4o-mini",
@@ -175,7 +184,6 @@ async function procesarMensaje(phone, text, pushName = "") {
             temperature: 0.5,
             max_tokens: 120
         });
-
         const respuestaIA = completion?.choices?.[0]?.message?.content?.trim();
         if (respuestaIA) {
             await enviarMensaje(phone, respuestaIA);
@@ -183,7 +191,7 @@ async function procesarMensaje(phone, text, pushName = "") {
         }
 
     } catch (error) {
-        console.error("❌ Error en procesarMensaje:", error.message);
+        console.error("❌ Error:", error.message);
         return "";
     }
 }
