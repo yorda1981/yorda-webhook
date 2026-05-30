@@ -75,7 +75,7 @@ const verificarToken = (req, res, next) => {
 };
 
 // ==========================================
-// WEBHOOK PRINCIPAL (CON LOG DE AUDITORÍA)
+// WEBHOOK PRINCIPAL (CORREGIDO)
 // ==========================================
 app.post("/webhook", webhookLimiter, async (req, res) => {
     res.status(200).send("OK");
@@ -88,11 +88,13 @@ app.post("/webhook", webhookLimiter, async (req, res) => {
         const textMessage = body.text?.message || body.body || body.message || "";
         const pushName = body.senderName || body.sender?.pushName || "Cliente";
 
-        // 🚨 BLOQUE DE AUDITORÍA PARA DEPURAR EL AUTO-BLOQUEO
-        if (body.fromMe === true || body.fromMe === "true") {
+        // 👨‍💼 FILTRO DE INTERVENCIÓN HUMANA
+        // Solo activa la pausa si el mensaje es de la cuenta (fromMe) 
+        // Y NO fue enviado por la API (fromApi !== true)
+        if ((body.fromMe === true || body.fromMe === "true") && body.fromApi !== true) {
             console.log(
-                "🚨 MENSAJE PROPIO DETECTADO:",
-                JSON.stringify(body, null, 2)
+                "👨‍💼 INTERVENCIÓN HUMANA DETECTADA:",
+                JSON.stringify({ phone, textMessage }, null, 2)
             );
 
             if (phone) {
@@ -101,15 +103,19 @@ app.post("/webhook", webhookLimiter, async (req, res) => {
             return;
         }
 
+        // Ignorar si el mensaje es de la cuenta pero viene de la API (es el bot respondiendo)
+        if (body.fromMe === true || body.fromMe === "true") return;
+
         if (body.isGroup === true || body.isNewsletter === true) return;
         if (!phone || !textMessage || typeof textMessage !== "string") return;
 
+        // Verificar si la conversación está en pausa para el bot
         if (enPausaHumana(phone)) {
-            console.log(`⏸️ Conversa em pausa humana: ${phone}`);
+            console.log(`⏸️ Conversa ignorada (Pausa Humana Activa): ${phone}`);
             return;
         }
 
-        // --- Lógica de Buffer y Respuesta ---
+        // --- Lógica de Acumulación y Respuesta ---
         const mensajeAnterior = pendingMessages.get(phone) || "";
         const mensajeAcumulado = mensajeAnterior 
             ? mensajeAnterior + "\n" + textMessage 
