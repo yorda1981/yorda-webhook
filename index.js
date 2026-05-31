@@ -3,7 +3,9 @@ const fs = require("fs");
 const path = require("path");
 require("dotenv").config();
 
+// PASO 1: Requerir el pool de conexión
 require("./db");
+const pool = require("./db");
 
 // ==========================================
 // SERVICIOS
@@ -64,10 +66,8 @@ const verificarToken = (req, res, next) => {
     next();
 };
 
-const TASAS_PATH = path.join(__dirname, "src", "config", "tasas.json");
-
 // ==========================================
-// WEBHOOK PRINCIPAL (VERSIÓN ROBUSTA)
+// WEBHOOK PRINCIPAL
 // ==========================================
 app.post("/webhook", async (req, res) => {
     res.status(200).send("OK");
@@ -75,20 +75,9 @@ app.post("/webhook", async (req, res) => {
         const body = req.body;
         if (!body) return;
 
-        // 🔍 AUDITORÍA DE WEBHOOK
-        console.log("📥 WEBHOOK RECEIVED:", JSON.stringify({
-            type: body.type,
-            messageType: body.messageType,
-            text: body.text?.message || body.body || "No text",
-            hasImage: !!(body.image || body.type === "image" || body.messageType === "image"),
-            hasDoc: !!(body.document || body.type === "document" || body.messageType === "document")
-        }, null, 2));
-
-        // Validación de entrada flexibilizada (Acepta disparos directos de multimedia)
         const tiposValidos = ["ReceivedCallback", "image", "document", "audio", "video"];
         if (!tiposValidos.includes(body.type)) return;
 
-        // Evitar duplicados (messageId es el más fiable en Z-API)
         const messageId = body.messageId || body.id || body.zeId;
         if (messageId && mensajesProcesados.has(messageId)) return;
         if (messageId) {
@@ -100,10 +89,8 @@ app.post("/webhook", async (req, res) => {
         const chatName = body.chatName;
         const pushName = body.senderName || "Cliente";
 
-        // Filtro DDD 55 (Solo Brasil)
         if (!phoneRaw || !phoneRaw.startsWith("55")) return;
 
-        // Registro de salida humana (Pausa)
         if ((body.fromMe === true || body.fromMe === "true") && body.fromApi !== true) {
             if (!mapaNombresATelefono.has(chatName)) mapaNombresATelefono.set(chatName, phoneRaw);
             const phoneReal = mapaNombresATelefono.get(chatName);
@@ -114,7 +101,6 @@ app.post("/webhook", async (req, res) => {
         if (body.fromMe === true || body.isGroup || body.isNewsletter) return;
         if (enPausaHumana(phoneRaw)) return;
 
-        // 🛠️ DETECCIÓN MULTIMEDIA ROBUSTA
         const esMultimedia = 
             body.messageType === "image" || 
             body.messageType === "document" || 
@@ -126,9 +112,7 @@ app.post("/webhook", async (req, res) => {
         const textMessage = body.text?.message || body.body || body.caption || "";
 
         if (esMultimedia) {
-            console.log(`📸 Multimedia (comprobante) de ${phoneRaw}. Caption: "${textMessage || 'comprobante'}"`);
             try {
-                // Priorizamos el caption (subtítulo) para capturar montos escritos junto a la imagen
                 await openaiService.procesarMensaje(phoneRaw, textMessage || "comprobante", pushName);
             } catch (e) {
                 console.error("❌ Error en multimedia:", e.message);
@@ -138,7 +122,6 @@ app.post("/webhook", async (req, res) => {
 
         if (!textMessage) return;
 
-        // BUFFER DE TEXTO (Espera 3.5s para agrupar mensajes)
         const mensajeAnterior = pendingMessages.get(phoneRaw) || "";
         pendingMessages.set(phoneRaw, mensajeAnterior ? mensajeAnterior + "\n" + textMessage : textMessage);
 
@@ -163,37 +146,57 @@ app.post("/webhook", async (req, res) => {
 });
 
 // ==========================================
-// RUTAS ADMIN
+// RUTAS ADMIN (PASO 2: CONECTADAS A POSTGRES)
 // ==========================================
-app.get("/admin/tasas", verificarToken, (req, res) => {
+
+app.get("/admin/tasas", verificarToken, async (req, res) => {
     try {
-        if (!fs.existsSync(TASAS_PATH)) return res.json({});
-        res.json(JSON.parse(fs.readFileSync(TASAS_PATH, "utf8")));
-    } catch (e) { res.status(500).json({ error: e.message }); }
+        const result = await pool.query("SELECT * FROM rates LIMIT 1");
+        res.json(result.rows[0] || {});
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
 });
 
 app.post("/admin/tasas", verificarToken, async (req, res) => {
     try {
-        await fs.promises.writeFile(TASAS_PATH, JSON.stringify(req.body, null, 2));
+        const { brl_0, brl_100, brl_500, brl_1000, usd1, usd2 } = req.body;
+
+        await pool.query(`
+            UPDATE rates
+            SET
+                brl_0 = $1,
+                brl_100 = $2,
+                brl_500 = $3,
+                brl_1000 = $4,
+                usd1 = $5,
+                usd2 = $6,
+                updated_at = NOW()
+            WHERE id = 1
+        `, [brl_0, brl_100, brl_500, brl_1000, usd1, usd2]);
+
         res.json({ success: true });
-    } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
 });
 
-app.get("/admin/clientes", verificarToken, (req, res) => {
-    try { res.json(obtenerTodos()); } catch (e) { res.status(500).json({ error: e.message }); }
+// RUTAS DE DATOS (Recuerda que ahora deben ser async/await)
+app.get("/admin/clientes", verificarToken, async (req, res) => {
+    try { res.json(await obtenerTodos()); } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get("/admin/operaciones", verificarToken, (req, res) => {
-    try { res.json(obtenerTodas()); } catch (e) { res.status(500).json({ error: e.message }); }
+app.get("/admin/operaciones", verificarToken, async (req, res) => {
+    try { res.json(await obtenerTodas()); } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get("/admin/stats", verificarToken, (req, res) => {
-    try { res.json(obtenerEstadisticas()); } catch (e) { res.status(500).json({ error: e.message }); }
+app.get("/admin/stats", verificarToken, async (req, res) => {
+    try { res.json(await obtenerEstadisticas()); } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post("/admin/confirmar-operacion/:id", verificarToken, (req, res) => {
+app.post("/admin/confirmar-operacion/:id", verificarToken, async (req, res) => {
     try {
-        const ok = confirmarOperacion(req.params.id);
+        const ok = await confirmarOperacion(req.params.id);
         res.json({ success: ok });
     } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
@@ -205,5 +208,5 @@ app.get("/dashboard", verificarToken, (req, res) => {
 app.get("/", (req, res) => res.send("YordaBot Online ✅"));
 
 app.listen(PORT, "0.0.0.0", () => {
-    console.log(`🚀 SERVIDOR BLINDADO EN PUERTO ${PORT}`);
+    console.log(`🚀 SERVIDOR CONECTADO A POSTGRES EN PUERTO ${PORT}`);
 });
