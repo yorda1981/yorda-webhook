@@ -35,8 +35,8 @@ async function procesarMensaje(phone, text, pushName = "") {
         // 1. DETECCIÓN DE IDIOMA
         const esEspanol = /hola|buenas|buenos dias|buen dia|quiero|cuanto|enviar|mandar|giro|transferencia|dinero|cuba|pesos|cup|reales|usd|dolares|dolar/i.test(texto);
 
-        // 2. MEMORIA DE CLIENTE
-        const cliente = obtenerCliente(phone);
+        // 2. MEMORIA DE CLIENTE (CORREGIDO: Ahora es asíncrono con await)
+        const cliente = await obtenerCliente(phone);
 
         // 3. ATENCIÓN HUMANA / CASOS ESPECIALES
         if (
@@ -121,7 +121,6 @@ async function procesarMensaje(phone, text, pushName = "") {
             }
 
             if (cliente.ultimoMonto > 0) {
-                // CORRECCIÓN: await para obtener el array real de la DB
                 const operaciones = await obtenerTodas();
                 
                 const yaExistePendiente = operaciones.find(op => 
@@ -131,7 +130,6 @@ async function procesarMensaje(phone, text, pushName = "") {
                 );
 
                 if (!yaExistePendiente) {
-                    // CORRECCIÓN: await para asegurar el guardado en PostgreSQL
                     await agregarOperacion({
                         phone: phone,
                         nombre: pushName || cliente.nombre || "Cliente",
@@ -156,9 +154,10 @@ async function procesarMensaje(phone, text, pushName = "") {
         }
 
         // ---------------------------------------------------------
-        // 6. CÁLCULO USD -> CUP
+        // 6. CÁLCULO USD -> CUP (Corregido con await para DB)
         // ---------------------------------------------------------
         if (esMontoValido && (texto.includes("usd") || texto.includes("dolar") || texto.includes("dolares")) && !texto.includes("real") && !texto.includes("brl")) {
+            
             const tipoUsd = texto.includes("prepago") ? "usd_prepago" : "usd_clasica";
             const resultado = await calcularOperacion({ tipo: tipoUsd, valor });
 
@@ -176,7 +175,7 @@ async function procesarMensaje(phone, text, pushName = "") {
         }
 
         // ---------------------------------------------------------
-        // 7. CÁLCULO BRL -> CUP
+        // 7. CÁLCULO BRL -> CUP (Corregido con await para DB)
         // ---------------------------------------------------------
         if (esMontoValido && !texto.includes("usd") && !texto.includes("dolar") && !texto.includes("dolares") && !texto.includes("cup") && !texto.includes("mlc")) {
             const resultado = await calcularOperacion({ tipo: "brl_cup", valor });
@@ -188,7 +187,7 @@ async function procesarMensaje(phone, text, pushName = "") {
                     fechaEstado: new Date().toISOString(),
                     fechaCotizacion: new Date().toISOString()
                 });
-                const respuesta = `💵 R$${valor} hoy serían ${formatearNumero(resultado.cup)} CUP 🇨🇺\n\n¿Deseas realizar la operación ahora?`;
+                const respuesta = `💵 R$${valor} hoy serían ${formatearNumero(resultado.cup)} CUP 🇨🇺\n\n¿Deseas realizar la operation ahora?`;
                 await enviarMensaje(phone, respuesta);
                 return respuesta;
             }
