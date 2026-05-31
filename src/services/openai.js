@@ -1,9 +1,13 @@
 require("dotenv").config();
+
 const OpenAI = require("openai");
 
-const { enviarMensaje } = require("./zapi");
+const { enviarMensaje, enviarImagen } = require("./zapi");
+
 const { calcularOperacion } = require("./calculator");
+
 const { guardarCliente, obtenerCliente } = require("./customer-memory");
+
 const { agregarOperacion, obtenerTodas } = require("./operations");
 
 const openai = new OpenAI({
@@ -13,7 +17,9 @@ const openai = new OpenAI({
 // ==========================================
 // CONFIGURACIONES DE SEGURIDAD (V. FINAL)
 // ==========================================
+
 const DOS_HORAS = 2 * 60 * 60 * 1000;
+
 const gatilhos = ["yordanys", "asesor", "humano", "ayuda", "informacion", "contacto"];
 
 function normalizarTexto(texto) {
@@ -29,7 +35,9 @@ function formatearNumero(numero) {
 
 async function procesarMensaje(phone, text, pushName = "") {
     try {
+
         if (!text || !phone) return "";
+
         const texto = normalizarTexto(text);
 
         // 1. DETECCIÓN DE IDIOMA
@@ -48,6 +56,7 @@ async function procesarMensaje(phone, text, pushName = "") {
             const respuesta = esEspanol
                 ? "Perfecto 😊\nYordanys te atenderá enseguida para darte la cotización exacta de esa operación. 👌"
                 : "Perfeito 😊\nYordanys irá atendê-lo imediatamente para lhe dar a cotação exata dessa operação. 👌";
+
             await enviarMensaje(phone, respuesta);
             return respuesta;
         }
@@ -59,7 +68,7 @@ async function procesarMensaje(phone, text, pushName = "") {
         if (soloNumeros.length === 16) {
             console.log("💳 Tarjeta detectada, guardando silencio.");
             await guardarCliente({ phone, tarjeta: soloNumeros });
-            return ""; 
+            return "";
         }
 
         const esMontoValido = valor && valor >= 10 && valor <= 50000;
@@ -68,7 +77,7 @@ async function procesarMensaje(phone, text, pushName = "") {
         // 4. LÓGICA DE ENVÍO DE PIX
         // ---------------------------------------------------------
         if (/pix|envia el pix|envía el pix|pasame el pix|pásame el pix|quiero hacerlo|voy a pagar/i.test(texto)) {
-            
+
             if (!cliente || !cliente.ultimo_monto || cliente.ultimo_monto <= 0) {
                 const msg = esEspanol
                     ? "Primero indícame el monto que deseas enviar. 😊"
@@ -79,6 +88,7 @@ async function procesarMensaje(phone, text, pushName = "") {
 
             const ahora = Date.now();
             const fechaCotRef = cliente.fecha_cotizacion || cliente.updated_at;
+
             if (ahora - new Date(fechaCotRef).getTime() > DOS_HORAS) {
                 const msgVencido = esEspanol
                     ? "La cotización anterior ha vencido. Indícame nuevamente el monto para actualizar la tasa. 📈"
@@ -88,7 +98,7 @@ async function procesarMensaje(phone, text, pushName = "") {
             }
 
             const llavePix = "8becaaf5-f296-4cbc-a115-46e3d23b042a";
-            
+
             await guardarCliente({
                 phone,
                 estado: "aguardando_comprovante",
@@ -96,7 +106,17 @@ async function procesarMensaje(phone, text, pushName = "") {
                 fechaPix: new Date().toISOString()
             });
 
-            await enviarMensaje(phone, llavePix);
+            await enviarImagen(
+                phone,
+                "https://yorda-webhook-production.up.railway.app/pix.jpg.png",
+                "📲 Escanee el QR PIX para realizar el pago."
+            );
+
+            await enviarMensaje(
+                phone,
+                "🔑 Clave PIX:\n\n8becaaf5-f296-4cbc-a115-46e3d23b042a\n\nDespués envíe el comprobante."
+            );
+
             return llavePix;
         }
 
@@ -104,26 +124,27 @@ async function procesarMensaje(phone, text, pushName = "") {
         // 5. INTENCIÓN: COMPROBANTES
         // ---------------------------------------------------------
         if (/paguei|pague|comprovante|comprobante|feito|realizado|ya envie|ya mande/i.test(texto)) {
-            
+
             if (!cliente || cliente.estado !== "aguardando_comprovante") {
-                console.log(`⚠️ Comprobante ignorado: no estaba en flujo de pago.`);
-                return ""; 
+                console.log("⚠️ Comprobante ignorado: no estaba en flujo de pago.");
+                return "";
             }
 
             const ahora = Date.now();
             const fechaPixRef = cliente.fecha_pix || cliente.fecha_estado;
+
             if (ahora - new Date(fechaPixRef).getTime() > DOS_HORAS) {
-                console.log(`⏰ Sesión de pago vencida.`);
+                console.log("⏰ Sesión de pago vencida.");
                 await guardarCliente({ phone, estado: null, fechaEstado: null, fechaPix: null });
-                return ""; 
+                return "";
             }
 
             if (cliente.ultimo_monto > 0) {
                 const operaciones = await obtenerTodas();
-                
-                const yaExistePendiente = operaciones.find(op => 
-                    op.phone === phone && 
-                    op.status === "pendiente" && 
+
+                const yaExistePendiente = operaciones.find(op =>
+                    op.phone === phone &&
+                    op.status === "pendiente" &&
                     Number(op.monto) === Number(cliente.ultimo_monto)
                 );
 
@@ -134,7 +155,7 @@ async function procesarMensaje(phone, text, pushName = "") {
                         monto: cliente.ultimo_monto,
                         tipo: cliente.tipo_favorito
                     });
-                    
+
                     await guardarCliente({
                         phone,
                         estado: "comprovante_recibido",
@@ -146,7 +167,7 @@ async function procesarMensaje(phone, text, pushName = "") {
             const respuesta = esEspanol
                 ? "Perfecto 😊\nRecibimos tu comprobante. Procesaremos tu envío enseguida."
                 : "Perfeito 😊\nRecebemos seu comprovante. Processaremos seu envio imediatamente.";
-            
+
             await enviarMensaje(phone, respuesta);
             return respuesta;
         }
@@ -155,20 +176,21 @@ async function procesarMensaje(phone, text, pushName = "") {
         // 6. CÁLCULO USD -> CUP
         // ---------------------------------------------------------
         if (esMontoValido && (texto.includes("usd") || texto.includes("dolar") || texto.includes("dolares")) && !texto.includes("real") && !texto.includes("brl")) {
-            
+
             const tipoUsd = texto.includes("prepago") ? "usd_prepago" : "usd_clasica";
             const resultado = await calcularOperacion({ tipo: tipoUsd, valor });
 
             if (resultado) {
-                await guardarCliente({ 
-                    phone, 
-                    nombre: pushName, 
-                    monto: valor, 
+                await guardarCliente({
+                    phone,
+                    nombre: pushName,
+                    monto: valor,
                     tipo: tipoUsd,
-                    estado: "cotizacion_realizada", 
+                    estado: "cotizacion_realizada",
                     fechaEstado: new Date().toISOString(),
                     fechaCotizacion: new Date().toISOString()
                 });
+
                 const respuesta = `💵 ${valor} USD hoy rinden ${formatearNumero(resultado.cup)} CUP 🇨🇺\n\n¿Deseas continuar?`;
                 await enviarMensaje(phone, respuesta);
                 return respuesta;
@@ -179,21 +201,20 @@ async function procesarMensaje(phone, text, pushName = "") {
         // 7. CÁLCULO BRL -> CUP (Con Mensajes de Incentivo)
         // ---------------------------------------------------------
         if (esMontoValido && !texto.includes("usd") && !texto.includes("dolar") && !texto.includes("dolares") && !texto.includes("cup") && !texto.includes("mlc")) {
-            
+
             const resultado = await calcularOperacion({ tipo: "brl_cup", valor });
 
             if (resultado) {
-                await guardarCliente({ 
-                    phone, 
-                    nombre: pushName, 
-                    monto: valor, 
+                await guardarCliente({
+                    phone,
+                    nombre: pushName,
+                    monto: valor,
                     tipo: "brl_cup",
-                    estado: "cotizacion_realizada", 
+                    estado: "cotizacion_realizada",
                     fechaEstado: new Date().toISOString(),
                     fechaCotizacion: new Date().toISOString()
                 });
 
-                // Lógica de Mensaje Extra por Escalas
                 let mensajeExtra = "";
                 if (valor < 100) {
                     mensajeExtra = "\n\n💡 A partir de R$100 la tasa mejora y recibes más CUP.";
@@ -204,13 +225,12 @@ async function procesarMensaje(phone, text, pushName = "") {
                 }
 
                 const respuesta = `💵 R$${valor} hoy serían ${formatearNumero(resultado.cup)} CUP 🇨🇺${mensajeExtra}\n\n¿Deseas realizar la operación ahora?`;
-
                 await enviarMensaje(phone, respuesta);
                 return respuesta;
             }
         }
 
-        if (valor && !esMontoValido) return ""; 
+        if (valor && !esMontoValido) return "";
 
         const activarIA = gatilhos.some(g => texto.includes(normalizarTexto(g)));
         if (!activarIA) return "";
