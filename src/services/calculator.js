@@ -1,47 +1,39 @@
-const fs = require("fs");
-const path = require("path");
+const pool = require("../../db");
 
-const TASAS_PATH = path.join(
-    __dirname,
-    "../config/tasas.json"
-);
-
-function leerTasas() {
+async function leerTasas() {
     try {
+        const result = await pool.query(
+            "SELECT * FROM rates LIMIT 1"
+        );
 
-        if (!fs.existsSync(TASAS_PATH)) {
-            console.error("❌ tasas.json no encontrado");
+        if (result.rows.length === 0) {
+            console.error("❌ No hay tasas en PostgreSQL");
             return null;
         }
 
-        const raw = fs.readFileSync(
-            TASAS_PATH,
-            "utf8"
-        );
-
-        const data = JSON.parse(raw);
+        const tasas = result.rows[0];
 
         console.log(
-            "📊 TASAS CARGADAS:",
-            JSON.stringify(data, null, 2)
+            "📊 TASAS CARGADAS DESDE POSTGRESQL:",
+            tasas
         );
 
-        return data;
+        return tasas;
 
-    } catch (e) {
+    } catch (err) {
 
         console.error(
-            "❌ Error leyendo tasas.json:",
-            e.message
+            "❌ Error leyendo tasas PostgreSQL:",
+            err.message
         );
 
         return null;
     }
 }
 
-function calcularOperacion({ tipo, valor }) {
+async function calcularOperacion({ tipo, valor }) {
 
-    const tasas = leerTasas();
+    const tasas = await leerTasas();
 
     if (!tasas) return null;
 
