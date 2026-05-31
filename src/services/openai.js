@@ -11,7 +11,7 @@ const openai = new OpenAI({
 });
 
 // ==========================================
-// CONFIGURACIONES DE SEGURIDAD (V. TOTAL)
+// CONFIGURACIONES DE SEGURIDAD (V. POSTGRES)
 // ==========================================
 const DOS_HORAS = 2 * 60 * 60 * 1000;
 const gatilhos = ["yordanys", "asesor", "humano", "ayuda", "informacion", "contacto"];
@@ -35,10 +35,10 @@ async function procesarMensaje(phone, text, pushName = "") {
         // 1. DETECCIÓN DE IDIOMA
         const esEspanol = /hola|buenas|buenos dias|buen dia|quiero|cuanto|enviar|mandar|giro|transferencia|dinero|cuba|pesos|cup|reales|usd|dolares|dolar/i.test(texto);
 
-        // 2. MEMORIA DE CLIENTE (CORREGIDO: Ahora es asíncrono con await)
+        // 2. MEMORIA DE CLIENTE (Asíncrono)
         const cliente = await obtenerCliente(phone);
 
-        // 3. ATENCIÓN HUMANA / CASOS ESPECIALES
+        // 3. ATENCIÓN HUMANA
         if (
             /yordanys|humano|asesor|tengo cup|dinero en cuba|enviar para brasil|traer para brasil|vender cup|cup por reales/i.test(texto) ||
             ((texto.includes("usd") || texto.includes("dolar") || texto.includes("dolares")) && (texto.includes("real") || texto.includes("brl") || texto.includes("brasil"))) ||
@@ -52,26 +52,25 @@ async function procesarMensaje(phone, text, pushName = "") {
             return respuesta;
         }
 
-        // ---------------------------------------------------------
         // VALIDACIÓN DE NÚMEROS (Tarjetas vs Montos)
-        // ---------------------------------------------------------
         const soloNumeros = texto.replace(/\D/g, '');
         const valor = soloNumeros.length > 0 ? Number(soloNumeros) : null;
 
         if (soloNumeros.length === 16) {
-            console.log("💳 Tarjeta detectada, guardando y guardando silencio.");
-            guardarCliente({ phone, tarjeta: soloNumeros });
+            console.log("💳 Tarjeta detectada, guardando silencio.");
+            await guardarCliente({ phone, tarjeta: soloNumeros });
             return ""; 
         }
 
         const esMontoValido = valor && valor >= 10 && valor <= 50000;
 
         // ---------------------------------------------------------
-        // 4. LÓGICA DE ENVÍO DE PIX (Validación de Existencia y Frescura)
+        // 4. LÓGICA DE ENVÍO DE PIX (Nombres de campos corregidos)
         // ---------------------------------------------------------
         if (/pix|envia el pix|envía el pix|pasame el pix|pásame el pix|quiero hacerlo|voy a pagar/i.test(texto)) {
             
-            if (!cliente || !cliente.ultimoMonto || cliente.ultimoMonto <= 0) {
+            // Corrección: ultimo_monto (Postgres)
+            if (!cliente || !cliente.ultimo_monto || cliente.ultimo_monto <= 0) {
                 const msg = esEspanol
                     ? "Primero indícame el monto que deseas enviar. 😊"
                     : "Primeiro informe o valor que deseja enviar. 😊";
@@ -79,8 +78,9 @@ async function procesarMensaje(phone, text, pushName = "") {
                 return msg;
             }
 
+            // Corrección: fecha_cotizacion / updated_at (Postgres)
             const ahora = Date.now();
-            const fechaCotRef = cliente.fechaCotizacion || cliente.updatedAt;
+            const fechaCotRef = cliente.fecha_cotizacion || cliente.updated_at;
             if (ahora - new Date(fechaCotRef).getTime() > DOS_HORAS) {
                 const msgVencido = esEspanol
                     ? "La cotización anterior ha vencido. Indícame nuevamente el monto para actualizar la tasa. 📈"
@@ -91,11 +91,12 @@ async function procesarMensaje(phone, text, pushName = "") {
 
             const llavePix = "8becaaf5-f296-4cbc-a115-46e3d23b042a";
             
-            guardarCliente({
+            // Corrección: await guardarCliente
+            await guardarCliente({
                 phone,
                 estado: "aguardando_comprovante",
-                fechaEstado: new Date().toISOString(),
-                fechaPix: new Date().toISOString()
+                fecha_estado: new Date().toISOString(),
+                fecha_pix: new Date().toISOString()
             });
 
             await enviarMensaje(phone, llavePix);
@@ -103,44 +104,46 @@ async function procesarMensaje(phone, text, pushName = "") {
         }
 
         // ---------------------------------------------------------
-        // 5. INTENCIÓN: COMPROBANTES (Paso 3: Seguridad con await DB)
+        // 5. INTENCIÓN: COMPROBANTES (Nombres de campos corregidos)
         // ---------------------------------------------------------
         if (/paguei|pague|comprovante|comprobante|feito|realizado|ya envie|ya mande/i.test(texto)) {
             
             if (!cliente || cliente.estado !== "aguardando_comprovante") {
-                console.log(`⚠️ Comprobante ignorado de ${phone}: no estaba en flujo de pago.`);
+                console.log(`⚠️ Comprobante ignorado: no estaba en flujo de pago.`);
                 return ""; 
             }
 
+            // Corrección: fecha_pix / fecha_estado (Postgres)
             const ahora = Date.now();
-            const fechaPixRef = cliente.fechaPix || cliente.fechaEstado;
+            const fechaPixRef = cliente.fecha_pix || cliente.fecha_estado;
             if (ahora - new Date(fechaPixRef).getTime() > DOS_HORAS) {
-                console.log(`⏰ Sesión de pago vencida para ${phone}. Excedió las 2 horas.`);
-                guardarCliente({ phone, estado: null, fechaEstado: null, fechaPix: null });
+                console.log(`⏰ Sesión de pago vencida.`);
+                await guardarCliente({ phone, estado: null, fecha_estado: null, fecha_pix: null });
                 return ""; 
             }
 
-            if (cliente.ultimoMonto > 0) {
+            // Corrección: ultimo_monto
+            if (cliente.ultimo_monto > 0) {
                 const operaciones = await obtenerTodas();
                 
                 const yaExistePendiente = operaciones.find(op => 
                     op.phone === phone && 
                     op.status === "pendiente" && 
-                    Number(op.monto) === Number(cliente.ultimoMonto)
+                    Number(op.monto) === Number(cliente.ultimo_monto) // Corrección campos
                 );
 
                 if (!yaExistePendiente) {
                     await agregarOperacion({
                         phone: phone,
                         nombre: pushName || cliente.nombre || "Cliente",
-                        monto: cliente.ultimoMonto,
-                        tipo: cliente.tipoFavorito
+                        monto: cliente.ultimo_monto, // Corrección campos
+                        tipo: cliente.tipo_favorito // Corrección campos
                     });
                     
-                    guardarCliente({
+                    await guardarCliente({
                         phone,
                         estado: "comprovante_recibido",
-                        fechaEstado: new Date().toISOString()
+                        fecha_estado: new Date().toISOString()
                     });
                 }
             }
@@ -154,19 +157,18 @@ async function procesarMensaje(phone, text, pushName = "") {
         }
 
         // ---------------------------------------------------------
-        // 6. CÁLCULO USD -> CUP (Corregido con await para DB)
+        // 6. CÁLCULO USD -> CUP (await guardarCliente)
         // ---------------------------------------------------------
         if (esMontoValido && (texto.includes("usd") || texto.includes("dolar") || texto.includes("dolares")) && !texto.includes("real") && !texto.includes("brl")) {
-            
             const tipoUsd = texto.includes("prepago") ? "usd_prepago" : "usd_clasica";
             const resultado = await calcularOperacion({ tipo: tipoUsd, valor });
 
             if (resultado) {
-                guardarCliente({ 
-                    phone, nombre: pushName, monto: valor, tipo: tipoUsd,
+                await guardarCliente({ 
+                    phone, nombre: pushName, ultimo_monto: valor, tipo_favorito: tipoUsd,
                     estado: "cotizacion_realizada", 
-                    fechaEstado: new Date().toISOString(),
-                    fechaCotizacion: new Date().toISOString()
+                    fecha_estado: new Date().toISOString(),
+                    fecha_cotizacion: new Date().toISOString()
                 });
                 const respuesta = `💵 ${valor} USD hoy rinden ${formatearNumero(resultado.cup)} CUP 🇨🇺\n\n¿Deseas continuar?`;
                 await enviarMensaje(phone, respuesta);
@@ -175,19 +177,19 @@ async function procesarMensaje(phone, text, pushName = "") {
         }
 
         // ---------------------------------------------------------
-        // 7. CÁLCULO BRL -> CUP (Corregido con await para DB)
+        // 7. CÁLCULO BRL -> CUP (await guardarCliente)
         // ---------------------------------------------------------
         if (esMontoValido && !texto.includes("usd") && !texto.includes("dolar") && !texto.includes("dolares") && !texto.includes("cup") && !texto.includes("mlc")) {
             const resultado = await calcularOperacion({ tipo: "brl_cup", valor });
 
             if (resultado) {
-                guardarCliente({ 
-                    phone, nombre: pushName, monto: valor, tipo: "brl_cup",
+                await guardarCliente({ 
+                    phone, nombre: pushName, ultimo_monto: valor, tipo_favorito: "brl_cup",
                     estado: "cotizacion_realizada", 
-                    fechaEstado: new Date().toISOString(),
-                    fechaCotizacion: new Date().toISOString()
+                    fecha_estado: new Date().toISOString(),
+                    fecha_cotizacion: new Date().toISOString()
                 });
-                const respuesta = `💵 R$${valor} hoy serían ${formatearNumero(resultado.cup)} CUP 🇨🇺\n\n¿Deseas realizar la operation ahora?`;
+                const respuesta = `💵 R$${valor} hoy serían ${formatearNumero(resultado.cup)} CUP 🇨🇺\n\n¿Deseas realizar la operación ahora?`;
                 await enviarMensaje(phone, respuesta);
                 return respuesta;
             }
