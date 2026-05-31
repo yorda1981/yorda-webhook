@@ -1,50 +1,9 @@
-const fs = require("fs");
-const path = require("path");
+const pool = require("../../db");
 
-console.log("🔥 customer-memory cargado (Versión Actualizada)");
-
-const DB_PATH = path.join(__dirname, "../data/customers.json");
-
-let clientes = new Map();
-
-function asegurarDB() {
-    try {
-        if (!fs.existsSync(DB_PATH)) {
-            fs.writeFileSync(DB_PATH, JSON.stringify({}, null, 2));
-            console.log("📁 customers.json creado");
-        }
-    } catch (err) {
-        console.error("❌ Error creando DB", err);
-    }
-}
-
-function cargarClientes() {
-    try {
-        asegurarDB();
-        const raw = fs.readFileSync(DB_PATH, "utf8");
-        if (!raw || raw.trim() === "") {
-            clientes = new Map();
-            return;
-        }
-        const data = JSON.parse(raw);
-        clientes = new Map(Object.entries(data));
-        console.log(`✅ Memoria de clientes lista: ${clientes.size}`);
-    } catch (err) {
-        console.error("❌ Error cargando clientes", err);
-        clientes = new Map();
-    }
-}
-
-function guardarDB() {
-    try {
-        const obj = Object.fromEntries(clientes);
-        fs.writeFileSync(DB_PATH, JSON.stringify(obj, null, 2));
-    } catch (err) {
-        console.error("❌ Error guardando DB", err);
-    }
-}
-
-function guardarCliente({
+// ========================
+// SALVAR / ATUALIZAR CLIENTE
+// ========================
+async function guardarCliente({
     phone,
     nombre = "",
     monto = 0,
@@ -52,73 +11,174 @@ function guardarCliente({
     banco = "",
     tarjeta = "",
     estado = null,
-    fechaEstado = null
+    fechaEstado = null,
+    fechaCotizacion = null,
+    fechaPix = null
 }) {
+
+    if (!phone) return null;
+
     try {
-        if (!phone) return null;
 
-        const actual = clientes.get(phone) || {
-            nombre: "",
-            ultimoMonto: 0,
-            tipoFavorito: tipo,
-            bancoFavorito: "",
-            tarjetaFrecuente: "",
-            ultimaConsulta: null,
-            estado: null,
-            fechaEstado: null,
-            vip: false, // Ahora el VIP se gestionará por operaciones reales
-            createdAt: new Date().toISOString()
-        };
+        const existe = await pool.query(
+            "SELECT * FROM customers WHERE phone = $1",
+            [phone]
+        );
 
-        // ACTUALIZACIÓN DE MEMORIA (No suma estadísticas)
-        actual.nombre = nombre || actual.nombre;
-        
-        if (Number(monto) > 0) {
-            actual.ultimoMonto = Number(monto);
-            actual.tipoFavorito = tipo || actual.tipoFavorito;
+        if (existe.rows.length === 0) {
+
+            await pool.query(`
+                INSERT INTO customers (
+                    phone,
+                    nombre,
+                    ultimo_monto,
+                    tipo_favorito,
+                    banco_favorito,
+                    tarjeta_frecuente,
+                    estado,
+                    fecha_estado,
+                    fecha_cotizacion,
+                    fecha_pix,
+                    created_at,
+                    updated_at
+                )
+                VALUES (
+                    $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW(),NOW()
+                )
+            `, [
+                phone,
+                nombre,
+                monto,
+                tipo,
+                banco,
+                tarjeta,
+                estado,
+                fechaEstado,
+                fechaCotizacion,
+                fechaPix
+            ]);
+
+        } else {
+
+            await pool.query(`
+                UPDATE customers
+                SET
+                    nombre = COALESCE($2,nombre),
+                    ultimo_monto = CASE
+                        WHEN $3 > 0 THEN $3
+                        ELSE ultimo_monto
+                    END,
+                    tipo_favorito = COALESCE($4,tipo_favorito),
+                    banco_favorito = COALESCE($5,banco_favorito),
+                    tarjeta_frecuente = COALESCE($6,tarjeta_frecuente),
+                    estado = COALESCE($7,estado),
+                    fecha_estado = COALESCE($8,fecha_estado),
+                    fecha_cotizacion = COALESCE($9,fecha_cotizacion),
+                    fecha_pix = COALESCE($10,fecha_pix),
+                    updated_at = NOW()
+                WHERE phone = $1
+            `, [
+                phone,
+                nombre,
+                monto,
+                tipo,
+                banco,
+                tarjeta,
+                estado,
+                fechaEstado,
+                fechaCotizacion,
+                fechaPix
+            ]);
         }
 
-        actual.bancoFavorito = banco || actual.bancoFavorito;
-        actual.tarjetaFrecuente = tarjeta || actual.tarjetaFrecuente;
+        return true;
 
-        // Actualización de estado (Paso 1)
-        if (estado !== null) {
-            actual.estado = estado;
-        }
-
-        if (fechaEstado !== null) {
-            actual.fechaEstado = fechaEstado;
-        }
-
-        actual.ultimaConsulta = new Date().toISOString();
-        actual.updatedAt = new Date().toISOString();
-
-        clientes.set(phone, actual);
-        guardarDB();
-        return actual;
     } catch (err) {
-        console.error("❌ Error guardando memoria de cliente", err);
+
+        console.error(
+            "❌ Error guardando cliente:",
+            err.message
+        );
+
+        return false;
+    }
+}
+
+// ========================
+// OBTENER CLIENTE
+// ========================
+async function obtenerCliente(phone) {
+
+    try {
+
+        const result = await pool.query(
+            "SELECT * FROM customers WHERE phone = $1",
+            [phone]
+        );
+
+        return result.rows[0] || null;
+
+    } catch (err) {
+
+        console.error(
+            "❌ Error obteniendo cliente:",
+            err.message
+        );
+
         return null;
     }
 }
 
-function obtenerCliente(phone) {
-    return clientes.get(phone) || null;
+// ========================
+// TODOS LOS CLIENTES
+// ========================
+async function obtenerTodos() {
+
+    try {
+
+        const result = await pool.query(`
+            SELECT *
+            FROM customers
+            ORDER BY updated_at DESC
+        `);
+
+        return result.rows;
+
+    } catch (err) {
+
+        console.error(
+            "❌ Error obteniendo clientes:",
+            err.message
+        );
+
+        return [];
+    }
 }
 
-function obtenerTodos() {
-    return Array.from(clientes.entries()).map(([phone, data]) => ({
-        phone,
-        ...data
-    }));
-}
+// ========================
+// ELIMINAR CLIENTE
+// ========================
+async function eliminarCliente(phone) {
 
-function eliminarCliente(phone) {
-    clientes.delete(phone);
-    guardarDB();
-}
+    try {
 
-cargarClientes();
+        await pool.query(
+            "DELETE FROM customers WHERE phone = $1",
+            [phone]
+        );
+
+        return true;
+
+    } catch (err) {
+
+        console.error(
+            "❌ Error eliminando cliente:",
+            err.message
+        );
+
+        return false;
+    }
+}
 
 module.exports = {
     guardarCliente,
