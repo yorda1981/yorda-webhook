@@ -58,14 +58,12 @@ async function procesarMensaje(phone, text, pushName = "") {
         const soloNumeros = texto.replace(/\D/g, '');
         const valor = soloNumeros.length > 0 ? Number(soloNumeros) : null;
 
-        // PRIORIDAD 1: Si tiene 16 dígitos, es una tarjeta. No cotizar.
         if (soloNumeros.length === 16) {
             console.log("💳 Tarjeta detectada, guardando y guardando silencio.");
             guardarCliente({ phone, tarjeta: soloNumeros });
             return ""; 
         }
 
-        // PRIORIDAD 2: Rango lógico para remesas (10 a 50.000)
         const esMontoValido = valor && valor >= 10 && valor <= 50000;
 
         // ---------------------------------------------------------
@@ -73,7 +71,6 @@ async function procesarMensaje(phone, text, pushName = "") {
         // ---------------------------------------------------------
         if (/pix|envia el pix|envía el pix|pasame el pix|pásame el pix|quiero hacerlo|voy a pagar/i.test(texto)) {
             
-            // Candado A: ¿Existe monto cotizado previo en la memoria?
             if (!cliente || !cliente.ultimoMonto || cliente.ultimoMonto <= 0) {
                 const msg = esEspanol
                     ? "Primero indícame el monto que deseas enviar. 😊"
@@ -82,7 +79,6 @@ async function procesarMensaje(phone, text, pushName = "") {
                 return msg;
             }
 
-            // Candado B: ¿La cotización sigue vigente? (Máximo 2 horas usando fechaCotizacion)
             const ahora = Date.now();
             const fechaCotRef = cliente.fechaCotizacion || cliente.updatedAt;
             if (ahora - new Date(fechaCotRef).getTime() > DOS_HORAS) {
@@ -107,7 +103,7 @@ async function procesarMensaje(phone, text, pushName = "") {
         }
 
         // ---------------------------------------------------------
-        // 5. INTENCIÓN: COMPROBANTES (Validación de Estado y Expiración del PIX)
+        // 5. INTENCIÓN: COMPROBANTES (Paso 3: Seguridad con await DB)
         // ---------------------------------------------------------
         if (/paguei|pague|comprovante|comprobante|feito|realizado|ya envie|ya mande/i.test(texto)) {
             
@@ -125,13 +121,18 @@ async function procesarMensaje(phone, text, pushName = "") {
             }
 
             if (cliente.ultimoMonto > 0) {
-                const operaciones = obtenerTodas();
+                // CORRECCIÓN: await para obtener el array real de la DB
+                const operaciones = await obtenerTodas();
+                
                 const yaExistePendiente = operaciones.find(op => 
-                    op.phone === phone && op.status === "pendiente" && op.monto === cliente.ultimoMonto
+                    op.phone === phone && 
+                    op.status === "pendiente" && 
+                    Number(op.monto) === Number(cliente.ultimoMonto)
                 );
 
                 if (!yaExistePendiente) {
-                    agregarOperacion({
+                    // CORRECCIÓN: await para asegurar el guardado en PostgreSQL
+                    await agregarOperacion({
                         phone: phone,
                         nombre: pushName || cliente.nombre || "Cliente",
                         monto: cliente.ultimoMonto,
@@ -155,24 +156,19 @@ async function procesarMensaje(phone, text, pushName = "") {
         }
 
         // ---------------------------------------------------------
-        // 6. CÁLCULO USD -> CUP (Corregido con await para DB)
+        // 6. CÁLCULO USD -> CUP
         // ---------------------------------------------------------
         if (esMontoValido && (texto.includes("usd") || texto.includes("dolar") || texto.includes("dolares")) && !texto.includes("real") && !texto.includes("brl")) {
-            
             const tipoUsd = texto.includes("prepago") ? "usd_prepago" : "usd_clasica";
             const resultado = await calcularOperacion({ tipo: tipoUsd, valor });
 
             if (resultado) {
                 guardarCliente({ 
-                    phone, 
-                    nombre: pushName, 
-                    monto: valor, 
-                    tipo: tipoUsd,
+                    phone, nombre: pushName, monto: valor, tipo: tipoUsd,
                     estado: "cotizacion_realizada", 
                     fechaEstado: new Date().toISOString(),
                     fechaCotizacion: new Date().toISOString()
                 });
-
                 const respuesta = `💵 ${valor} USD hoy rinden ${formatearNumero(resultado.cup)} CUP 🇨🇺\n\n¿Deseas continuar?`;
                 await enviarMensaje(phone, respuesta);
                 return respuesta;
@@ -180,40 +176,33 @@ async function procesarMensaje(phone, text, pushName = "") {
         }
 
         // ---------------------------------------------------------
-        // 7. CÁLCULO BRL -> CUP (Corregido con await para DB)
+        // 7. CÁLCULO BRL -> CUP
         // ---------------------------------------------------------
         if (esMontoValido && !texto.includes("usd") && !texto.includes("dolar") && !texto.includes("dolares") && !texto.includes("cup") && !texto.includes("mlc")) {
-            
             const resultado = await calcularOperacion({ tipo: "brl_cup", valor });
 
             if (resultado) {
                 guardarCliente({ 
-                    phone, 
-                    nombre: pushName, 
-                    monto: valor, 
-                    tipo: "brl_cup",
+                    phone, nombre: pushName, monto: valor, tipo: "brl_cup",
                     estado: "cotizacion_realizada", 
                     fechaEstado: new Date().toISOString(),
                     fechaCotizacion: new Date().toISOString()
                 });
-
                 const respuesta = `💵 R$${valor} hoy serían ${formatearNumero(resultado.cup)} CUP 🇨🇺\n\n¿Deseas realizar la operación ahora?`;
                 await enviarMensaje(phone, respuesta);
                 return respuesta;
             }
         }
 
-        // 8. BLOQUEO PREVENTIVO (Fuera de rango o sin intención)
         if (valor && !esMontoValido) return ""; 
 
-        // 9. OPENAI FALLBACK
         const activarIA = gatilhos.some(g => texto.includes(normalizarTexto(g)));
         if (!activarIA) return "";
 
         const completion = await openai.chat.completions.create({
             model: "gpt-4o-mini",
             messages: [
-                { role: "system", content: "Eres YordaBot. Si el cliente quiere hablar con un humano o asesor, confirma que Yordanys lo atenderá. No inventes tasas ni calcules dinero." },
+                { role: "system", content: "Eres YordaBot. Si el cliente quiere hablar con un humano o asesor, confirma que Yordanys lo atenderá." },
                 { role: "user", content: text }
             ],
             temperature: 0.3,
