@@ -6,61 +6,51 @@ const {
   ZAPI_CLIENT_TOKEN
 } = require("../config/env");
 
-const logger =
-  require("../utils/logger");
+const logger = require("../utils/logger");
 
-async function enviarMensaje(
-  phone,
-  message
-) {
-
+async function enviarMensaje(phone, message) {
   try {
-
     await axios({
-
       method: "post",
-
-      url:
-`https://api.z-api.io/instances/${ZAPI_INSTANCE}/token/${ZAPI_TOKEN}/send-text`,
-
+      url: `https://api.z-api.io/instances/${ZAPI_INSTANCE}/token/${ZAPI_TOKEN}/send-text`,
       headers: {
-
-        "Client-Token":
-          ZAPI_CLIENT_TOKEN,
-
-        "Content-Type":
-          "application/json"
+        "Client-Token": ZAPI_CLIENT_TOKEN,
+        "Content-Type": "application/json"
       },
-
       data: {
-
         phone,
-
-        message:
-          String(message)
-          .replace(/\*/g, "")
-          .trim(),
-
-        checkContact:
-          false
+        message: String(message).replace(/\*/g, "").trim(),
+        checkContact: false
       },
-
-      timeout:
-        15000
+      timeout: 15000
     });
-
   } catch (e) {
+    logger("error", "ZAPI_SEND_ERROR", { err: e.message });
+  }
+}
 
-    logger(
-      "error",
-      "ZAPI_SEND_ERROR",
-      {
-        err: e.message
-      }
-    );
+async function enviarImagen(phone, imageUrl, caption = "") {
+  try {
+    await axios({
+      method: "post",
+      url: `https://api.z-api.io/instances/${ZAPI_INSTANCE}/token/${ZAPI_TOKEN}/send-image`,
+      headers: {
+        "Client-Token": ZAPI_CLIENT_TOKEN,
+        "Content-Type": "application/json"
+      },
+      data: {
+        phone,
+        image: imageUrl,
+        caption
+      },
+      timeout: 15000
+    });
+  } catch (e) {
+    logger("error", "ZAPI_IMAGE_ERROR", { err: e.message });
   }
 }
 
 module.exports = {
-  enviarMensaje
+  enviarMensaje,
+  enviarImagen
 };
