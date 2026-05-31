@@ -1,102 +1,177 @@
-const fs = require("fs");
-const path = require("path");
-
-const DB = path.join(__dirname, "../data/operations.json");
-
-let operaciones = [];
+const pool = require("../../db");
 
 // =====================
-// CARGAR AL INICIO
+// AGREGAR OPERACIÓN
 // =====================
+async function agregarOperacion(data) {
+
+```
 try {
-  if (fs.existsSync(DB)) {
-    const raw = fs.readFileSync(DB, "utf8");
-    operaciones = raw ? JSON.parse(raw) : [];
-  }
-} catch (e) {
-    console.error("❌ Error cargando operaciones:", e.message);
-    operaciones = [];
+
+    const result = await pool.query(`
+        INSERT INTO operations (
+            phone,
+            nombre,
+            monto,
+            tipo,
+            status,
+            created_at
+        )
+        VALUES ($1,$2,$3,$4,'pendiente',NOW())
+        RETURNING *
+    `, [
+        data.phone || "Sin teléfono",
+        data.nombre || "Cliente",
+        Number(data.monto || 0),
+        data.tipo || "brl_cup"
+    ]);
+
+    console.log(
+        `⏳ Operación PENDIENTE: R$${data.monto}`
+    );
+
+    return result.rows[0];
+
+} catch (err) {
+
+    console.error(
+        "❌ Error agregando operación:",
+        err.message
+    );
+
+    return null;
+}
+```
+
 }
 
 // =====================
-// GUARDAR EN DISCO
+// CONFIRMAR OPERACIÓN
 // =====================
-function guardar() {
-  try {
-    fs.writeFileSync(DB, JSON.stringify(operaciones, null, 2));
-  } catch (e) {
-    console.error("❌ Error guardando operaciones:", e.message);
-  }
-}
+async function confirmarOperacion(id) {
 
-// ==========================================
-// FASE 1 & 2: AGREGAR (Blindaje de Status)
-// ==========================================
-function agregarOperacion(data) {
-  const nueva = {
-    id: Date.now(),
-    fecha: new Date().toISOString(),
-    phone: data.phone || "Sin teléfono",
-    nombre: data.nombre || "Cliente",
-    monto: Number(data.monto || 0),
-    tipo: data.tipo || "brl_cup",
-    ...data,
-    status: "pendiente" // 🛡️ Al ir al final, sobreescribe cualquier intento externo
-  };
+```
+try {
 
-  operaciones.unshift(nueva);
-  guardar();
-  console.log(`⏳ Operación PENDIENTE: R$${nueva.monto} - ${nueva.nombre}`);
-  return nueva;
-}
+    const result = await pool.query(`
+        UPDATE operations
+        SET
+            status = 'confirmada',
+            confirmed_at = NOW()
+        WHERE id = $1
+        RETURNING *
+    `, [id]);
 
-// =====================
-// FASE 3: CONFIRMAR
-// =====================
-function confirmarOperacion(id) {
-    const op = operaciones.find(o => o.id == id);
-
-    if (!op) {
+    if (result.rows.length === 0) {
         console.log(`❌ ID no encontrado: ${id}`);
         return false;
     }
 
-    if (op.status === "confirmada") return true;
+    console.log(
+        `✅ Operación CONFIRMADA: ${id}`
+    );
 
-    op.status = "confirmada";
-    op.fechaConfirmacion = new Date().toISOString();
-    
-    guardar();
-    console.log(`✅ Operación CONFIRMADA: ID ${id}`);
     return true;
+
+} catch (err) {
+
+    console.error(
+        "❌ Error confirmando operación:",
+        err.message
+    );
+
+    return false;
+}
+```
+
 }
 
 // =====================
-// FASE 4: OBTENER TODAS
+// OBTENER TODAS
 // =====================
-function obtenerTodas() {
-  return operaciones;
+async function obtenerTodas() {
+
+```
+try {
+
+    const result = await pool.query(`
+        SELECT *
+        FROM operations
+        ORDER BY created_at DESC
+    `);
+
+    return result.rows;
+
+} catch (err) {
+
+    console.error(
+        "❌ Error obteniendo operaciones:",
+        err.message
+    );
+
+    return [];
+}
+```
+
 }
 
 // =====================
-// ESTADÍSTICAS REALES
+// ESTADÍSTICAS
 // =====================
-function obtenerEstadisticas() {
-    // Solo operaciones que pasaron por tu verificación manual
-    const confirmadas = operaciones.filter(op => op.status === "confirmada");
-    
-    const volumenTotal = confirmadas.reduce((acc, op) => acc + (Number(op.monto) || 0), 0);
-    
+async function obtenerEstadisticas() {
+
+```
+try {
+
+    const total = await pool.query(`
+        SELECT COUNT(*) AS total
+        FROM operations
+        WHERE status='confirmada'
+    `);
+
+    const volumen = await pool.query(`
+        SELECT COALESCE(SUM(monto),0) AS volumen
+        FROM operations
+        WHERE status='confirmada'
+    `);
+
+    const pendientes = await pool.query(`
+        SELECT COUNT(*) AS pendientes
+        FROM operations
+        WHERE status='pendiente'
+    `);
+
     return {
-        totalOperaciones: confirmadas.length,
-        volumenTotal: volumenTotal,
-        pendientes: operaciones.filter(op => op.status === "pendiente").length
+        totalOperaciones:
+            Number(total.rows[0].total),
+
+        volumenTotal:
+            Number(volumen.rows[0].volumen),
+
+        pendientes:
+            Number(pendientes.rows[0].pendientes)
     };
+
+} catch (err) {
+
+    console.error(
+        "❌ Error obteniendo estadísticas:",
+        err.message
+    );
+
+    return {
+        totalOperaciones: 0,
+        volumenTotal: 0,
+        pendientes: 0
+    };
+}
+```
+
 }
 
 module.exports = {
-  agregarOperacion,
-  confirmarOperacion,
-  obtenerTodas,
-  obtenerEstadisticas
+agregarOperacion,
+confirmarOperacion,
+obtenerTodas,
+obtenerEstadisticas
 };
