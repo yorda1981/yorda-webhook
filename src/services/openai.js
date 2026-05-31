@@ -38,7 +38,7 @@ async function procesarMensaje(phone, text, pushName = "") {
         // 2. MEMORIA DE CLIENTE (Asíncrono)
         const cliente = await obtenerCliente(phone);
 
-        // 3. ATENCIÓN HUMANA / CASOS ESPECIALES
+        // 3. ATENCIÓN HUMANA
         if (
             /yordanys|humano|asesor|tengo cup|dinero en cuba|enviar para brasil|traer para brasil|vender cup|cup por reales/i.test(texto) ||
             ((texto.includes("usd") || texto.includes("dolar") || texto.includes("dolares")) && (texto.includes("real") || texto.includes("brl") || texto.includes("brasil"))) ||
@@ -78,7 +78,6 @@ async function procesarMensaje(phone, text, pushName = "") {
             }
 
             const ahora = Date.now();
-            // Referencia a campos de la DB
             const fechaCotRef = cliente.fecha_cotizacion || cliente.updated_at;
             if (ahora - new Date(fechaCotRef).getTime() > DOS_HORAS) {
                 const msgVencido = esEspanol
@@ -90,7 +89,6 @@ async function procesarMensaje(phone, text, pushName = "") {
 
             const llavePix = "8becaaf5-f296-4cbc-a115-46e3d23b042a";
             
-            // CORRECCIÓN: Usar nombres de propiedades que el Ledger/Memory procese a snake_case
             await guardarCliente({
                 phone,
                 estado: "aguardando_comprovante",
@@ -178,7 +176,7 @@ async function procesarMensaje(phone, text, pushName = "") {
         }
 
         // ---------------------------------------------------------
-        // 7. CÁLCULO BRL -> CUP
+        // 7. CÁLCULO BRL -> CUP (Con Mensajes de Incentivo)
         // ---------------------------------------------------------
         if (esMontoValido && !texto.includes("usd") && !texto.includes("dolar") && !texto.includes("dolares") && !texto.includes("cup") && !texto.includes("mlc")) {
             
@@ -194,7 +192,19 @@ async function procesarMensaje(phone, text, pushName = "") {
                     fechaEstado: new Date().toISOString(),
                     fechaCotizacion: new Date().toISOString()
                 });
-                const respuesta = `💵 R$${valor} hoy serían ${formatearNumero(resultado.cup)} CUP 🇨🇺\n\n¿Deseas realizar la operación ahora?`;
+
+                // Lógica de Mensaje Extra por Escalas
+                let mensajeExtra = "";
+                if (valor < 100) {
+                    mensajeExtra = "\n\n💡 A partir de R$100 la tasa mejora y recibes más CUP.";
+                } else if (valor >= 100 && valor < 500) {
+                    mensajeExtra = "\n\n🔥 A partir de R$500 la tasa vuelve a mejorar.";
+                } else if (valor >= 500 && valor < 1000) {
+                    mensajeExtra = "\n\n🚀 A partir de R$1000 obtienes nuestra mejor tasa.";
+                }
+
+                const respuesta = `💵 R$${valor} hoy serían ${formatearNumero(resultado.cup)} CUP 🇨🇺${mensajeExtra}\n\n¿Deseas realizar la operación ahora?`;
+
                 await enviarMensaje(phone, respuesta);
                 return respuesta;
             }
