@@ -11,8 +11,7 @@ const pool = require("./db");
 // SERVICIOS
 // ==========================================
 const openaiService = require("./src/services/openai");
-const { obtenerTodos } = require("./src/services/customer-memory");
-const { obtenerClientePorTelefono } = require("./src/services/customer-memory");
+const { obtenerTodos, obtenerCliente } = require("./src/services/customer-memory");
 const {
     obtenerTodas,
     confirmarOperacion,
@@ -80,6 +79,26 @@ app.post("/webhook", async (req, res) => {
         const body = req.body;
         if (!body) return;
 
+        // Filtrar grupos por doble seguridad
+        const phoneRaw = body.phone || body.from;
+
+        if (
+            body.isGroup ||
+            String(phoneRaw).includes("-group")
+        ) {
+            console.log("🚫 Grupo ignorado");
+            return;
+        }
+
+        if (body.isNewsletter) {
+            console.log("🚫 Newsletter ignorada");
+            return;
+        }
+
+        // Ignorar chats LID y números que no sean de Brasil
+        if (!phoneRaw || phoneRaw.includes("@lid")) return;
+        if (!phoneRaw.startsWith("55")) return;
+
         const tiposValidos = ["ReceivedCallback", "image", "document", "audio", "video"];
         if (!tiposValidos.includes(body.type)) return;
 
@@ -90,11 +109,8 @@ app.post("/webhook", async (req, res) => {
             setTimeout(() => mensajesProcesados.delete(messageId), 300000);
         }
 
-        const phoneRaw = body.phone || body.from;
         const chatName = body.chatName;
         const pushName = body.senderName || "Cliente";
-
-        if (!phoneRaw || !phoneRaw.startsWith("55")) return;
 
         // Mensaje enviado por humano agente (no por API)
         if ((body.fromMe === true || body.fromMe === "true") && body.fromApi !== true) {
@@ -104,7 +120,7 @@ app.post("/webhook", async (req, res) => {
             return;
         }
 
-        if (body.fromMe === true || body.isGroup || body.isNewsletter) return;
+        if (body.fromMe === true) return;
         if (enPausaHumana(phoneRaw)) return;
 
         const esMultimedia =
@@ -128,11 +144,10 @@ app.post("/webhook", async (req, res) => {
 
             console.log("📸 URL IMAGEN:", body.image?.imageUrl);
             console.log("📄 URL PDF:", body.document?.documentUrl);
-            console.log("📸 CAPTION:", body.image?.caption || "");
+            console.log("📎 MIME:", body.image?.mimeType || body.document?.mimeType);
 
             try {
-                // Solo analizar si el cliente está esperando un comprobante
-                const cliente = await obtenerClientePorTelefono(phoneRaw);
+                const cliente = await obtenerCliente(phoneRaw);
 
                 if (
                     mediaUrl &&
