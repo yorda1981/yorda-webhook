@@ -1,5 +1,4 @@
-Aquí tienes el archivo completo actualizado con ese bloque reemplazado:
-jsrequire("dotenv").config();
+require("dotenv").config();
 
 const OpenAI = require("openai");
 
