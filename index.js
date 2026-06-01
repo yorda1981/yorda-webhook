@@ -4,19 +4,15 @@ const path = require("path");
 const axios = require("axios");
 require("dotenv").config();
 
-// PASO 1: Requerir el pool de conexión
 const pool = require("./db");
 
 // ==========================================
 // SERVICIOS
 // ==========================================
+
 const openaiService = require("./src/services/openai");
 const { obtenerTodos, obtenerCliente } = require("./src/services/customer-memory");
-const {
-    obtenerTodas,
-    confirmarOperacion,
-    obtenerEstadisticas
-} = require("./src/services/operations");
+const { obtenerTodas, confirmarOperacion, obtenerEstadisticas } = require("./src/services/operations");
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -26,6 +22,7 @@ app.set("trust proxy", 1);
 // ==========================================
 // CONFIGURACIÓN Y MEMORIA
 // ==========================================
+
 const buffers = new Map();
 const pendingMessages = new Map();
 const pausasHumanas = new Map();
@@ -37,11 +34,12 @@ const MINUTOS_PAUSA = 30;
 // ==========================================
 // FUNCIONES DE CONTROL
 // ==========================================
+
 function activarPausaHumana(phone) {
     const finActual = pausasHumanas.get(phone);
     if (finActual && finActual > Date.now()) return;
-    pausasHumanas.set(phone, Date.now() + (MINUTOS_PAUSA * 60 * 1000));
-    console.log(`⏸️ Pausa humana: ${MINUTOS_PAUSA} min para ${phone}`);
+    pausasHumanas.set(phone, Date.now() + (MINUTOS_PAUSA * 60 * 1000)); // ✅ corregido
+    console.log(`⏸️ Pausa humana: ${MINUTOS_PAUSA} min para ${phone}`); // ✅ corregido
 }
 
 function enPausaHumana(phone) {
@@ -57,6 +55,7 @@ function enPausaHumana(phone) {
 // ==========================================
 // MIDDLEWARES
 // ==========================================
+
 app.use(express.json({ limit: "10mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
@@ -70,6 +69,7 @@ const verificarToken = (req, res, next) => {
 // ==========================================
 // WEBHOOK PRINCIPAL
 // ==========================================
+
 app.post("/webhook", async (req, res) => {
     res.status(200).send("OK");
 
@@ -79,13 +79,9 @@ app.post("/webhook", async (req, res) => {
         const body = req.body;
         if (!body) return;
 
-        // Filtrar grupos por doble seguridad
+        // Filtrar grupos
         const phoneRaw = body.phone || body.from;
-
-        if (
-            body.isGroup ||
-            String(phoneRaw).includes("-group")
-        ) {
+        if (body.isGroup || String(phoneRaw).includes("-group")) {
             console.log("🚫 Grupo ignorado");
             return;
         }
@@ -136,6 +132,7 @@ app.post("/webhook", async (req, res) => {
         // ==========================================
         // MANEJO DE MULTIMEDIA
         // ==========================================
+
         if (esMultimedia) {
             const mediaUrl =
                 body.image?.imageUrl ||
@@ -163,7 +160,7 @@ app.post("/webhook", async (req, res) => {
                         mediaUrl
                     );
                 } else {
-                    console.log(`📵 Imagen ignorada. Estado del cliente: ${cliente?.estado}`);
+                    console.log(`📵 Imagen ignorada. Estado del cliente: ${cliente?.estado}`); // ✅ corregido
                 }
             } catch (e) {
                 console.error("❌ Error en multimedia:", e.message);
@@ -175,6 +172,7 @@ app.post("/webhook", async (req, res) => {
         // ==========================================
         // MANEJO DE MENSAJES DE TEXTO
         // ==========================================
+
         if (!textMessage) return;
 
         const mensajeAnterior = pendingMessages.get(phoneRaw) || "";
@@ -193,7 +191,7 @@ app.post("/webhook", async (req, res) => {
                 await openaiService.procesarMensaje(phoneRaw, msgFinal, pushName);
                 pendingMessages.delete(phoneRaw);
             } catch (e) {
-                console.error(`❌ Error OpenAI: ${e.message}`);
+                console.error(`❌ Error OpenAI: ${e.message}`); // ✅ corregido
             } finally {
                 buffers.delete(phoneRaw);
             }
@@ -207,8 +205,9 @@ app.post("/webhook", async (req, res) => {
 });
 
 // ==========================================
-// RUTAS ADMIN (CONECTADAS A POSTGRES)
+// RUTAS ADMIN
 // ==========================================
+
 app.get("/admin/tasas", verificarToken, async (req, res) => {
     try {
         const result = await pool.query("SELECT * FROM rates LIMIT 1");
@@ -268,18 +267,15 @@ app.post("/admin/confirmar-operacion/:id", verificarToken, async (req, res) => {
         const operacion = await confirmarOperacion(req.params.id);
 
         if (!operacion) {
-            return res.status(404).json({
-                success: false,
-                error: "Operación no encontrada"
-            });
+            return res.status(404).json({ success: false, error: "Operación no encontrada" });
         }
 
         try {
             await axios.post(
-                `https://api.z-api.io/instances/${process.env.ZAPI_INSTANCE}/token/${process.env.ZAPI_TOKEN}/send-text`,
+                `https://api.z-api.io/instances/${process.env.ZAPI_INSTANCE}/token/${process.env.ZAPI_TOKEN}/send-text`, // ✅ corregido
                 {
                     phone: operacion.phone,
-                    message: `✅ Pago confirmado.\n\nSu operación de R$${operacion.monto} ha sido aprobada y está siendo procesada.\n\nGracias por confiar en nosotros.`
+                    message: `✅ Pago confirmado.\n\nSu operación de R$${operacion.monto} ha sido aprobada y está siendo procesada.\n\nGracias por confiar en nosotros.` // ✅ corregido
                 },
                 {
                     headers: {
@@ -287,14 +283,13 @@ app.post("/admin/confirmar-operacion/:id", verificarToken, async (req, res) => {
                     }
                 }
             );
-            console.log(`📲 Confirmación enviada a ${operacion.phone}`);
+            console.log(`📲 Confirmación enviada a ${operacion.phone}`); // ✅ corregido
         } catch (err) {
             console.error("❌ Error enviando WhatsApp:");
             console.error(err.response?.data || err.message);
         }
 
         res.json({ success: true });
-
     } catch (e) {
         res.status(500).json({ success: false, error: e.message });
     }
@@ -306,6 +301,4 @@ app.get("/dashboard", verificarToken, (req, res) => {
 
 app.get("/", (req, res) => res.send("YordaBot Online ✅"));
 
-app.listen(PORT, "0.0.0.0", () => {
-    console.log(`🚀 SERVIDOR CONECTADO A POSTGRES EN PUERTO ${PORT}`);
-});
+app.listen(PORT, () => console.log(`🚀 Servidor en puerto ${PORT}`));
