@@ -1,6 +1,25 @@
-const express = require("express");
+const operacion = result.rows[0];
+console.log(`✅ Operación CONFIRMADA: ${id}`);
+return operacion;  // ✅ devuelve el objeto completo
+En index.js — tienes razón, ese es un error nuevo que introduje. Cambia esta línea en el endpoint:
+js// ❌ INCORRECTO
+`https://api.z-api.io/instances/${process.env.ZAPI_INSTANCE_ID}/token/${process.env.ZAPI_TOKEN}/send-text`
+
+// ✅ CORRECTO
+`https://api.z-api.io/instances/${process.env.ZAPI_INSTANCE}/token/${process.env.ZAPI_TOKEN}/send-text`
+Solo ese string cambia, el resto del endpoint queda igual:
+jsawait axios.post(
+    `https://api.z-api.io/instances/${process.env.ZAPI_INSTANCE}/token/${process.env.ZAPI_TOKEN}/send-text`,
+    {
+        phone: operacion.phone,
+        message: `✅ Pago confirmado.\n\nSu operación de R$${operacion.monto} ha sido aprobada y está siendo procesada.\n\nGracias por confiar en nosotros.`
+    }
+);
+Disculpa el descuido con ZAPI_INSTANCE_ID. ¿Quieres que te regenere el index.js completo con esa corrección aplicada?siAquí está el index.js completo y corregido:
+jsconst express = require("express");
 const fs = require("fs");
 const path = require("path");
+const axios = require("axios");
 require("dotenv").config();
 
 // PASO 1: Requerir el pool de conexión
@@ -10,32 +29,35 @@ const pool = require("./db");
 // ==========================================
 // SERVICIOS
 // ==========================================
+
 const openaiService = require("./src/services/openai");
 const { obtenerTodos } = require("./src/services/customer-memory");
-const { 
-    obtenerTodas, 
-    confirmarOperacion, 
-    obtenerEstadisticas 
+const {
+    obtenerTodas,
+    confirmarOperacion,
+    obtenerEstadisticas
 } = require("./src/services/operations");
 
 const app = express();
 const PORT = process.env.PORT || 8080;
+
 app.set("trust proxy", 1);
 
 // ==========================================
 // CONFIGURACIÓN Y MEMORIA
 // ==========================================
+
 const buffers = new Map();
 const pendingMessages = new Map();
 const pausasHumanas = new Map();
 const mapaNombresATelefono = new Map();
 const mensajesProcesados = new Set();
-
-const MINUTOS_PAUSA = 30; 
+const MINUTOS_PAUSA = 30;
 
 // ==========================================
 // FUNCIONES DE CONTROL
 // ==========================================
+
 function activarPausaHumana(phone) {
     const finActual = pausasHumanas.get(phone);
     if (finActual && finActual > Date.now()) return;
@@ -56,6 +78,7 @@ function enPausaHumana(phone) {
 // ==========================================
 // MIDDLEWARES
 // ==========================================
+
 app.use(express.json({ limit: "10mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
@@ -69,8 +92,10 @@ const verificarToken = (req, res, next) => {
 // ==========================================
 // WEBHOOK PRINCIPAL
 // ==========================================
+
 app.post("/webhook", async (req, res) => {
     res.status(200).send("OK");
+
     try {
         const body = req.body;
         if (!body) return;
@@ -82,7 +107,7 @@ app.post("/webhook", async (req, res) => {
         if (messageId && mensajesProcesados.has(messageId)) return;
         if (messageId) {
             mensajesProcesados.add(messageId);
-            setTimeout(() => mensajesProcesados.delete(messageId), 300000); 
+            setTimeout(() => mensajesProcesados.delete(messageId), 300000);
         }
 
         const phoneRaw = body.phone || body.from;
@@ -101,12 +126,12 @@ app.post("/webhook", async (req, res) => {
         if (body.fromMe === true || body.isGroup || body.isNewsletter) return;
         if (enPausaHumana(phoneRaw)) return;
 
-        const esMultimedia = 
-            body.messageType === "image" || 
-            body.messageType === "document" || 
-            body.type === "image" || 
-            body.type === "document" || 
-            body.image || 
+        const esMultimedia =
+            body.messageType === "image" ||
+            body.messageType === "document" ||
+            body.type === "image" ||
+            body.type === "document" ||
+            body.image ||
             body.document;
 
         const textMessage = body.text?.message || body.body || body.caption || "";
@@ -117,7 +142,7 @@ app.post("/webhook", async (req, res) => {
             } catch (e) {
                 console.error("❌ Error en multimedia:", e.message);
             }
-            return; 
+            return;
         }
 
         if (!textMessage) return;
@@ -126,6 +151,7 @@ app.post("/webhook", async (req, res) => {
         pendingMessages.set(phoneRaw, mensajeAnterior ? mensajeAnterior + "\n" + textMessage : textMessage);
 
         if (buffers.has(phoneRaw)) clearTimeout(buffers.get(phoneRaw));
+
         const timer = setTimeout(async () => {
             const msgFinal = pendingMessages.get(phoneRaw);
             if (!msgFinal) return;
@@ -137,7 +163,8 @@ app.post("/webhook", async (req, res) => {
             } finally {
                 buffers.delete(phoneRaw);
             }
-        }, 3500); 
+        }, 3500);
+
         buffers.set(phoneRaw, timer);
 
     } catch (e) {
@@ -146,7 +173,7 @@ app.post("/webhook", async (req, res) => {
 });
 
 // ==========================================
-// RUTAS ADMIN (PASO 2: CONECTADAS A POSTGRES)
+// RUTAS ADMIN (CONECTADAS A POSTGRES)
 // ==========================================
 
 app.get("/admin/tasas", verificarToken, async (req, res) => {
@@ -161,7 +188,6 @@ app.get("/admin/tasas", verificarToken, async (req, res) => {
 app.post("/admin/tasas", verificarToken, async (req, res) => {
     try {
         const { brl_0, brl_100, brl_500, brl_1000, usd1, usd2 } = req.body;
-
         await pool.query(`
             UPDATE rates
             SET
@@ -174,14 +200,12 @@ app.post("/admin/tasas", verificarToken, async (req, res) => {
                 updated_at = NOW()
             WHERE id = 1
         `, [brl_0, brl_100, brl_500, brl_1000, usd1, usd2]);
-
         res.json({ success: true });
     } catch (e) {
         res.status(500).json({ success: false, error: e.message });
     }
 });
 
-// RUTAS DE DATOS (Recuerda que ahora deben ser async/await)
 app.get("/admin/clientes", verificarToken, async (req, res) => {
     try { res.json(await obtenerTodos()); } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -196,9 +220,34 @@ app.get("/admin/stats", verificarToken, async (req, res) => {
 
 app.post("/admin/confirmar-operacion/:id", verificarToken, async (req, res) => {
     try {
-        const ok = await confirmarOperacion(req.params.id);
-        res.json({ success: ok });
-    } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+
+        const operacion = await confirmarOperacion(req.params.id);
+
+        if (!operacion) {
+            return res.status(404).json({
+                success: false,
+                error: "Operación no encontrada"
+            });
+        }
+
+        try {
+            await axios.post(
+                `https://api.z-api.io/instances/${process.env.ZAPI_INSTANCE}/token/${process.env.ZAPI_TOKEN}/send-text`,
+                {
+                    phone: operacion.phone,
+                    message: `✅ Pago confirmado.\n\nSu operación de R$${operacion.monto} ha sido aprobada y está siendo procesada.\n\nGracias por confiar en nosotros.`
+                }
+            );
+            console.log(`📲 Confirmación enviada a ${operacion.phone}`);
+        } catch (err) {
+            console.error("❌ Error enviando WhatsApp:", err.message);
+        }
+
+        res.json({ success: true });
+
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
 });
 
 app.get("/dashboard", verificarToken, (req, res) => {
