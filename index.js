@@ -11,7 +11,6 @@ const pool = require("./db");
 // ==========================================
 // SERVICIOS
 // ==========================================
-
 const openaiService = require("./src/services/openai");
 const { obtenerTodos } = require("./src/services/customer-memory");
 const {
@@ -28,7 +27,6 @@ app.set("trust proxy", 1);
 // ==========================================
 // CONFIGURACIÓN Y MEMORIA
 // ==========================================
-
 const buffers = new Map();
 const pendingMessages = new Map();
 const pausasHumanas = new Map();
@@ -39,7 +37,6 @@ const MINUTOS_PAUSA = 30;
 // ==========================================
 // FUNCIONES DE CONTROL
 // ==========================================
-
 function activarPausaHumana(phone) {
     const finActual = pausasHumanas.get(phone);
     if (finActual && finActual > Date.now()) return;
@@ -60,7 +57,6 @@ function enPausaHumana(phone) {
 // ==========================================
 // MIDDLEWARES
 // ==========================================
-
 app.use(express.json({ limit: "10mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
@@ -74,11 +70,16 @@ const verificarToken = (req, res, next) => {
 // ==========================================
 // WEBHOOK PRINCIPAL
 // ==========================================
-
 app.post("/webhook", async (req, res) => {
     res.status(200).send("OK");
 
     try {
+        // 👇 TEMPORAL: ver estructura completa del webhook
+        console.log(
+            "WEBHOOK COMPLETO:",
+            JSON.stringify(req.body, null, 2)
+        );
+
         const body = req.body;
         if (!body) return;
 
@@ -106,6 +107,7 @@ app.post("/webhook", async (req, res) => {
         }
 
         if (body.fromMe === true || body.isGroup || body.isNewsletter) return;
+
         if (enPausaHumana(phoneRaw)) return;
 
         const esMultimedia =
@@ -157,7 +159,6 @@ app.post("/webhook", async (req, res) => {
 // ==========================================
 // RUTAS ADMIN (CONECTADAS A POSTGRES)
 // ==========================================
-
 app.get("/admin/tasas", verificarToken, async (req, res) => {
     try {
         const result = await pool.query("SELECT * FROM rates LIMIT 1");
@@ -202,9 +203,7 @@ app.get("/admin/stats", verificarToken, async (req, res) => {
 
 app.post("/admin/confirmar-operacion/:id", verificarToken, async (req, res) => {
     try {
-
         const operacion = await confirmarOperacion(req.params.id);
-
         if (!operacion) {
             return res.status(404).json({
                 success: false,
@@ -232,7 +231,6 @@ app.post("/admin/confirmar-operacion/:id", verificarToken, async (req, res) => {
         }
 
         res.json({ success: true });
-
     } catch (e) {
         res.status(500).json({ success: false, error: e.message });
     }
