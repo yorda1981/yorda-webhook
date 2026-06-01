@@ -121,8 +121,17 @@ app.post("/webhook", async (req, res) => {
         const textMessage = body.text?.message || body.body || body.caption || "";
 
         if (esMultimedia) {
+            console.log(
+                "📸 URL IMAGEN:",
+                body.image?.imageUrl
+            );
+
             try {
-                await openaiService.procesarMensaje(phoneRaw, textMessage || "comprobante", pushName);
+                await openaiService.procesarMensaje(
+                    phoneRaw,
+                    textMessage || "comprobante",
+                    pushName
+                );
             } catch (e) {
                 console.error("❌ Error en multimedia:", e.message);
             }
