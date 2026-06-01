@@ -1,22 +1,4 @@
-const operacion = result.rows[0];
-console.log(`✅ Operación CONFIRMADA: ${id}`);
-return operacion;  // ✅ devuelve el objeto completo
-En index.js — tienes razón, ese es un error nuevo que introduje. Cambia esta línea en el endpoint:
-js// ❌ INCORRECTO
-`https://api.z-api.io/instances/${process.env.ZAPI_INSTANCE_ID}/token/${process.env.ZAPI_TOKEN}/send-text`
-
-// ✅ CORRECTO
-`https://api.z-api.io/instances/${process.env.ZAPI_INSTANCE}/token/${process.env.ZAPI_TOKEN}/send-text`
-Solo ese string cambia, el resto del endpoint queda igual:
-jsawait axios.post(
-    `https://api.z-api.io/instances/${process.env.ZAPI_INSTANCE}/token/${process.env.ZAPI_TOKEN}/send-text`,
-    {
-        phone: operacion.phone,
-        message: `✅ Pago confirmado.\n\nSu operación de R$${operacion.monto} ha sido aprobada y está siendo procesada.\n\nGracias por confiar en nosotros.`
-    }
-);
-Disculpa el descuido con ZAPI_INSTANCE_ID. ¿Quieres que te regenere el index.js completo con esa corrección aplicada?siAquí está el index.js completo y corregido:
-jsconst express = require("express");
+const express = require("express");
 const fs = require("fs");
 const path = require("path");
 const axios = require("axios");
