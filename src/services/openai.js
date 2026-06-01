@@ -1,13 +1,9 @@
 require("dotenv").config();
 
 const OpenAI = require("openai");
-
 const { enviarMensaje, enviarImagen } = require("./zapi");
-
 const { calcularOperacion } = require("./calculator");
-
 const { guardarCliente, obtenerCliente } = require("./customer-memory");
-
 const { agregarOperacion, obtenerTodas } = require("./operations");
 
 const openai = new OpenAI({
@@ -17,9 +13,7 @@ const openai = new OpenAI({
 // ==========================================
 // CONFIGURACIONES DE SEGURIDAD (V. FINAL)
 // ==========================================
-
 const DOS_HORAS = 2 * 60 * 60 * 1000;
-
 const gatilhos = ["yordanys", "asesor", "humano", "ayuda", "informacion", "contacto"];
 
 function normalizarTexto(texto) {
@@ -33,12 +27,11 @@ function formatearNumero(numero) {
     return Number(numero).toLocaleString("es-ES");
 }
 
-async function procesarMensaje(phone, text, pushName = "") {
-
+async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
     console.log("NOMBRE CLIENTE:", pushName);
+    if (imageUrl) console.log("🖼️ imageUrl recibida:", imageUrl);
 
     try {
-
         if (!text || !phone) return "";
 
         const texto = normalizarTexto(text);
@@ -80,7 +73,6 @@ async function procesarMensaje(phone, text, pushName = "") {
         // 4. LÓGICA DE ENVÍO DE PIX
         // ---------------------------------------------------------
         if (/pix|envia el pix|envía el pix|pasame el pix|pásame el pix|quiero hacerlo|voy a pagar/i.test(texto)) {
-
             if (!cliente || !cliente.ultimo_monto || cliente.ultimo_monto <= 0) {
                 const msg = esEspanol
                     ? "Primero indícame el monto que deseas enviar. 😊"
@@ -91,7 +83,6 @@ async function procesarMensaje(phone, text, pushName = "") {
 
             const ahora = Date.now();
             const fechaCotRef = cliente.fecha_cotizacion || cliente.updated_at;
-
             if (ahora - new Date(fechaCotRef).getTime() > DOS_HORAS) {
                 const msgVencido = esEspanol
                     ? "La cotización anterior ha vencido. Indícame nuevamente el monto para actualizar la tasa. 📈"
@@ -115,16 +106,8 @@ async function procesarMensaje(phone, text, pushName = "") {
                 "📲 Escanee el QR PIX para realizar el pago."
             );
 
-            await enviarMensaje(
-                phone,
-                "8becaaf5-f296-4cbc-a115-46e3d23b042a"
-            );
-
-            await enviarMensaje(
-                phone,
-                "Titular: Yordanys Rafael Sosa Reyes\n🏦 Nubank"
-            );
-
+            await enviarMensaje(phone, "8becaaf5-f296-4cbc-a115-46e3d23b042a");
+            await enviarMensaje(phone, "Titular: Yordanys Rafael Sosa Reyes\n🏦 Nubank");
             await enviarMensaje(
                 phone,
                 esEspanol
@@ -138,8 +121,13 @@ async function procesarMensaje(phone, text, pushName = "") {
         // ---------------------------------------------------------
         // 5. INTENCIÓN: COMPROBANTES
         // ---------------------------------------------------------
-        if (/paguei|pague|comprovante|comprobante|feito|realizado|ya envie|ya mande/i.test(texto)) {
 
+        // Si llegó una imagen Y el cliente está esperando comprobante → es comprobante
+        const esComprobante =
+            (imageUrl && cliente?.estado === "aguardando_comprovante") ||
+            /paguei|pague|comprovante|comprobante|feito|realizado|ya envie|ya mande/i.test(texto);
+
+        if (esComprobante) {
             if (!cliente || cliente.estado !== "aguardando_comprovante") {
                 console.log("⚠️ Comprobante ignorado: no estaba en flujo de pago.");
                 return "";
@@ -147,7 +135,6 @@ async function procesarMensaje(phone, text, pushName = "") {
 
             const ahora = Date.now();
             const fechaPixRef = cliente.fecha_pix || cliente.fecha_estado;
-
             if (ahora - new Date(fechaPixRef).getTime() > DOS_HORAS) {
                 console.log("⏰ Sesión de pago vencida.");
                 await guardarCliente({ phone, estado: null, fechaEstado: null, fechaPix: null });
@@ -156,7 +143,6 @@ async function procesarMensaje(phone, text, pushName = "") {
 
             if (cliente.ultimo_monto > 0) {
                 const operaciones = await obtenerTodas();
-
                 const yaExistePendiente = operaciones.find(op =>
                     op.phone === phone &&
                     op.status === "pendiente" &&
@@ -188,10 +174,23 @@ async function procesarMensaje(phone, text, pushName = "") {
         }
 
         // ---------------------------------------------------------
+        // Si llegó una imagen pero el cliente NO está en flujo de pago → posible tarjeta
+        // ---------------------------------------------------------
+        if (imageUrl) {
+            console.log("💳 Posible tarjeta recibida:", imageUrl);
+
+            await enviarMensaje(
+                phone,
+                "📸 Imagen recibida correctamente.\n\nSi es una tarjeta de destino, en breve podremos detectarla automáticamente."
+            );
+
+            return "";
+        }
+
+        // ---------------------------------------------------------
         // 6. CÁLCULO USD -> CUP
         // ---------------------------------------------------------
         if (esMontoValido && (texto.includes("usd") || texto.includes("dolar") || texto.includes("dolares")) && !texto.includes("real") && !texto.includes("brl")) {
-
             const tipoUsd = texto.includes("prepago") ? "usd_prepago" : "usd_clasica";
             const resultado = await calcularOperacion({ tipo: tipoUsd, valor });
 
@@ -216,7 +215,6 @@ async function procesarMensaje(phone, text, pushName = "") {
         // 7. CÁLCULO BRL -> CUP (Con Mensajes de Incentivo)
         // ---------------------------------------------------------
         if (esMontoValido && !texto.includes("usd") && !texto.includes("dolar") && !texto.includes("dolares") && !texto.includes("cup") && !texto.includes("mlc")) {
-
             const resultado = await calcularOperacion({ tipo: "brl_cup", valor });
 
             if (resultado) {
