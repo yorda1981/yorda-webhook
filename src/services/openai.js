@@ -1,6 +1,7 @@
 require("dotenv").config();
 
 const OpenAI = require("openai");
+
 const { enviarMensaje, enviarImagen } = require("./zapi");
 const { calcularOperacion } = require("./calculator");
 const { guardarCliente, obtenerCliente } = require("./customer-memory");
@@ -13,7 +14,9 @@ const openai = new OpenAI({
 // ==========================================
 // CONFIGURACIONES DE SEGURIDAD (V. FINAL)
 // ==========================================
+
 const DOS_HORAS = 2 * 60 * 60 * 1000;
+
 const gatilhos = ["yordanys", "asesor", "humano", "ayuda", "informacion", "contacto"];
 
 function normalizarTexto(texto) {
@@ -25,6 +28,38 @@ function normalizarTexto(texto) {
 
 function formatearNumero(numero) {
     return Number(numero).toLocaleString("es-ES");
+}
+
+async function detectarTarjetaEnImagen(imageUrl) {
+    try {
+        const response = await openai.chat.completions.create({
+            model: "gpt-4o",
+            messages: [
+                {
+                    role: "user",
+                    content: [
+                        {
+                            type: "text",
+                            text: `Extrae únicamente un número de tarjeta de 16 dígitos visible en la imagen.\n\nReglas:\n- Responde SOLO los 16 números.\n- Si no existe una tarjeta visible responde:\nNO_ENCONTRADA`
+                        },
+                        {
+                            type: "image_url",
+                            image_url: {
+                                url: imageUrl
+                            }
+                        }
+                    ]
+                }
+            ],
+            max_tokens: 30
+        });
+
+        return response.choices?.[0]?.message?.content?.trim();
+
+    } catch (error) {
+        console.error("❌ Error detectando tarjeta:", error.message);
+        return null;
+    }
 }
 
 async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
@@ -83,6 +118,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
 
             const ahora = Date.now();
             const fechaCotRef = cliente.fecha_cotizacion || cliente.updated_at;
+
             if (ahora - new Date(fechaCotRef).getTime() > DOS_HORAS) {
                 const msgVencido = esEspanol
                     ? "La cotización anterior ha vencido. Indícame nuevamente el monto para actualizar la tasa. 📈"
@@ -139,6 +175,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
 
             const ahora = Date.now();
             const fechaPixRef = cliente.fecha_pix || cliente.fecha_estado;
+
             if (ahora - new Date(fechaPixRef).getTime() > DOS_HORAS) {
                 console.log("⏰ Sesión de pago vencida.");
                 await guardarCliente({ phone, estado: null, fechaEstado: null, fechaPix: null });
@@ -178,21 +215,39 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         }
 
         // ---------------------------------------------------------
-        // Si llegó una imagen pero el cliente NO está en flujo de pago → posible tarjeta
+        // 6. DETECCIÓN DE TARJETA EN IMAGEN (GPT-4o Vision)
         // ---------------------------------------------------------
         if (imageUrl) {
-            console.log("💳 Posible tarjeta recibida:", imageUrl);
+            console.log("💳 Analizando imagen...");
+
+            const tarjetaDetectada = await detectarTarjetaEnImagen(imageUrl);
+
+            console.log("💳 Resultado GPT:", tarjetaDetectada);
+
+            if (tarjetaDetectada && /^\d{16}$/.test(tarjetaDetectada)) {
+                await guardarCliente({
+                    phone,
+                    tarjeta: tarjetaDetectada
+                });
+
+                await enviarMensaje(
+                    phone,
+                    `💳 Tarjeta detectada:\n${tarjetaDetectada}`
+                );
+
+                return "";
+            }
 
             await enviarMensaje(
                 phone,
-                "📸 Imagen recibida correctamente.\n\nSi es una tarjeta de destino, en breve podremos detectarla automáticamente."
+                "⚠️ No pude detectar una tarjeta válida en la imagen."
             );
 
             return "";
         }
 
         // ---------------------------------------------------------
-        // 6. CÁLCULO USD -> CUP
+        // 7. CÁLCULO USD -> CUP
         // ---------------------------------------------------------
         if (esMontoValido && (texto.includes("usd") || texto.includes("dolar") || texto.includes("dolares")) && !texto.includes("real") && !texto.includes("brl")) {
             const tipoUsd = texto.includes("prepago") ? "usd_prepago" : "usd_clasica";
@@ -216,7 +271,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         }
 
         // ---------------------------------------------------------
-        // 7. CÁLCULO BRL -> CUP (Con Mensajes de Incentivo)
+        // 8. CÁLCULO BRL -> CUP (Con Mensajes de Incentivo)
         // ---------------------------------------------------------
         if (esMontoValido && !texto.includes("usd") && !texto.includes("dolar") && !texto.includes("dolares") && !texto.includes("cup") && !texto.includes("mlc")) {
             const resultado = await calcularOperacion({ tipo: "brl_cup", valor });
@@ -249,6 +304,9 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
 
         if (valor && !esMontoValido) return "";
 
+        // ---------------------------------------------------------
+        // 9. IA COMO RESPALDO (Solo si hay gatillo)
+        // ---------------------------------------------------------
         const activarIA = gatilhos.some(g => texto.includes(normalizarTexto(g)));
         if (!activarIA) return "";
 
