@@ -203,11 +203,11 @@
                 ranking.forEach(c => {
                     tbodyCli.innerHTML += `
                         <tr>
-                            <td>${c.nombre || "Desconocido"} ${c.totalReal >= 1000 ? '⭐' : ''}</td>
+                            <td>${c.nombre || "Desconocido"} ${c.totalReal >= 10000 ? '⭐' : ''}</td>
                             <td style="color:#8b949e;">${c.phone ? c.phone.split('@')[0] : "-"}</td>
                             <td style="color:var(--green); font-weight:bold;">R$ ${c.totalReal.toLocaleString('pt-BR')}</td>
-                            <td>${c.tipoFavorito || "-"}</td>
-                            <td>${c.totalReal >= 1000 ? '<b style="color:var(--green)">VIP</b>' : 'Estándar'}</td>
+                            <td>${c.tipo_favorito || "-"}</td>
+                            <td>${c.totalReal >= 10000 ? '<b style="color:gold">⭐ VIP</b>' : 'Estándar'}</td>
                         </tr>
                     `;
                 });
