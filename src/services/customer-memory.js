@@ -1,3 +1,4 @@
+```javascript
 const pool = require("../../db");
 
 // ========================
@@ -6,13 +7,13 @@ const pool = require("../../db");
 
 async function guardarCliente({
     phone,
-    nombre = "",
-    monto = 0,
-    tipo = "brl_cup",
-    banco = "",
-    tarjeta = "",
-    titular = "",
-    bancoDetectado = "",
+    nombre = null,
+    monto = null,
+    tipo = null,
+    banco = null,
+    tarjeta = null,
+    titular = null,
+    bancoDetectado = null,
     estado = null,
     fechaEstado = null,
     fechaCotizacion = null,
@@ -27,6 +28,7 @@ async function guardarCliente({
         );
 
         if (existe.rows.length === 0) {
+
             await pool.query(`
                 INSERT INTO customers (
                     phone,
@@ -63,24 +65,34 @@ async function guardarCliente({
             ]);
 
         } else {
+
             await pool.query(`
                 UPDATE customers
                 SET
                     nombre = COALESCE($2,nombre),
-                    ultimo_monto = CASE
-                        WHEN $3 > 0 THEN $3
-                        ELSE ultimo_monto
-                    END,
+
+                    ultimo_monto = COALESCE($3,ultimo_monto),
+
                     tipo_favorito = COALESCE($4,tipo_favorito),
+
                     banco_favorito = COALESCE($5,banco_favorito),
+
                     tarjeta_frecuente = COALESCE($6,tarjeta_frecuente),
+
                     titular_frecuente = COALESCE($7,titular_frecuente),
+
                     banco_detectado = COALESCE($8,banco_detectado),
+
                     estado = COALESCE($9,estado),
+
                     fecha_estado = COALESCE($10,fecha_estado),
+
                     fecha_cotizacion = COALESCE($11,fecha_cotizacion),
+
                     fecha_pix = COALESCE($12,fecha_pix),
+
                     updated_at = NOW()
+
                 WHERE phone = $1
             `, [
                 phone,
@@ -112,12 +124,16 @@ async function guardarCliente({
 
 async function obtenerCliente(phone) {
     try {
+
         const result = await pool.query(
             "SELECT * FROM customers WHERE phone = $1",
             [phone]
         );
+
         return result.rows[0] || null;
+
     } catch (err) {
+
         console.error("❌ Error obteniendo cliente:", err.message);
         return null;
     }
@@ -129,13 +145,17 @@ async function obtenerCliente(phone) {
 
 async function obtenerTodos() {
     try {
+
         const result = await pool.query(`
             SELECT *
             FROM customers
             ORDER BY updated_at DESC
         `);
+
         return result.rows;
+
     } catch (err) {
+
         console.error("❌ Error obteniendo clientes:", err.message);
         return [];
     }
@@ -147,12 +167,16 @@ async function obtenerTodos() {
 
 async function eliminarCliente(phone) {
     try {
+
         await pool.query(
             "DELETE FROM customers WHERE phone = $1",
             [phone]
         );
+
         return true;
+
     } catch (err) {
+
         console.error("❌ Error eliminando cliente:", err.message);
         return false;
     }
@@ -164,3 +188,4 @@ module.exports = {
     obtenerTodos,
     eliminarCliente
 };
+```
