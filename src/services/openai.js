@@ -95,7 +95,7 @@ async function detectarComprobantePIX(imageUrl) {
                     content: [
                         {
                             type: "text",
-                            text: `Analiza la imagen y responde EXCLUSIVAMENTE en JSON.\n\nFormato:\n\n{\n  "tipo": "comprovante_pix",\n  "valor": 200,\n  "fecha": "DD/MM/AAAA",\n  "hora": "HH:MM",\n  "banco": "nombre del banco origen",\n  "destinatario": "nombre del destinatario",\n  "destino_correcto": true,\n  "valido": true\n}\n\nReglas:\n- valor debe ser un número sin símbolos (ej: 200, no "R$200,00").\n- fecha en formato DD/MM/AAAA.\n- hora en formato HH:MM.\n- destino_correcto debe ser true si el destinatario contiene "Yordanys", "Yordanys Rafael" o "Yordanys Rafael Sosa Reyes".\n- valido debe ser true si es un comprobante PIX real.\n- si algún dato no existe usar null.\n- no agregues texto fuera del JSON.`
+                            text: `Analiza la imagen y responde EXCLUSIVAMENTE en JSON.\n\nFormato:\n\n{\n  "tipo": "comprovante_pix",\n  "valor": 200,\n  "fecha": "DD/MM/AAAA",\n  "hora": "HH:MM",\n  "banco": "nombre del banco origen",\n  "destinatario": "nombre del destinatario",\n  "destino_correcto": true,\n  "valido": true\n}\n\nReglas:\n- valor debe ser un número sin símbolos (ej: 200, no "R$200,00").\n- fecha en formato DD/MM/AAAA.\n- hora en formato HH:MM.\n- destino_correcto debe ser true si el destinatario contiene: Yordanys, Yordanys Rafael, Yordanys Rafael Sosa Reyes, Yordanys R S Reyes, Yordanys Sosa Reyes, Yordanys Reyes.\n- valido debe ser true si es un comprobante PIX real.\n- si algún dato no existe usar null.\n- no agregues texto fuera del JSON.`
                         },
                         {
                             type: "image_url",
@@ -134,7 +134,7 @@ async function detectarComprobantePDF(pdfUrl) {
             messages: [
                 {
                     role: "user",
-                    content: `Analiza el siguiente texto de un comprobante de pago y responde EXCLUSIVAMENTE en JSON.\n\nTexto:\n${textoPDF}\n\nFormato:\n\n{\n  "tipo": "comprovante_pdf",\n  "valor": 200,\n  "fecha": "DD/MM/AAAA",\n  "hora": "HH:MM",\n  "banco": "nombre del banco origen",\n  "destinatario": "nombre del destinatario",\n  "destino_correcto": true,\n  "valido": true\n}\n\nReglas:\n- valor debe ser un número sin símbolos (ej: 200, no "R$200,00").\n- destino_correcto debe ser true si el destinatario contiene "Yordanys", "Yordanys Rafael" o "Yordanys Rafael Sosa Reyes".\n- valido debe ser true si es un comprobante de pago real.\n- si algún dato no existe usar null.\n- no agregues texto fuera del JSON.`
+                    content: `Analiza el siguiente texto de un comprobante de pago y responde EXCLUSIVAMENTE en JSON.\n\nTexto:\n${textoPDF}\n\nFormato:\n\n{\n  "tipo": "comprovante_pdf",\n  "valor": 200,\n  "fecha": "DD/MM/AAAA",\n  "hora": "HH:MM",\n  "banco": "nombre del banco origen",\n  "destinatario": "nombre del destinatario",\n  "destino_correcto": true,\n  "valido": true\n}\n\nReglas:\n- valor debe ser un número sin símbolos (ej: 200, no "R$200,00").\n- destino_correcto debe ser true si el destinatario contiene: Yordanys, Yordanys Rafael, Yordanys Rafael Sosa Reyes, Yordanys R S Reyes, Yordanys Sosa Reyes, Yordanys Reyes.\n- valido debe ser true si es un comprobante de pago real.\n- si algún dato no existe usar null.\n- no agregues texto fuera del JSON.`
                 }
             ],
             max_tokens: 200
@@ -200,7 +200,7 @@ async function enviarSeguro(phone, mensaje) {
 async function limpiarSesion(phone) {
     await guardarCliente({
         phone,
-        monto: null,              
+        monto: null,
         estado: null,
         fechaEstado: null,
         fechaPix: null,
@@ -248,7 +248,6 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
 
         const esMontoValido = valor && valor >= 10 && valor <= 50000;
 
-        // ✅ REINICIO DE FLUJO SI ESTÁ EN ESPERA DE COMPROBANTE (Cambio solicitado)
         if (
             esMontoValido &&
             (
@@ -327,7 +326,21 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                 const datos = await detectarTarjetaEnImagen(imageUrl);
                 const tarjetaLimpia = String(datos.tarjeta || "").replace(/\D/g, "");
 
-                // ✅ VALIDACIÓN DE TARJETA OPTIMIZADA
+                if (
+                    datos.banco &&
+                    datos.banco.toLowerCase().includes("bpa")
+                ) {
+                    if (
+                        tarjetaLimpia.startsWith("1239")
+                    ) {
+                        await enviarSeguro(
+                            phone,
+                            "⚠️ No pude leer correctamente la tarjeta BPA. Envíe una foto más clara."
+                        );
+                        return "";
+                    }
+                }
+
                 if (
                     datos.valida &&
                     /^\d{16}$/.test(tarjetaLimpia)
@@ -336,7 +349,11 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                         phone,
                         tarjeta: tarjetaLimpia,
                         titular: datos.titular || "",
-                        bancoDetectado: datos.banco || ""
+                        bancoDetectado: datos.banco || "",
+
+                        tarjeta_frecuente: tarjetaLimpia,
+                        titular_frecuente: datos.titular || "",
+                        banco_detectado: datos.banco || ""
                     });
                     await enviarSeguro(
                         phone,
@@ -344,19 +361,21 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                     );
                     return "";
                 }
-            } else if (clasificacion.tipo === "comprovante") {
-                console.log("📄 Imagen clasificada como comprobante, procesando...");
-            } else {
-                return "";
             }
         }
 
         const esComprobante =
-            (imageUrl && cliente?.estado === "aguardando_comprovante") ||
+            (
+                imageUrl &&
+                (
+                    cliente?.estado === "aguardando_comprovante" ||
+                    cliente?.estado === "comprovante_recibido"
+                )
+            ) ||
             /paguei|pague|comprovante|comprobante|feito|realizado|ya envie|ya mande/i.test(texto);
 
         if (esComprobante) {
-            if (!cliente || cliente.estado !== "aguardando_comprovante") return "";
+            if (!cliente || (cliente.estado !== "aguardando_comprovante" && cliente.estado !== "comprovante_recibido")) return "";
 
             const ahora = Date.now();
             const fechaPixRef = cliente.fecha_pix || cliente.fecha_estado;
@@ -384,59 +403,73 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                 return "";
             }
 
+            const operaciones = await obtenerTodas();
+
+            const operacionPendiente = operaciones
+                .filter(op =>
+                    op.phone === phone &&
+                    op.status === "pendiente"
+                )
+                .sort((a,b) => b.id - a.id)[0];
+
             if (
+                operacionPendiente &&
                 datosComprobante.valor &&
-                cliente.ultimo_monto &&
-                Math.round(Number(datosComprobante.valor)) !== Math.round(Number(cliente.ultimo_monto))
+                Math.round(Number(datosComprobante.valor))
+                    !==
+                Math.round(Number(operacionPendiente.monto))
             ) {
                 await enviarSeguro(
                     phone,
-                    `⚠️ El valor del comprobante (R$${datosComprobante.valor}) no coincide con la operación (R$${cliente.ultimo_monto}). Por favor verifique.`
+                    `⚠️ El valor del comprobante (R$${datosComprobante.valor}) no coincide con la operación (R$${operacionPendiente.monto}). Por favor verifique.`
                 );
                 return "";
             }
 
             if (cliente.ultimo_monto > 0) {
-                const operaciones = await obtenerTodas();
-                const yaExistePendiente = operaciones.find(op =>
+                const yaExisteMismoMonto = operaciones.find(op =>
                     op.phone === phone &&
                     op.status === "pendiente" &&
                     Number(op.monto) === Number(cliente.ultimo_monto)
                 );
-                if (!yaExistePendiente) {
-                    if (!cliente.tarjeta && !cliente.tarjeta_frecuente) {
-                        await enviarSeguro(
-                            phone,
-                            esEspanol
-                                ? "⚠️ Primero envíe una foto de la tarjeta de destino para poder procesar la operación."
-                                : "⚠️ Primeiro envie uma foto do cartão de destino para processar a operação."
-                        );
-                        return "";
-                    }
 
-                    const resultado = await calcularOperacion({
-                        tipo: cliente.tipo_favorito,
-                        valor: cliente.ultimo_monto
-                    });
-                    await agregarOperacion({
-                        phone,
-                        nombre: pushName || cliente.nombre || "Cliente",
-                        monto: cliente.ultimo_monto,
-                        cup: resultado?.cup || 0,
-                        tarjeta: cliente.tarjeta || cliente.tarjeta_frecuente || "",
-                        titular: cliente.titular || cliente.titular_frecuente || "",
-                        banco: cliente.banco_detectado || cliente.bancoDetectado || "",
-                        tipo: cliente.tipo_favorito
-                    });
-                    await enviarSeguro(
-                        phone,
-                        `📥 Operación registrada\n\n👤 Cliente: ${pushName || cliente.nombre}\n\n💵 Enviado: R$${cliente.ultimo_monto}\n\n🇨🇺 Recibe: ${formatearNumero(resultado?.cup || 0)} CUP\n\n🏦 Banco: ${cliente.banco_detectado || cliente.bancoDetectado || "-"}\n\n💳 Tarjeta:\n${cliente.tarjeta || cliente.tarjeta_frecuente || "-"}\n\n👤 Titular:\n${cliente.titular || cliente.titular_frecuente || "-"}\n\n⏳ Estado:\nPendiente de validación`
-                    );
-
-                    // ✅ LIMPIEZA Y CIERRE DE FLUJO (Cambio solicitado)
-                    await limpiarSesion(phone);
+                if (yaExisteMismoMonto) {
                     return "";
                 }
+
+                if (!cliente.tarjeta && !cliente.tarjeta_frecuente) {
+                    await enviarSeguro(
+                        phone,
+                        esEspanol
+                            ? "⚠️ Primero envíe una foto de la tarjeta de destino para poder procesar la operación."
+                            : "⚠️ Primeiro envie uma foto do cartão de destino para processar a operação."
+                    );
+                    return "";
+                }
+
+                const resultado = await calcularOperacion({
+                    tipo: cliente.tipo_favorito,
+                    valor: cliente.ultimo_monto
+                });
+
+                await agregarOperacion({
+                    phone,
+                    nombre: pushName || cliente.nombre || "Cliente",
+                    monto: cliente.ultimo_monto,
+                    cup: resultado?.cup || 0,
+                    tarjeta: cliente.tarjeta || cliente.tarjeta_frecuente || "",
+                    titular: cliente.titular || cliente.titular_frecuente || "",
+                    banco: cliente.banco_detectado || cliente.bancoDetectado || "",
+                    tipo: cliente.tipo_favorito
+                });
+
+                await enviarSeguro(
+                    phone,
+                    `📥 NUEVA OPERACIÓN PENDIENTE\n\n👤 Cliente: ${pushName || cliente.nombre}\n\n📱 Teléfono: ${phone}\n\n💵 Enviado: R$${cliente.ultimo_monto}\n\n🇨🇺 Recibe: ${formatearNumero(resultado?.cup || 0)} CUP\n\n🏦 Banco: ${cliente.banco_detectado || cliente.bancoDetectado || "-"}\n\n💳 Tarjeta:\n${cliente.tarjeta || cliente.tarjeta_frecuente || "-"}\n\n👤 Titular:\n${cliente.titular || cliente.titular_frecuente || "-"}\n\n⏳ Estado:\nPendiente de validación`
+                );
+
+                await limpiarSesion(phone);
+                return "";
             }
 
             const respuesta = esEspanol
@@ -446,7 +479,6 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             return respuesta;
         }
 
-        // CÁLCULO USD -> CUP
         if (esMontoValido && (texto.includes("usd") || texto.includes("dolar") || texto.includes("dolares")) && !texto.includes("real") && !texto.includes("brl")) {
             const tipoUsd = texto.includes("prepago") ? "usd_prepago" : "usd_clasica";
             const resultado = await calcularOperacion({ tipo: tipoUsd, valor });
@@ -466,7 +498,6 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             }
         }
 
-        // CÁLCULO BRL -> CUP
         if (esMontoValido && !texto.includes("usd") && !texto.includes("dolar") && !texto.includes("dolares") && !texto.includes("cup") && !texto.includes("mlc")) {
             const resultado = await calcularOperacion({ tipo: "brl_cup", valor });
             if (resultado) {
