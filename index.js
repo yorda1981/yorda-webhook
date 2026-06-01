@@ -38,8 +38,8 @@ const MINUTOS_PAUSA = 30;
 function activarPausaHumana(phone) {
     const finActual = pausasHumanas.get(phone);
     if (finActual && finActual > Date.now()) return;
-    pausasHumanas.set(phone, Date.now() + (MINUTOS_PAUSA * 60 * 1000)); // ✅ corregido
-    console.log(`⏸️ Pausa humana: ${MINUTOS_PAUSA} min para ${phone}`); // ✅ corregido
+    pausasHumanas.set(phone, Date.now() + (MINUTOS_PAUSA * 60 * 1000));
+    console.log(`⏸️ Pausa humana: ${MINUTOS_PAUSA} min para ${phone}`);
 }
 
 function enPausaHumana(phone) {
@@ -74,22 +74,27 @@ app.post("/webhook", async (req, res) => {
     res.status(200).send("OK");
 
     try {
-        console.log("WEBHOOK COMPLETO:", JSON.stringify(req.body, null, 2));
-
         const body = req.body;
         if (!body) return;
 
-        // Filtrar grupos
         const phoneRaw = body.phone || body.from;
-        if (body.isGroup || String(phoneRaw).includes("-group")) {
-            console.log("🚫 Grupo ignorado");
+
+        // ✅ FILTROS RÁPIDOS — antes del log, sin ruido en logs
+        if (body.isGroup || String(phoneRaw).includes("-group")) return;
+        if (body.isNewsletter) return;
+        if (body.fromMe) {
+            // Si es mensaje del agente humano (no API), activar pausa
+            if (body.fromApi !== true) {
+                const chatName = body.chatName;
+                if (!mapaNombresATelefono.has(chatName)) mapaNombresATelefono.set(chatName, phoneRaw);
+                const phoneReal = mapaNombresATelefono.get(chatName);
+                if (phoneReal) activarPausaHumana(phoneReal);
+            }
             return;
         }
 
-        if (body.isNewsletter) {
-            console.log("🚫 Newsletter ignorada");
-            return;
-        }
+        // ✅ Solo llega aquí lo que importa
+        console.log("WEBHOOK COMPLETO:", JSON.stringify(body, null, 2));
 
         // Ignorar chats LID y números que no sean de Brasil
         if (!phoneRaw || phoneRaw.includes("@lid")) return;
@@ -105,18 +110,8 @@ app.post("/webhook", async (req, res) => {
             setTimeout(() => mensajesProcesados.delete(messageId), 300000);
         }
 
-        const chatName = body.chatName;
         const pushName = body.senderName || "Cliente";
 
-        // Mensaje enviado por humano agente (no por API)
-        if ((body.fromMe === true || body.fromMe === "true") && body.fromApi !== true) {
-            if (!mapaNombresATelefono.has(chatName)) mapaNombresATelefono.set(chatName, phoneRaw);
-            const phoneReal = mapaNombresATelefono.get(chatName);
-            if (phoneReal) activarPausaHumana(phoneReal);
-            return;
-        }
-
-        if (body.fromMe === true) return;
         if (enPausaHumana(phoneRaw)) return;
 
         const esMultimedia =
@@ -160,7 +155,7 @@ app.post("/webhook", async (req, res) => {
                         mediaUrl
                     );
                 } else {
-                    console.log(`📵 Imagen ignorada. Estado del cliente: ${cliente?.estado}`); // ✅ corregido
+                    console.log(`📵 Imagen ignorada. Estado del cliente: ${cliente?.estado}`);
                 }
             } catch (e) {
                 console.error("❌ Error en multimedia:", e.message);
@@ -191,7 +186,7 @@ app.post("/webhook", async (req, res) => {
                 await openaiService.procesarMensaje(phoneRaw, msgFinal, pushName);
                 pendingMessages.delete(phoneRaw);
             } catch (e) {
-                console.error(`❌ Error OpenAI: ${e.message}`); // ✅ corregido
+                console.error(`❌ Error OpenAI: ${e.message}`);
             } finally {
                 buffers.delete(phoneRaw);
             }
@@ -272,10 +267,10 @@ app.post("/admin/confirmar-operacion/:id", verificarToken, async (req, res) => {
 
         try {
             await axios.post(
-                `https://api.z-api.io/instances/${process.env.ZAPI_INSTANCE}/token/${process.env.ZAPI_TOKEN}/send-text`, // ✅ corregido
+                `https://api.z-api.io/instances/${process.env.ZAPI_INSTANCE}/token/${process.env.ZAPI_TOKEN}/send-text`,
                 {
                     phone: operacion.phone,
-                    message: `✅ Pago confirmado.\n\nSu operación de R$${operacion.monto} ha sido aprobada y está siendo procesada.\n\nGracias por confiar en nosotros.` // ✅ corregido
+                    message: `✅ Pago confirmado.\n\nSu operación de R$${operacion.monto} ha sido aprobada y está siendo procesada.\n\nGracias por confiar en nosotros.`
                 },
                 {
                     headers: {
@@ -283,7 +278,7 @@ app.post("/admin/confirmar-operacion/:id", verificarToken, async (req, res) => {
                     }
                 }
             );
-            console.log(`📲 Confirmación enviada a ${operacion.phone}`); // ✅ corregido
+            console.log(`📲 Confirmación enviada a ${operacion.phone}`);
         } catch (err) {
             console.error("❌ Error enviando WhatsApp:");
             console.error(err.response?.data || err.message);
