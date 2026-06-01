@@ -329,7 +329,9 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                 );
 
                 if (!yaExistePendiente) {
-                    // ✅ Calcular CUP antes de guardar
+                    // ✅ Log del cliente completo antes de calcular
+                    console.log("CLIENTE COMPLETO:", cliente);
+
                     const resultado = await calcularOperacion({
                         tipo: cliente.tipo_favorito,
                         valor: cliente.ultimo_monto
@@ -346,7 +348,6 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                         tipo: cliente.tipo_favorito
                     });
 
-                    // ✅ Mensaje resumen de la operación
                     await enviarSeguro(
                         phone,
                         `📥 Operación registrada\n\n👤 Cliente: ${pushName || cliente.nombre}\n\n💵 Enviado: R$${cliente.ultimo_monto}\n\n🇨🇺 Recibe: ${formatearNumero(resultado?.cup || 0)} CUP\n\n🏦 Banco: ${cliente.banco_detectado || "-"}\n\n💳 Tarjeta:\n${cliente.tarjeta_frecuente || "-"}\n\n👤 Titular:\n${cliente.titular_frecuente || "-"}\n\n⏳ Estado:\nPendiente de validación`
@@ -404,7 +405,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                     nombre: pushName,
                     monto: valor,
                     tipo: "brl_cup",
-                    estado: "cotizacion_realizada",
+                    estado: new Date().toISOString(),
                     fechaEstado: new Date().toISOString(),
                     fechaCotizacion: new Date().toISOString()
                 });
