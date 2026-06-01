@@ -30,6 +30,10 @@ function formatearNumero(numero) {
     return Number(numero).toLocaleString("es-ES");
 }
 
+// ==========================================
+// DETECCIÓN DE TARJETA EN IMAGEN
+// ==========================================
+
 async function detectarTarjetaEnImagen(imageUrl) {
     try {
         const response = await openai.chat.completions.create({
@@ -61,6 +65,10 @@ async function detectarTarjetaEnImagen(imageUrl) {
         return null;
     }
 }
+
+// ==========================================
+// PROCESAR MENSAJE
+// ==========================================
 
 async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
     console.log("NOMBRE CLIENTE:", pushName);
@@ -183,8 +191,8 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                 await guardarCliente({
                     phone,
                     tarjeta: tarjetaLimpia,
-                    banco: datos.banco || "",
-                    titular: datos.titular || ""
+                    titular: datos.titular || "",
+                    bancoDetectado: datos.banco || ""
                 });
 
                 await enviarMensaje(
