@@ -278,6 +278,14 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                 return "";
             }
 
+            // LOG DE PDF ANTES DE VALIDAR TIEMPO
+            if (
+                imageUrl &&
+                imageUrl.toLowerCase().endsWith(".pdf")
+            ) {
+                console.log("📄 COMPROBANTE PDF PENDIENTE DE LECTURA:", imageUrl);
+            }
+
             const ahora = Date.now();
             const fechaPixRef = cliente.fecha_pix || cliente.fecha_estado;
 
@@ -305,13 +313,6 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             ) {
                 const resultado = await detectarComprobantePIX(imageUrl);
                 console.log("📄 COMPROBANTE GPT:", resultado);
-            }
-
-            if (
-                imageUrl &&
-                imageUrl.toLowerCase().endsWith(".pdf")
-            ) {
-                console.log("📄 COMPROBANTE PDF PENDIENTE DE LECTURA:", imageUrl);
             }
 
             if (cliente.ultimo_monto > 0) {
