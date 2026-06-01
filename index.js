@@ -218,6 +218,11 @@ app.post("/admin/confirmar-operacion/:id", verificarToken, async (req, res) => {
                 {
                     phone: operacion.phone,
                     message: `✅ Pago confirmado.\n\nSu operación de R$${operacion.monto} ha sido aprobada y está siendo procesada.\n\nGracias por confiar en nosotros.`
+                },
+                {
+                    headers: {
+                        "Client-Token": process.env.ZAPI_CLIENT_TOKEN
+                    }
                 }
             );
             console.log(`📲 Confirmación enviada a ${operacion.phone}`);
