@@ -205,7 +205,19 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         // DEBE IR ANTES que el bloque de comprobantes
         // ---------------------------------------------------------
 
-        if (imageUrl) {
+        // SEGUNDO CAMBIO: detectar PDF antes de intentar leer como tarjeta
+        if (
+            imageUrl &&
+            imageUrl.toLowerCase().endsWith(".pdf")
+        ) {
+            console.log("📄 PDF DETECTADO:", imageUrl);
+        }
+
+        // PRIMER CAMBIO: solo analizar como tarjeta si NO es PDF
+        if (
+            imageUrl &&
+            !imageUrl.toLowerCase().endsWith(".pdf")
+        ) {
             console.log("💳 Analizando imagen...");
             const respuestaGPT = await detectarTarjetaEnImagen(imageUrl);
             console.log("💳 GPT RAW:", respuestaGPT);
