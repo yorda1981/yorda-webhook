@@ -181,7 +181,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         const esMontoValido = valor && valor >= 10 && valor <= 50000;
 
         // ---------------------------------------------------------
-        // 4a. CLIENTE NO PUEDE ESCANEAR EL QR ✅ NUEVO
+        // 4a. CLIENTE NO PUEDE ESCANEAR EL QR
         // ---------------------------------------------------------
 
         if (/no consigo escanear|nao consigo escanear|no puedo escanear|no funciona el qr|qr no funciona|escanear/i.test(texto)) {
@@ -214,7 +214,6 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                 return msgVencido;
             }
 
-            // ✅ Fallback hardcodeado por si Railway pierde la variable
             const llavePix = process.env.PIX_KEY || "8becaaf5-f296-4cbc-a115-46e3d23b042a";
             console.log("🔑 PIX_KEY =", llavePix);
 
@@ -330,12 +329,24 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                 );
 
                 if (!yaExistePendiente) {
+                    // ✅ NUEVO: calcular CUP antes de guardar la operación
+                    const resultadoCup = await calcularOperacion({
+                        tipo: cliente.tipo_favorito,
+                        valor: cliente.ultimo_monto
+                    });
+
                     await agregarOperacion({
                         phone,
                         nombre: pushName || cliente.nombre || "Cliente",
                         monto: cliente.ultimo_monto,
-                        tipo: cliente.tipo_favorito
+                        cup: resultadoCup?.cup || 0,           // ✅ NUEVO
+                        tipo: cliente.tipo_favorito,
+                        tarjeta: cliente.tarjeta_frecuente || "",  // ✅ NUEVO
+                        titular: cliente.titular_frecuente || "",  // ✅ NUEVO
+                        banco: cliente.banco_detectado || "",      // ✅ NUEVO
+                        estado: "pendiente"                        // ✅ NUEVO
                     });
+
                     await guardarCliente({
                         phone,
                         estado: "comprovante_recibido",
