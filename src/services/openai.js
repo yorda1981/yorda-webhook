@@ -176,7 +176,15 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             let datos = {};
 
             try {
-                datos = JSON.parse(respuestaGPT);
+                const jsonLimpio = respuestaGPT
+                    .replace(/```json/g, "")
+                    .replace(/```/g, "")
+                    .trim();
+
+                console.log("JSON LIMPIO:", jsonLimpio);
+
+                datos = JSON.parse(jsonLimpio);
+
             } catch (e) {
                 console.log("❌ Error parseando JSON:", e.message);
             }
