@@ -329,8 +329,8 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                 );
 
                 if (!yaExistePendiente) {
-                    // ✅ NUEVO: calcular CUP antes de guardar la operación
-                    const resultadoCup = await calcularOperacion({
+                    // ✅ Calcular CUP antes de guardar
+                    const resultado = await calcularOperacion({
                         tipo: cliente.tipo_favorito,
                         valor: cliente.ultimo_monto
                     });
@@ -339,13 +339,18 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                         phone,
                         nombre: pushName || cliente.nombre || "Cliente",
                         monto: cliente.ultimo_monto,
-                        cup: resultadoCup?.cup || 0,           // ✅ NUEVO
-                        tipo: cliente.tipo_favorito,
-                        tarjeta: cliente.tarjeta_frecuente || "",  // ✅ NUEVO
-                        titular: cliente.titular_frecuente || "",  // ✅ NUEVO
-                        banco: cliente.banco_detectado || "",      // ✅ NUEVO
-                        estado: "pendiente"                        // ✅ NUEVO
+                        cup: resultado?.cup || 0,
+                        tarjeta: cliente.tarjeta_frecuente || "",
+                        titular: cliente.titular_frecuente || "",
+                        banco: cliente.banco_detectado || "",
+                        tipo: cliente.tipo_favorito
                     });
+
+                    // ✅ Mensaje resumen de la operación
+                    await enviarSeguro(
+                        phone,
+                        `📥 Operación registrada\n\n👤 Cliente: ${pushName || cliente.nombre}\n\n💵 Enviado: R$${cliente.ultimo_monto}\n\n🇨🇺 Recibe: ${formatearNumero(resultado?.cup || 0)} CUP\n\n🏦 Banco: ${cliente.banco_detectado || "-"}\n\n💳 Tarjeta:\n${cliente.tarjeta_frecuente || "-"}\n\n👤 Titular:\n${cliente.titular_frecuente || "-"}\n\n⏳ Estado:\nPendiente de validación`
+                    );
 
                     await guardarCliente({
                         phone,
