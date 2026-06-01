@@ -33,20 +33,38 @@ function formatearNumero(numero) {
 }
 
 // ==========================================
+// HELPER: limpiar JSON de GPT
+// ==========================================
+
+function limpiarJSONGPT(texto) {
+    try {
+        return JSON.parse(
+            String(texto || "")
+                .replace(/```json/g, "")
+                .replace(/```/g, "")
+                .trim()
+        );
+    } catch (e) {
+        console.log("❌ Error parseando JSON GPT:", e.message);
+        return {};
+    }
+}
+
+// ==========================================
 // DETECCIÓN DE TARJETA EN IMAGEN
 // ==========================================
 
 async function detectarTarjetaEnImagen(imageUrl) {
     try {
         const response = await openai.chat.completions.create({
-            model: "gpt-4o",
+            model: "gpt-4o-mini",
             messages: [
                 {
                     role: "user",
                     content: [
                         {
                             type: "text",
-                            text: `Analiza la imagen y responde EXCLUSIVAMENTE en JSON.\n\nFormato:\n\n{\n  "tarjeta":"numero de 16 digitos",\n  "titular":"nombre del titular",\n  "banco":"nombre del banco"\n}\n\nReglas:\n- tarjeta debe contener únicamente los 16 números.\n- titular debe contener el nombre visible.\n- banco debe contener el nombre del banco.\n- si algún dato no existe usar null.\n- no agregues texto fuera del JSON.`
+                            text: `Analiza la imagen y responde EXCLUSIVAMENTE en JSON.\n\nFormato:\n\n{\n  "tarjeta": "numero de 16 digitos",\n  "titular": "nombre del titular",\n  "banco": "nombre del banco",\n  "valida": true\n}\n\nReglas:\n- tarjeta debe contener únicamente los 16 números sin espacios.\n- titular debe contener el nombre visible en mayúsculas.\n- banco debe contener el nombre del banco.\n- valida debe ser true si encontraste una tarjeta real, false si no.\n- si algún dato no existe usar null.\n- no agregues texto fuera del JSON.`
                         },
                         {
                             type: "image_url",
@@ -55,13 +73,13 @@ async function detectarTarjetaEnImagen(imageUrl) {
                     ]
                 }
             ],
-            max_tokens: 100
+            max_tokens: 120
         });
 
-        return response.choices?.[0]?.message?.content?.trim();
+        return limpiarJSONGPT(response.choices?.[0]?.message?.content);
     } catch (error) {
         console.error("❌ Error detectando tarjeta:", error.message);
-        return null;
+        return {};
     }
 }
 
@@ -72,14 +90,14 @@ async function detectarTarjetaEnImagen(imageUrl) {
 async function detectarComprobantePIX(imageUrl) {
     try {
         const response = await openai.chat.completions.create({
-            model: "gpt-4o",
+            model: "gpt-4o-mini",
             messages: [
                 {
                     role: "user",
                     content: [
                         {
                             type: "text",
-                            text: `Analiza la imagen y responde EXCLUSIVAMENTE en JSON.\n\nFormato:\n\n{\n  "tipo": "comprovante_pix",\n  "valor": "monto con decimales",\n  "fecha": "DD/MM/AAAA",\n  "hora": "HH:MM",\n  "banco": "nombre del banco origen",\n  "destinatario": "nombre del destinatario"\n}\n\nReglas:\n- valor debe ser el monto transferido, con decimales (ej: "130.00").\n- fecha en formato DD/MM/AAAA.\n- hora en formato HH:MM.\n- banco es el banco desde el que se realizó el pago.\n- destinatario es el nombre de quien recibió el pago.\n- si algún dato no existe o no se ve, usar null.\n- no agregues texto fuera del JSON.`
+                            text: `Analiza la imagen y responde EXCLUSIVAMENTE en JSON.\n\nFormato:\n\n{\n  "tipo": "comprovante_pix",\n  "valor": 200,\n  "fecha": "DD/MM/AAAA",\n  "hora": "HH:MM",\n  "banco": "nombre del banco origen",\n  "destinatario": "nombre del destinatario",\n  "destino_correcto": true,\n  "valido": true\n}\n\nReglas:\n- valor debe ser un número sin símbolos (ej: 200, no "R$200,00").\n- fecha en formato DD/MM/AAAA.\n- hora en formato HH:MM.\n- destino_correcto debe ser true si el destinatario contiene "Yordanys", "Yordanys Rafael" o "Yordanys Rafael Sosa Reyes".\n- valido debe ser true si es un comprobante PIX real.\n- si algún dato no existe usar null.\n- no agregues texto fuera del JSON.`
                         },
                         {
                             type: "image_url",
@@ -88,18 +106,18 @@ async function detectarComprobantePIX(imageUrl) {
                     ]
                 }
             ],
-            max_tokens: 150
+            max_tokens: 200
         });
 
-        return response.choices?.[0]?.message?.content?.trim();
+        return limpiarJSONGPT(response.choices?.[0]?.message?.content);
     } catch (error) {
         console.error("❌ Error detectando comprobante PIX:", error.message);
-        return null;
+        return {};
     }
 }
 
 // ==========================================
-// DETECCIÓN DE COMPROBANTE PDF (V1 - Solo logs)
+// DETECCIÓN DE COMPROBANTE PDF INTELIGENTE
 // ==========================================
 
 async function detectarComprobantePDF(pdfUrl) {
@@ -111,19 +129,66 @@ async function detectarComprobantePDF(pdfUrl) {
         const buffer = Buffer.from(arrayBuffer);
 
         const data = await pdfParse(buffer);
-        const texto = data.text;
+        const textoPDF = data.text;
 
-        console.log("📄 TEXTO PDF:\n", texto);
+        console.log("📄 TEXTO PDF:\n", textoPDF);
 
-        return texto;
+        const completion = await openai.chat.completions.create({
+            model: "gpt-4o-mini",
+            messages: [
+                {
+                    role: "user",
+                    content: `Analiza el siguiente texto de un comprobante de pago y responde EXCLUSIVAMENTE en JSON.\n\nTexto:\n${textoPDF}\n\nFormato:\n\n{\n  "tipo": "comprovante_pdf",\n  "valor": 200,\n  "fecha": "DD/MM/AAAA",\n  "hora": "HH:MM",\n  "banco": "nombre del banco origen",\n  "destinatario": "nombre del destinatario",\n  "destino_correcto": true,\n  "valido": true\n}\n\nReglas:\n- valor debe ser un número sin símbolos (ej: 200, no "R$200,00").\n- destino_correcto debe ser true si el destinatario contiene "Yordanys", "Yordanys Rafael" o "Yordanys Rafael Sosa Reyes".\n- valido debe ser true si es un comprobante de pago real.\n- si algún dato no existe usar null.\n- no agregues texto fuera del JSON.`
+                }
+            ],
+            max_tokens: 200
+        });
+
+        const datos = limpiarJSONGPT(completion.choices?.[0]?.message?.content);
+        console.log("📄 COMPROBANTE PDF ANALIZADO:", datos);
+        return datos;
+
     } catch (error) {
         console.error("❌ Error leyendo PDF:", error.message);
-        return null;
+        return {};
     }
 }
 
 // ==========================================
-// HELPER: envío seguro (nunca envía undefined)
+// CLASIFICADOR DE IMAGEN
+// ==========================================
+
+async function clasificarImagen(imageUrl) {
+    try {
+        const response = await openai.chat.completions.create({
+            model: "gpt-4o-mini",
+            messages: [
+                {
+                    role: "user",
+                    content: [
+                        {
+                            type: "text",
+                            text: `Analiza la imagen y responde EXCLUSIVAMENTE en JSON.\n\n{\n  "tipo": "tarjeta"\n}\no\n{\n  "tipo": "comprovante"\n}\no\n{\n  "tipo": "otro"\n}\n\nReglas:\n- "tarjeta" si ves una tarjeta bancaria física.\n- "comprovante" si ves un comprobante o recibo de pago/transferencia PIX.\n- "otro" para cualquier otra cosa.\n- no agregues texto fuera del JSON.`
+                        },
+                        {
+                            type: "image_url",
+                            image_url: { url: imageUrl }
+                        }
+                    ]
+                }
+            ],
+            max_tokens: 30
+        });
+
+        return limpiarJSONGPT(response.choices?.[0]?.message?.content);
+    } catch (error) {
+        console.error("❌ Error clasificando imagen:", error.message);
+        return { tipo: "otro" };
+    }
+}
+
+// ==========================================
+// HELPER: envío seguro
 // ==========================================
 
 async function enviarSeguro(phone, mensaje) {
@@ -133,6 +198,22 @@ async function enviarSeguro(phone, mensaje) {
     }
     console.log("📤 ENVIANDO:", mensaje);
     await enviarMensaje(phone, mensaje);
+}
+
+// ==========================================
+// HELPER: limpiar sesión completamente (#4)
+// ==========================================
+
+async function limpiarSesion(phone) {
+    await guardarCliente({
+        phone,
+        monto: 0,              // ✅ #4: limpia monto
+        estado: null,
+        fechaEstado: null,
+        fechaPix: null,
+        fechaCotizacion: null
+    });
+    console.log("✅ SESIÓN CERRADA:", phone);
 }
 
 // ==========================================
@@ -174,7 +255,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
 
         if (soloNumeros.length === 16) {
             console.log("💳 Tarjeta detectada por texto, guardando silencio.");
-            await guardarCliente({ phone, tarjeta: soloNumeros });
+            await guardarCliente({ phone, tarjeta: soloNumeros }); // nombres originales
             return "";
         }
 
@@ -192,10 +273,15 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         }
 
         // ---------------------------------------------------------
-        // 4. LÓGICA DE ENVÍO DE PIX
+        // 4. LÓGICA DE ENVÍO DE PIX (regex estricto)
         // ---------------------------------------------------------
 
-        if (/pix|envia el pix|envía el pix|pasame el pix|pásame el pix|quiero hacerlo|voy a pagar/i.test(texto)) {
+        const quierePagar =
+            /^(pix|envia el pix|envía el pix|envia pix|envía pix|pasame el pix|pásame el pix|quiero hacerlo|voy a pagar|hacer pix|fazer pix)$/.test(texto.trim()) ||
+            /\bquiero (hacer|enviar|mandar) (el )?pix\b/.test(texto) ||
+            /\bvoy a (pagar|hacer|enviar)\b/.test(texto);
+
+        if (quierePagar) {
             if (!cliente || !cliente.ultimo_monto || cliente.ultimo_monto <= 0) {
                 const msg = esEspanol
                     ? "Primero indícame el monto que deseas enviar. 😊"
@@ -240,45 +326,52 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         }
 
         // ---------------------------------------------------------
-        // 5. DETECCIÓN DE TARJETA EN IMAGEN (GPT-4o Vision)
+        // 5. DETECCIÓN DE IMAGEN: clasificar primero
         // ---------------------------------------------------------
+
+        if (imageUrl && !imageUrl.toLowerCase().endsWith(".pdf")) {
+            console.log("🔍 Clasificando imagen...");
+            const clasificacion = await clasificarImagen(imageUrl);
+            console.log("🔍 TIPO DE IMAGEN:", clasificacion.tipo);
+
+            if (clasificacion.tipo === "tarjeta") {
+                const datos = await detectarTarjetaEnImagen(imageUrl);
+                console.log("💳 TARJETA GPT:", datos);
+
+                const tarjetaLimpia = String(datos.tarjeta || "").replace(/\D/g, "");
+                console.log("💳 Tarjeta:", tarjetaLimpia);
+                console.log("👤 Titular:", datos.titular);
+                console.log("🏦 Banco:", datos.banco);
+                console.log("✅ Válida:", datos.valida);
+
+                if (datos.valida && /^\d{16}$/.test(tarjetaLimpia)) {
+                    // ✅ #1: usando nombres que acepta customer-memory.js original
+                    await guardarCliente({
+                        phone,
+                        tarjeta: tarjetaLimpia,
+                        titular: datos.titular || "",
+                        bancoDetectado: datos.banco || ""
+                    });
+                    await enviarSeguro(
+                        phone,
+                        `💳 Tarjeta detectada:\n${tarjetaLimpia}\n\n👤 Titular: ${datos.titular || "-"}\n🏦 Banco: ${datos.banco || "-"}`
+                    );
+                    return "";
+                } else {
+                    console.log("⚠️ Tarjeta inválida o no detectada");
+                }
+
+            } else if (clasificacion.tipo === "comprovante") {
+                console.log("📄 Imagen clasificada como comprobante, procesando...");
+                // continúa hacia bloque 6
+            } else {
+                console.log("📷 Imagen clasificada como 'otro', ignorando.");
+                return "";
+            }
+        }
 
         if (imageUrl && imageUrl.toLowerCase().endsWith(".pdf")) {
             console.log("📄 PDF DETECTADO:", imageUrl);
-        }
-
-        if (imageUrl && !imageUrl.toLowerCase().endsWith(".pdf")) {
-            console.log("💳 Analizando imagen...");
-            const respuestaGPT = await detectarTarjetaEnImagen(imageUrl);
-            console.log("💳 GPT RAW:", respuestaGPT);
-
-            let datos = {};
-            try {
-                const jsonLimpio = respuestaGPT
-                    .replace(/```json/g, "")
-                    .replace(/```/g, "")
-                    .trim();
-                console.log("JSON LIMPIO:", jsonLimpio);
-                datos = JSON.parse(jsonLimpio);
-            } catch (e) {
-                console.log("❌ Error parseando JSON:", e.message);
-            }
-
-            const tarjetaLimpia = String(datos.tarjeta || "").replace(/\D/g, "");
-            console.log("💳 Tarjeta:", tarjetaLimpia);
-            console.log("👤 Titular:", datos.titular);
-            console.log("🏦 Banco:", datos.banco);
-
-            if (/^\d{16}$/.test(tarjetaLimpia)) {
-                await guardarCliente({
-                    phone,
-                    tarjeta: tarjetaLimpia,
-                    titular: datos.titular || "",
-                    bancoDetectado: datos.banco || ""
-                });
-                await enviarSeguro(phone, `💳 Tarjeta detectada:\n${tarjetaLimpia}`);
-                return "";
-            }
         }
 
         // ---------------------------------------------------------
@@ -301,12 +394,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             const fechaPixRef = cliente.fecha_pix || cliente.fecha_estado;
             if (ahora - new Date(fechaPixRef).getTime() > DOS_HORAS) {
                 console.log("⏰ Comprobante recibido fuera del tiempo esperado.");
-                await guardarCliente({
-                    phone,
-                    estado: null,
-                    fechaEstado: null,
-                    fechaPix: null
-                });
+                await limpiarSesion(phone);
                 await enviarSeguro(
                     phone,
                     "⚠️ Hemos recibido su comprobante, pero la sesión había expirado. Será revisado manualmente."
@@ -314,11 +402,39 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                 return "";
             }
 
+            // LECTURA DEL COMPROBANTE
+            let datosComprobante = {};
+
             if (imageUrl && imageUrl.toLowerCase().endsWith(".pdf")) {
-                await detectarComprobantePDF(imageUrl);
+                datosComprobante = await detectarComprobantePDF(imageUrl);
+                console.log("📄 COMPROBANTE PDF:", datosComprobante);
             } else if (imageUrl) {
-                const datosComprobante = await detectarComprobantePIX(imageUrl);
-                console.log("📄 COMPROBANTE GPT:", datosComprobante);
+                datosComprobante = await detectarComprobantePIX(imageUrl);
+                console.log("📄 COMPROBANTE PIX:", datosComprobante);
+            }
+
+            // ✅ #5: bloquear si el destino no es Yordanys
+            if (datosComprobante.destino_correcto === false) {
+                console.warn("⚠️ Destinatario incorrecto en comprobante");
+                await enviarSeguro(
+                    phone,
+                    "⚠️ El comprobante no corresponde a nuestra cuenta. Por favor verifique el destinatario y envíe el comprobante correcto."
+                );
+                return "";
+            }
+
+            // ✅ #3: validar monto con redondeo
+            if (
+                datosComprobante.valor &&
+                cliente.ultimo_monto &&
+                Math.round(Number(datosComprobante.valor)) !== Math.round(Number(cliente.ultimo_monto))
+            ) {
+                console.warn(`⚠️ Monto comprobante (${datosComprobante.valor}) ≠ monto esperado (${cliente.ultimo_monto})`);
+                await enviarSeguro(
+                    phone,
+                    `⚠️ El valor del comprobante (R$${datosComprobante.valor}) no coincide con la operación (R$${cliente.ultimo_monto}). Por favor verifique.`
+                );
+                return "";
             }
 
             if (cliente.ultimo_monto > 0) {
@@ -330,7 +446,17 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                 );
 
                 if (!yaExistePendiente) {
-                    // ✅ Log del cliente completo
+                    // ✅ bloquear si no hay tarjeta guardada
+                    if (!cliente.tarjeta && !cliente.tarjeta_frecuente) {
+                        await enviarSeguro(
+                            phone,
+                            esEspanol
+                                ? "⚠️ Primero envíe una foto de la tarjeta de destino para poder procesar la operación."
+                                : "⚠️ Primeiro envie uma foto do cartão de destino para processar a operação."
+                        );
+                        return "";
+                    }
+
                     console.log("CLIENTE COMPLETO:", cliente);
 
                     const resultado = await calcularOperacion({
@@ -338,31 +464,24 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                         valor: cliente.ultimo_monto
                     });
 
+                    // ✅ usando los campos que lee customer-memory (bancoDetectado → banco_detectado en BD)
                     await agregarOperacion({
                         phone,
                         nombre: pushName || cliente.nombre || "Cliente",
                         monto: cliente.ultimo_monto,
                         cup: resultado?.cup || 0,
-                        tarjeta: cliente.tarjeta_frecuente || "",
-                        titular: cliente.titular_frecuente || "",
-                        banco: cliente.banco_detectado || "",
+                        tarjeta: cliente.tarjeta || cliente.tarjeta_frecuente || "",
+                        titular: cliente.titular || cliente.titular_frecuente || "",
+                        banco: cliente.banco_detectado || cliente.bancoDetectado || "",
                         tipo: cliente.tipo_favorito
                     });
 
                     await enviarSeguro(
                         phone,
-                        `📥 Operación registrada\n\n👤 Cliente: ${pushName || cliente.nombre}\n\n💵 Enviado: R$${cliente.ultimo_monto}\n\n🇨🇺 Recibe: ${formatearNumero(resultado?.cup || 0)} CUP\n\n🏦 Banco: ${cliente.banco_detectado || "-"}\n\n💳 Tarjeta:\n${cliente.tarjeta_frecuente || "-"}\n\n👤 Titular:\n${cliente.titular_frecuente || "-"}\n\n⏳ Estado:\nPendiente de validación`
+                        `📥 Operación registrada\n\n👤 Cliente: ${pushName || cliente.nombre}\n\n💵 Enviado: R$${cliente.ultimo_monto}\n\n🇨🇺 Recibe: ${formatearNumero(resultado?.cup || 0)} CUP\n\n🏦 Banco: ${cliente.banco_detectado || cliente.bancoDetectado || "-"}\n\n💳 Tarjeta:\n${cliente.tarjeta || cliente.tarjeta_frecuente || "-"}\n\n👤 Titular:\n${cliente.titular || cliente.titular_frecuente || "-"}\n\n⏳ Estado:\nPendiente de validación`
                     );
 
-                    console.log("✅ SESIÓN CERRADA:", phone); // ✅ NUEVO
-
-                    // ✅ Limpiar sesión completamente
-                    await guardarCliente({
-                        phone,
-                        estado: null,
-                        fechaEstado: null,
-                        fechaPix: null
-                    });
+                    await limpiarSesion(phone); // ✅ #4: limpia todo incluyendo monto
                 }
             }
 
@@ -461,4 +580,4 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
     }
 }
 
-module.exports = { detectarTarjetaEnImagen, detectarComprobantePIX, detectarComprobantePDF, procesarMensaje };
+module.exports = { detectarTarjetaEnImagen, detectarComprobantePIX, detectarComprobantePDF, clasificarImagen, procesarMensaje };
