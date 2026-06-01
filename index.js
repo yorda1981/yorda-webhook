@@ -121,10 +121,8 @@ app.post("/webhook", async (req, res) => {
         const textMessage = body.text?.message || body.body || body.caption || "";
 
         if (esMultimedia) {
-            console.log(
-                "📸 URL IMAGEN:",
-                body.image?.imageUrl
-            );
+            console.log("📸 URL IMAGEN:", body.image?.imageUrl);
+            console.log("📸 CAPTION:", body.image?.caption || "");
 
             try {
                 await openaiService.procesarMensaje(
