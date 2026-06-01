@@ -18,7 +18,6 @@ const openai = new OpenAI({
 // ==========================================
 
 const DOS_HORAS = 2 * 60 * 60 * 1000;
-
 const gatilhos = ["yordanys", "asesor", "humano", "ayuda", "informacion", "contacto"];
 
 function normalizarTexto(texto) {
@@ -75,7 +74,6 @@ async function detectarTarjetaEnImagen(imageUrl) {
             ],
             max_tokens: 120
         });
-
         return limpiarJSONGPT(response.choices?.[0]?.message?.content);
     } catch (error) {
         console.error("❌ Error detectando tarjeta:", error.message);
@@ -108,7 +106,6 @@ async function detectarComprobantePIX(imageUrl) {
             ],
             max_tokens: 200
         });
-
         return limpiarJSONGPT(response.choices?.[0]?.message?.content);
     } catch (error) {
         console.error("❌ Error detectando comprobante PIX:", error.message);
@@ -123,7 +120,6 @@ async function detectarComprobantePIX(imageUrl) {
 async function detectarComprobantePDF(pdfUrl) {
     try {
         console.log("📄 Descargando PDF:", pdfUrl);
-
         const response = await fetch(pdfUrl);
         const arrayBuffer = await response.arrayBuffer();
         const buffer = Buffer.from(arrayBuffer);
@@ -143,11 +139,9 @@ async function detectarComprobantePDF(pdfUrl) {
             ],
             max_tokens: 200
         });
-
         const datos = limpiarJSONGPT(completion.choices?.[0]?.message?.content);
         console.log("📄 COMPROBANTE PDF ANALIZADO:", datos);
         return datos;
-
     } catch (error) {
         console.error("❌ Error leyendo PDF:", error.message);
         return {};
@@ -179,7 +173,6 @@ async function clasificarImagen(imageUrl) {
             ],
             max_tokens: 30
         });
-
         return limpiarJSONGPT(response.choices?.[0]?.message?.content);
     } catch (error) {
         console.error("❌ Error clasificando imagen:", error.message);
@@ -201,13 +194,13 @@ async function enviarSeguro(phone, mensaje) {
 }
 
 // ==========================================
-// HELPER: limpiar sesión completamente (#4)
+// HELPER: limpiar sesión
 // ==========================================
 
 async function limpiarSesion(phone) {
     await guardarCliente({
         phone,
-        monto: 0,              // ✅ #4: limpia monto
+        monto: null,              
         estado: null,
         fechaEstado: null,
         fechaPix: null,
@@ -226,16 +219,11 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
 
     try {
         if (!text || !phone) return "";
-
         const texto = normalizarTexto(text);
 
-        // 1. DETECCIÓN DE IDIOMA
         const esEspanol = /hola|buenas|buenos dias|buen dia|quiero|cuanto|enviar|mandar|giro|transferencia|dinero|cuba|pesos|cup|reales|usd|dolares|dolar/i.test(texto);
-
-        // 2. MEMORIA DE CLIENTE
         const cliente = await obtenerCliente(phone);
 
-        // 3. ATENCIÓN HUMANA
         if (
             /yordanys|humano|asesor|tengo cup|dinero en cuba|enviar para brasil|traer para brasil|vender cup|cup por reales/i.test(texto) ||
             ((texto.includes("usd") || texto.includes("dolar") || texto.includes("dolares")) && (texto.includes("real") || texto.includes("brl") || texto.includes("brasil"))) ||
@@ -249,21 +237,37 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             return respuesta;
         }
 
-        // VALIDACIÓN DE NÚMEROS (Tarjetas vs Montos)
         const soloNumeros = texto.replace(/\D/g, "");
         const valor = soloNumeros.length > 0 ? Number(soloNumeros) : null;
 
         if (soloNumeros.length === 16) {
             console.log("💳 Tarjeta detectada por texto, guardando silencio.");
-            await guardarCliente({ phone, tarjeta: soloNumeros }); // nombres originales
+            await guardarCliente({ phone, tarjeta: soloNumeros });
             return "";
         }
 
         const esMontoValido = valor && valor >= 10 && valor <= 50000;
 
-        // ---------------------------------------------------------
-        // 4a. CLIENTE NO PUEDE ESCANEAR EL QR
-        // ---------------------------------------------------------
+        // ✅ REINICIO DE FLUJO SI ESTÁ EN ESPERA DE COMPROBANTE (Cambio solicitado)
+        if (
+            esMontoValido &&
+            (
+                texto.includes("real") ||
+                texto.includes("reales") ||
+                texto.includes("r$")
+            ) &&
+            cliente?.estado === "aguardando_comprovante"
+        ) {
+            await guardarCliente({
+                phone,
+                nombre: pushName,
+                monto: valor,
+                tipo: "brl_cup",
+                estado: "cotizacion_realizada",
+                fechaEstado: new Date().toISOString(),
+                fechaCotizacion: new Date().toISOString()
+            });
+        }
 
         if (/no consigo escanear|nao consigo escanear|no puedo escanear|no funciona el qr|qr no funciona|escanear/i.test(texto)) {
             const llaveFallback = process.env.PIX_KEY || "8becaaf5-f296-4cbc-a115-46e3d23b042a";
@@ -271,10 +275,6 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             await enviarSeguro(phone, msg);
             return msg;
         }
-
-        // ---------------------------------------------------------
-        // 4. LÓGICA DE ENVÍO DE PIX (regex estricto)
-        // ---------------------------------------------------------
 
         const quierePagar =
             /^(pix|envia el pix|envía el pix|envia pix|envía pix|pasame el pix|pásame el pix|quiero hacerlo|voy a pagar|hacer pix|fazer pix)$/.test(texto.trim()) ||
@@ -301,15 +301,12 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             }
 
             const llavePix = process.env.PIX_KEY || "8becaaf5-f296-4cbc-a115-46e3d23b042a";
-            console.log("🔑 PIX_KEY =", llavePix);
-
             await guardarCliente({
                 phone,
                 estado: "aguardando_comprovante",
                 fechaEstado: new Date().toISOString(),
                 fechaPix: new Date().toISOString()
             });
-
             await enviarImagen(
                 phone,
                 "https://yorda-webhook-production.up.railway.app/pix.jpg.png",
@@ -321,31 +318,20 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                 phone,
                 esEspanol ? "Después del pago, envíe el comprobante." : "Após o pagamento, envie o comprovante."
             );
-
             return llavePix;
         }
 
-        // ---------------------------------------------------------
-        // 5. DETECCIÓN DE IMAGEN: clasificar primero
-        // ---------------------------------------------------------
-
         if (imageUrl && !imageUrl.toLowerCase().endsWith(".pdf")) {
-            console.log("🔍 Clasificando imagen...");
             const clasificacion = await clasificarImagen(imageUrl);
-            console.log("🔍 TIPO DE IMAGEN:", clasificacion.tipo);
-
             if (clasificacion.tipo === "tarjeta") {
                 const datos = await detectarTarjetaEnImagen(imageUrl);
-                console.log("💳 TARJETA GPT:", datos);
-
                 const tarjetaLimpia = String(datos.tarjeta || "").replace(/\D/g, "");
-                console.log("💳 Tarjeta:", tarjetaLimpia);
-                console.log("👤 Titular:", datos.titular);
-                console.log("🏦 Banco:", datos.banco);
-                console.log("✅ Válida:", datos.valida);
 
-                if (datos.valida && /^\d{16}$/.test(tarjetaLimpia)) {
-                    // ✅ #1: usando nombres que acepta customer-memory.js original
+                // ✅ VALIDACIÓN DE TARJETA OPTIMIZADA
+                if (
+                    datos.valida &&
+                    /^\d{16}$/.test(tarjetaLimpia)
+                ) {
                     await guardarCliente({
                         phone,
                         tarjeta: tarjetaLimpia,
@@ -357,43 +343,24 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                         `💳 Tarjeta detectada:\n${tarjetaLimpia}\n\n👤 Titular: ${datos.titular || "-"}\n🏦 Banco: ${datos.banco || "-"}`
                     );
                     return "";
-                } else {
-                    console.log("⚠️ Tarjeta inválida o no detectada");
                 }
-
             } else if (clasificacion.tipo === "comprovante") {
                 console.log("📄 Imagen clasificada como comprobante, procesando...");
-                // continúa hacia bloque 6
             } else {
-                console.log("📷 Imagen clasificada como 'otro', ignorando.");
                 return "";
             }
         }
-
-        if (imageUrl && imageUrl.toLowerCase().endsWith(".pdf")) {
-            console.log("📄 PDF DETECTADO:", imageUrl);
-        }
-
-        // ---------------------------------------------------------
-        // 6. INTENCIÓN: COMPROBANTES
-        // ---------------------------------------------------------
-
-        console.log("DEBUG IMAGEN:", { imageUrl, estado: cliente?.estado, texto });
 
         const esComprobante =
             (imageUrl && cliente?.estado === "aguardando_comprovante") ||
             /paguei|pague|comprovante|comprobante|feito|realizado|ya envie|ya mande/i.test(texto);
 
         if (esComprobante) {
-            if (!cliente || cliente.estado !== "aguardando_comprovante") {
-                console.log("⚠️ Comprobante ignorado: no estaba en flujo de pago.");
-                return "";
-            }
+            if (!cliente || cliente.estado !== "aguardando_comprovante") return "";
 
             const ahora = Date.now();
             const fechaPixRef = cliente.fecha_pix || cliente.fecha_estado;
             if (ahora - new Date(fechaPixRef).getTime() > DOS_HORAS) {
-                console.log("⏰ Comprobante recibido fuera del tiempo esperado.");
                 await limpiarSesion(phone);
                 await enviarSeguro(
                     phone,
@@ -402,20 +369,14 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                 return "";
             }
 
-            // LECTURA DEL COMPROBANTE
             let datosComprobante = {};
-
             if (imageUrl && imageUrl.toLowerCase().endsWith(".pdf")) {
                 datosComprobante = await detectarComprobantePDF(imageUrl);
-                console.log("📄 COMPROBANTE PDF:", datosComprobante);
             } else if (imageUrl) {
                 datosComprobante = await detectarComprobantePIX(imageUrl);
-                console.log("📄 COMPROBANTE PIX:", datosComprobante);
             }
 
-            // ✅ #5: bloquear si el destino no es Yordanys
             if (datosComprobante.destino_correcto === false) {
-                console.warn("⚠️ Destinatario incorrecto en comprobante");
                 await enviarSeguro(
                     phone,
                     "⚠️ El comprobante no corresponde a nuestra cuenta. Por favor verifique el destinatario y envíe el comprobante correcto."
@@ -423,13 +384,11 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                 return "";
             }
 
-            // ✅ #3: validar monto con redondeo
             if (
                 datosComprobante.valor &&
                 cliente.ultimo_monto &&
                 Math.round(Number(datosComprobante.valor)) !== Math.round(Number(cliente.ultimo_monto))
             ) {
-                console.warn(`⚠️ Monto comprobante (${datosComprobante.valor}) ≠ monto esperado (${cliente.ultimo_monto})`);
                 await enviarSeguro(
                     phone,
                     `⚠️ El valor del comprobante (R$${datosComprobante.valor}) no coincide con la operación (R$${cliente.ultimo_monto}). Por favor verifique.`
@@ -444,9 +403,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                     op.status === "pendiente" &&
                     Number(op.monto) === Number(cliente.ultimo_monto)
                 );
-
                 if (!yaExistePendiente) {
-                    // ✅ bloquear si no hay tarjeta guardada
                     if (!cliente.tarjeta && !cliente.tarjeta_frecuente) {
                         await enviarSeguro(
                             phone,
@@ -457,14 +414,10 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                         return "";
                     }
 
-                    console.log("CLIENTE COMPLETO:", cliente);
-
                     const resultado = await calcularOperacion({
                         tipo: cliente.tipo_favorito,
                         valor: cliente.ultimo_monto
                     });
-
-                    // ✅ usando los campos que lee customer-memory (bancoDetectado → banco_detectado en BD)
                     await agregarOperacion({
                         phone,
                         nombre: pushName || cliente.nombre || "Cliente",
@@ -475,13 +428,14 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                         banco: cliente.banco_detectado || cliente.bancoDetectado || "",
                         tipo: cliente.tipo_favorito
                     });
-
                     await enviarSeguro(
                         phone,
                         `📥 Operación registrada\n\n👤 Cliente: ${pushName || cliente.nombre}\n\n💵 Enviado: R$${cliente.ultimo_monto}\n\n🇨🇺 Recibe: ${formatearNumero(resultado?.cup || 0)} CUP\n\n🏦 Banco: ${cliente.banco_detectado || cliente.bancoDetectado || "-"}\n\n💳 Tarjeta:\n${cliente.tarjeta || cliente.tarjeta_frecuente || "-"}\n\n👤 Titular:\n${cliente.titular || cliente.titular_frecuente || "-"}\n\n⏳ Estado:\nPendiente de validación`
                     );
 
-                    await limpiarSesion(phone); // ✅ #4: limpia todo incluyendo monto
+                    // ✅ LIMPIEZA Y CIERRE DE FLUJO (Cambio solicitado)
+                    await limpiarSesion(phone);
+                    return "";
                 }
             }
 
@@ -492,14 +446,10 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             return respuesta;
         }
 
-        // ---------------------------------------------------------
-        // 7. CÁLCULO USD -> CUP
-        // ---------------------------------------------------------
-
+        // CÁLCULO USD -> CUP
         if (esMontoValido && (texto.includes("usd") || texto.includes("dolar") || texto.includes("dolares")) && !texto.includes("real") && !texto.includes("brl")) {
             const tipoUsd = texto.includes("prepago") ? "usd_prepago" : "usd_clasica";
             const resultado = await calcularOperacion({ tipo: tipoUsd, valor });
-
             if (resultado) {
                 await guardarCliente({
                     phone,
@@ -516,13 +466,9 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             }
         }
 
-        // ---------------------------------------------------------
-        // 8. CÁLCULO BRL -> CUP
-        // ---------------------------------------------------------
-
+        // CÁLCULO BRL -> CUP
         if (esMontoValido && !texto.includes("usd") && !texto.includes("dolar") && !texto.includes("dolares") && !texto.includes("cup") && !texto.includes("mlc")) {
             const resultado = await calcularOperacion({ tipo: "brl_cup", valor });
-
             if (resultado) {
                 await guardarCliente({
                     phone,
@@ -551,10 +497,6 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
 
         if (valor && !esMontoValido) return "";
 
-        // ---------------------------------------------------------
-        // 9. IA COMO RESPALDO
-        // ---------------------------------------------------------
-
         const activarIA = gatilhos.some(g => texto.includes(normalizarTexto(g)));
         if (!activarIA) return "";
 
@@ -567,7 +509,6 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             temperature: 0.3,
             max_tokens: 100
         });
-
         const respuestaIA = completion?.choices?.[0]?.message?.content?.trim();
         if (respuestaIA) {
             await enviarSeguro(phone, respuestaIA);
