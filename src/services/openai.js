@@ -205,7 +205,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         // DEBE IR ANTES que el bloque de comprobantes
         // ---------------------------------------------------------
 
-        // SEGUNDO CAMBIO: detectar PDF antes de intentar leer como tarjeta
+        // Detectar PDF antes de intentar leer como tarjeta
         if (
             imageUrl &&
             imageUrl.toLowerCase().endsWith(".pdf")
@@ -213,7 +213,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             console.log("📄 PDF DETECTADO:", imageUrl);
         }
 
-        // PRIMER CAMBIO: solo analizar como tarjeta si NO es PDF
+        // Solo analizar como tarjeta si NO es PDF
         if (
             imageUrl &&
             !imageUrl.toLowerCase().endsWith(".pdf")
@@ -282,15 +282,36 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             const fechaPixRef = cliente.fecha_pix || cliente.fecha_estado;
 
             if (ahora - new Date(fechaPixRef).getTime() > DOS_HORAS) {
-                console.log("⏰ Sesión de pago vencida.");
-                await guardarCliente({ phone, estado: null, fechaEstado: null, fechaPix: null });
+                console.log("⏰ Comprobante recibido fuera del tiempo esperado.");
+
+                await guardarCliente({
+                    phone,
+                    estado: "comprovante_tardio",
+                    fechaEstado: new Date().toISOString()
+                });
+
+                await enviarMensaje(
+                    phone,
+                    "⚠️ Hemos recibido su comprobante, pero la sesión había expirado. Será revisado manualmente."
+                );
+
                 return "";
             }
 
-            // LECTURA DEL COMPROBANTE CON GPT-4o Vision
-            if (imageUrl) {
+            // LECTURA DEL COMPROBANTE
+            if (
+                imageUrl &&
+                !imageUrl.toLowerCase().endsWith(".pdf")
+            ) {
                 const resultado = await detectarComprobantePIX(imageUrl);
                 console.log("📄 COMPROBANTE GPT:", resultado);
+            }
+
+            if (
+                imageUrl &&
+                imageUrl.toLowerCase().endsWith(".pdf")
+            ) {
+                console.log("📄 COMPROBANTE PDF PENDIENTE DE LECTURA:", imageUrl);
             }
 
             if (cliente.ultimo_monto > 0) {
