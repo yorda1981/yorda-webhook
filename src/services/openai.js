@@ -1,6 +1,9 @@
 require("dotenv").config();
 
 const OpenAI = require("openai");
+const pdfParse = require("pdf-parse"); // ✅ NUEVO
+console.log("✅ PDF-PARSE CARGADO");   // ✅ NUEVO
+
 const { enviarMensaje, enviarImagen } = require("./zapi");
 const { calcularOperacion } = require("./calculator");
 const { guardarCliente, obtenerCliente } = require("./customer-memory");
@@ -14,7 +17,7 @@ const openai = new OpenAI({
 // CONFIGURACIONES
 // ==========================================
 
-const DOS_HORAS = 2 * 60 * 60 * 1000; // ✅ CORREGIDO: operadores * faltaban
+const DOS_HORAS = 2 * 60 * 60 * 1000;
 
 const gatilhos = ["yordanys", "asesor", "humano", "ayuda", "informacion", "contacto"];
 
@@ -43,7 +46,7 @@ async function detectarTarjetaEnImagen(imageUrl) {
                     content: [
                         {
                             type: "text",
-                            text: `Analiza la imagen y responde EXCLUSIVAMENTE en JSON.\n\nFormato:\n\n{\n  "tarjeta":"numero de 16 digitos",\n  "titular":"nombre del titular",\n  "banco":"nombre del banco"\n}\n\nReglas:\n- tarjeta debe contener únicamente los 16 números.\n- titular debe contener el nombre visible.\n- banco debe contener el nombre del banco.\n- si algún dato no existe usar null.\n- no agregues texto fuera del JSON.` // ✅ backticks corregidos
+                            text: `Analiza la imagen y responde EXCLUSIVAMENTE en JSON.\n\nFormato:\n\n{\n  "tarjeta":"numero de 16 digitos",\n  "titular":"nombre del titular",\n  "banco":"nombre del banco"\n}\n\nReglas:\n- tarjeta debe contener únicamente los 16 números.\n- titular debe contener el nombre visible.\n- banco debe contener el nombre del banco.\n- si algún dato no existe usar null.\n- no agregues texto fuera del JSON.`
                         },
                         {
                             type: "image_url",
@@ -63,7 +66,7 @@ async function detectarTarjetaEnImagen(imageUrl) {
 }
 
 // ==========================================
-// DETECCIÓN DE COMPROBANTE PIX
+// DETECCIÓN DE COMPROBANTE PIX (imagen)
 // ==========================================
 
 async function detectarComprobantePIX(imageUrl) {
@@ -76,7 +79,7 @@ async function detectarComprobantePIX(imageUrl) {
                     content: [
                         {
                             type: "text",
-                            text: `Analiza la imagen y responde EXCLUSIVAMENTE en JSON.\n\nFormato:\n\n{\n  "tipo": "comprovante_pix",\n  "valor": "monto con decimales",\n  "fecha": "DD/MM/AAAA",\n  "hora": "HH:MM",\n  "banco": "nombre del banco origen",\n  "destinatario": "nombre del destinatario"\n}\n\nReglas:\n- valor debe ser el monto transferido, con decimales (ej: "130.00").\n- fecha en formato DD/MM/AAAA.\n- hora en formato HH:MM.\n- banco es el banco desde el que se realizó el pago.\n- destinatario es el nombre de quien recibió el pago.\n- si algún dato no existe o no se ve, usar null.\n- no agregues texto fuera del JSON.` // ✅ backticks corregidos
+                            text: `Analiza la imagen y responde EXCLUSIVAMENTE en JSON.\n\nFormato:\n\n{\n  "tipo": "comprovante_pix",\n  "valor": "monto con decimales",\n  "fecha": "DD/MM/AAAA",\n  "hora": "HH:MM",\n  "banco": "nombre del banco origen",\n  "destinatario": "nombre del destinatario"\n}\n\nReglas:\n- valor debe ser el monto transferido, con decimales (ej: "130.00").\n- fecha en formato DD/MM/AAAA.\n- hora en formato HH:MM.\n- banco es el banco desde el que se realizó el pago.\n- destinatario es el nombre de quien recibió el pago.\n- si algún dato no existe o no se ve, usar null.\n- no agregues texto fuera del JSON.`
                         },
                         {
                             type: "image_url",
@@ -91,6 +94,30 @@ async function detectarComprobantePIX(imageUrl) {
         return response.choices?.[0]?.message?.content?.trim();
     } catch (error) {
         console.error("❌ Error detectando comprobante PIX:", error.message);
+        return null;
+    }
+}
+
+// ==========================================
+// DETECCIÓN DE COMPROBANTE PDF (V1 - Solo logs) ✅ NUEVO
+// ==========================================
+
+async function detectarComprobantePDF(pdfUrl) {
+    try {
+        console.log("📄 Descargando PDF:", pdfUrl);
+
+        const response = await fetch(pdfUrl);
+        const arrayBuffer = await response.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+
+        const data = await pdfParse(buffer);
+        const texto = data.text;
+
+        console.log("📄 TEXTO PDF:\n", texto);
+
+        return texto;
+    } catch (error) {
+        console.error("❌ Error leyendo PDF:", error.message);
         return null;
     }
 }
@@ -163,7 +190,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                 return msgVencido;
             }
 
-            const llavePix = process.env.PIX_KEY; // ✅ CORREGIDO: movido al .env
+            const llavePix = process.env.PIX_KEY;
 
             await guardarCliente({
                 phone,
@@ -224,7 +251,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                     titular: datos.titular || "",
                     bancoDetectado: datos.banco || ""
                 });
-                await enviarMensaje(phone, `💳 Tarjeta detectada:\n${tarjetaLimpia}`); // ✅ backticks corregidos
+                await enviarMensaje(phone, `💳 Tarjeta detectada:\n${tarjetaLimpia}`);
                 return "";
             }
             // No era tarjeta → continúa hacia comprobante
@@ -246,10 +273,6 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                 return "";
             }
 
-            if (imageUrl && imageUrl.toLowerCase().endsWith(".pdf")) {
-                console.log("📄 COMPROBANTE PDF PENDIENTE DE LECTURA:", imageUrl);
-            }
-
             const ahora = Date.now();
             const fechaPixRef = cliente.fecha_pix || cliente.fecha_estado;
             if (ahora - new Date(fechaPixRef).getTime() > DOS_HORAS) {
@@ -267,10 +290,12 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             }
 
             // LECTURA DEL COMPROBANTE
-            if (imageUrl && !imageUrl.toLowerCase().endsWith(".pdf")) {
-                const datosComprobante = await detectarComprobantePIX(imageUrl); // ✅ CORREGIDO: variable renombrada para evitar colisión
+            if (imageUrl && imageUrl.toLowerCase().endsWith(".pdf")) {
+                // ✅ NUEVO: ahora sí llama a detectarComprobantePDF
+                await detectarComprobantePDF(imageUrl);
+            } else if (imageUrl) {
+                const datosComprobante = await detectarComprobantePIX(imageUrl);
                 console.log("📄 COMPROBANTE GPT:", datosComprobante);
-                // Aquí puedes usar datosComprobante para validar el monto si lo necesitas
             }
 
             if (cliente.ultimo_monto > 0) {
@@ -321,7 +346,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                     fechaEstado: new Date().toISOString(),
                     fechaCotizacion: new Date().toISOString()
                 });
-                const respuesta = `💵 ${valor} USD hoy rinden ${formatearNumero(resultado.cup)} CUP 🇨🇺\n\n¿Deseas continuar?`; // ✅ backticks corregidos
+                const respuesta = `💵 ${valor} USD hoy rinden ${formatearNumero(resultado.cup)} CUP 🇨🇺\n\n¿Deseas continuar?`;
                 await enviarMensaje(phone, respuesta);
                 return respuesta;
             }
@@ -354,7 +379,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                     mensajeExtra = "\n\n🚀 A partir de R$1000 obtienes nuestra mejor tasa.";
                 }
 
-                const respuesta = `💵 R$${valor} hoy serían ${formatearNumero(resultado.cup)} CUP 🇨🇺${mensajeExtra}\n\n¿Deseas realizar la operación ahora?`; // ✅ backticks corregidos
+                const respuesta = `💵 R$${valor} hoy serían ${formatearNumero(resultado.cup)} CUP 🇨🇺${mensajeExtra}\n\n¿Deseas realizar la operación ahora?`;
                 await enviarMensaje(phone, respuesta);
                 return respuesta;
             }
@@ -391,4 +416,4 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
     }
 }
 
-module.exports = { detectarTarjetaEnImagen, detectarComprobantePIX, procesarMensaje };
+module.exports = { detectarTarjetaEnImagen, detectarComprobantePIX, detectarComprobantePDF, procesarMensaje }; // ✅ detectarComprobantePDF exportada
