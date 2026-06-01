@@ -11,7 +11,7 @@
         .container { max-width: 1100px; margin: auto; }
         .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }
         .status-badge { background: #1a2733; color: var(--green); padding: 8px 20px; border-radius: 30px; font-size: 13px; font-weight: 700; border: 1px solid #2d355a; }
-        
+
         /* Stats */
         .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 40px; }
         .stat-card { background: var(--card); padding: 25px; border-radius: 16px; border: 1px solid #2d355a; }
@@ -31,20 +31,21 @@
         /* Actions */
         .btn-confirm { background: var(--green); color: #0b0e1a; border: none; padding: 8px 15px; border-radius: 8px; font-weight: bold; cursor: pointer; transition: 0.2s; }
         .btn-confirm:hover { transform: scale(1.05); }
-        
+
         /* Inputs & Tasas */
         .grid-inputs { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 20px; }
         .input-group { display: flex; flex-direction: column; gap: 8px; }
         label { font-size: 13px; color: #94a3b8; font-weight: 600; }
         input { background: #0b0e1a; border: 1px solid #2d355a; padding: 14px; border-radius: 12px; color: white; font-size: 16px; outline: none; transition: 0.3s; }
         input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(124, 77, 255, 0.2); }
-        
+
         .btn-save { background: var(--accent); color: white; border: none; padding: 18px; border-radius: 15px; width: 100%; cursor: pointer; font-weight: 800; font-size: 16px; margin-top: 30px; transition: 0.3s; }
         .btn-save:hover { opacity: 0.9; transform: translateY(-2px); }
     </style>
 </head>
 <body>
     <div class="container">
+
         <div class="header">
             <h1>🤖 YORDA-BOT Admin</h1>
             <div class="status-badge">● Sistema Online</div>
@@ -127,6 +128,7 @@
             </div>
             <button class="btn-save" onclick="guardarTasas()">Guardar Cambios de Tasas</button>
         </div>
+
     </div>
 
     <script>
@@ -134,9 +136,8 @@
 
         async function refreshData() {
             if (!token) return alert("Error: Token de acceso no válido.");
-            
+
             try {
-                // Fetch de todas las fuentes
                 const [resTasas, resClientes, resStats, resOps] = await Promise.all([
                     fetch(`/admin/tasas?token=${token}`),
                     fetch(`/admin/clientes?token=${token}`),
@@ -152,7 +153,7 @@
                 // 1. Llenar Tasas
                 Object.keys(tasas).forEach(key => {
                     const input = document.getElementById(key);
-                    if(input) input.value = tasas[key];
+                    if (input) input.value = tasas[key];
                 });
 
                 // 2. Cards Superiores
@@ -166,14 +167,18 @@
                 const tablaPendientes = document.getElementById("tablaPendientes");
                 const pendientes = operaciones.filter(o => o.status === "pendiente");
                 tablaPendientes.innerHTML = "";
-                
-                if(pendientes.length === 0) {
+
+                if (pendientes.length === 0) {
                     tablaPendientes.innerHTML = '<tr><td colspan="5" style="text-align:center; color:#8b949e;">Todo al día. No hay pagos pendientes.</td></tr>';
                 } else {
                     pendientes.forEach(op => {
                         tablaPendientes.innerHTML += `
                             <tr>
-                                <td>${new Date(op.id).toLocaleTimeString()}</td>
+                                <td>
+                                    ${new Date(op.created_at).toLocaleDateString('pt-BR')}
+                                    <br>
+                                    <small>${new Date(op.created_at).toLocaleTimeString('pt-BR')}</small>
+                                </td>
                                 <td><strong>${op.nombre}</strong></td>
                                 <td style="color:var(--yellow); font-weight:700;">R$ ${op.monto}</td>
                                 <td><small>${op.tipo}</small></td>
@@ -186,14 +191,14 @@
                 // 4. Ranking de Clientes
                 const tbodyCli = document.getElementById("clientesTable");
                 tbodyCli.innerHTML = "";
-                const confirmadas = operaciones.filter(o => o.status === "confirmada");
 
+                const confirmadas = operaciones.filter(o => o.status === "confirmada");
                 const ranking = listaClientes.map(c => {
                     const totalConfirmado = confirmadas
                         .filter(o => o.phone === c.phone)
                         .reduce((acc, o) => acc + Number(o.monto), 0);
                     return { ...c, totalReal: totalConfirmado };
-                }).sort((a,b) => b.totalReal - a.totalReal);
+                }).sort((a, b) => b.totalReal - a.totalReal);
 
                 ranking.forEach(c => {
                     tbodyCli.innerHTML += `
@@ -213,10 +218,10 @@
         }
 
         async function confirmar(id) {
-            if(!confirm("¿Has verificado este pago en tu cuenta bancaria?")) return;
+            if (!confirm("¿Has verificado este pago en tu cuenta bancaria?")) return;
             const res = await fetch(`/admin/confirmar-operacion/${id}?token=${token}`, { method: 'POST' });
             const data = await res.json();
-            if(data.success) refreshData();
+            if (data.success) refreshData();
         }
 
         async function guardarTasas() {
@@ -224,7 +229,7 @@
             btn.innerText = "Guardando...";
             const data = {};
             document.querySelectorAll('#tasasForm input').forEach(i => data[i.id] = Number(i.value));
-            
+
             try {
                 await fetch(`/admin/tasas?token=${token}`, {
                     method: "POST",
@@ -233,8 +238,11 @@
                 });
                 alert("✅ Tasas actualizadas globalmente.");
                 refreshData();
-            } catch (e) { alert("Error al guardar."); }
-            finally { btn.innerText = "Guardar Cambios de Tasas"; }
+            } catch (e) {
+                alert("Error al guardar.");
+            } finally {
+                btn.innerText = "Guardar Cambios de Tasas";
+            }
         }
 
         refreshData();
