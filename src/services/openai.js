@@ -303,8 +303,9 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                 console.log("⏰ Comprobante recibido fuera del tiempo esperado.");
                 await guardarCliente({
                     phone,
-                    estado: "comprovante_tardio",
-                    fechaEstado: new Date().toISOString()
+                    estado: null,
+                    fechaEstado: null,
+                    fechaPix: null
                 });
                 await enviarSeguro(
                     phone,
@@ -329,7 +330,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                 );
 
                 if (!yaExistePendiente) {
-                    // ✅ Log del cliente completo antes de calcular
+                    // ✅ Log del cliente completo
                     console.log("CLIENTE COMPLETO:", cliente);
 
                     const resultado = await calcularOperacion({
@@ -353,10 +354,14 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                         `📥 Operación registrada\n\n👤 Cliente: ${pushName || cliente.nombre}\n\n💵 Enviado: R$${cliente.ultimo_monto}\n\n🇨🇺 Recibe: ${formatearNumero(resultado?.cup || 0)} CUP\n\n🏦 Banco: ${cliente.banco_detectado || "-"}\n\n💳 Tarjeta:\n${cliente.tarjeta_frecuente || "-"}\n\n👤 Titular:\n${cliente.titular_frecuente || "-"}\n\n⏳ Estado:\nPendiente de validación`
                     );
 
+                    console.log("✅ SESIÓN CERRADA:", phone); // ✅ NUEVO
+
+                    // ✅ Limpiar sesión completamente
                     await guardarCliente({
                         phone,
-                        estado: "comprovante_recibido",
-                        fechaEstado: new Date().toISOString()
+                        estado: null,
+                        fechaEstado: null,
+                        fechaPix: null
                     });
                 }
             }
@@ -405,7 +410,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                     nombre: pushName,
                     monto: valor,
                     tipo: "brl_cup",
-                    estado: new Date().toISOString(),
+                    estado: "cotizacion_realizada",
                     fechaEstado: new Date().toISOString(),
                     fechaCotizacion: new Date().toISOString()
                 });
