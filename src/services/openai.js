@@ -155,7 +155,37 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         }
 
         // ---------------------------------------------------------
-        // 5. INTENCIÓN: COMPROBANTES
+        // 5. DETECCIÓN DE TARJETA EN IMAGEN (GPT-4o Vision)
+        // DEBE IR ANTES que el bloque de comprobantes
+        // ---------------------------------------------------------
+        if (imageUrl) {
+            console.log("💳 Analizando imagen...");
+
+            const tarjetaDetectada = await detectarTarjetaEnImagen(imageUrl);
+
+            const tarjetaLimpia = String(tarjetaDetectada || "").replace(/\D/g, "");
+
+            console.log("💳 Resultado GPT:", tarjetaLimpia);
+
+            if (/^\d{16}$/.test(tarjetaLimpia)) {
+                await guardarCliente({
+                    phone,
+                    tarjeta: tarjetaLimpia
+                });
+
+                await enviarMensaje(
+                    phone,
+                    `💳 Tarjeta detectada:\n${tarjetaLimpia}`
+                );
+
+                return "";
+            }
+
+            // No era tarjeta → continúa hacia comprobante
+        }
+
+        // ---------------------------------------------------------
+        // 6. INTENCIÓN: COMPROBANTES
         // ---------------------------------------------------------
         console.log("DEBUG IMAGEN:", {
             imageUrl,
@@ -212,41 +242,6 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
 
             await enviarMensaje(phone, respuesta);
             return respuesta;
-        }
-
-        // ---------------------------------------------------------
-        // 6. DETECCIÓN DE TARJETA EN IMAGEN (GPT-4o Vision)
-        // ---------------------------------------------------------
-        if (imageUrl) {
-            console.log("💳 Analizando imagen...");
-
-            const tarjetaDetectada = await detectarTarjetaEnImagen(imageUrl);
-
-            const tarjetaLimpia = String(tarjetaDetectada || "").replace(/\D/g, "");
-
-            console.log("💳 Resultado GPT ORIGINAL:", tarjetaDetectada);
-            console.log("💳 Resultado LIMPIO:", tarjetaLimpia);
-
-            if (/^\d{16}$/.test(tarjetaLimpia)) {
-                await guardarCliente({
-                    phone,
-                    tarjeta: tarjetaLimpia
-                });
-
-                await enviarMensaje(
-                    phone,
-                    `💳 Tarjeta detectada:\n${tarjetaLimpia}`
-                );
-
-                return "";
-            }
-
-            await enviarMensaje(
-                phone,
-                "⚠️ No pude detectar una tarjeta válida en la imagen."
-            );
-
-            return "";
         }
 
         // ---------------------------------------------------------
