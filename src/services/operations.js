@@ -23,17 +23,11 @@ async function agregarOperacion(data) {
             data.tipo || "brl_cup"
         ]);
 
-        console.log(
-            `⏳ Operación PENDIENTE: R$${data.monto}`
-        );
-
+        console.log(`⏳ Operación PENDIENTE: R$${data.monto}`);
         return result.rows[0];
 
     } catch (err) {
-        console.error(
-            "❌ Error agregando operación:",
-            err.message
-        );
+        console.error("❌ Error agregando operación:", err.message);
         return null;
     }
 }
@@ -57,17 +51,12 @@ async function confirmarOperacion(id) {
             return false;
         }
 
-        console.log(
-            `✅ Operación CONFIRMADA: ${id}`
-        );
-
-        return true;
+        const operacion = result.rows[0];
+        console.log(`✅ Operación CONFIRMADA: ${id}`);
+        return operacion;
 
     } catch (err) {
-        console.error(
-            "❌ Error confirmando operación:",
-            err.message
-        );
+        console.error("❌ Error confirmando operación:", err.message);
         return false;
     }
 }
@@ -86,10 +75,7 @@ async function obtenerTodas() {
         return result.rows;
 
     } catch (err) {
-        console.error(
-            "❌ Error obteniendo operaciones:",
-            err.message
-        );
+        console.error("❌ Error obteniendo operaciones:", err.message);
         return [];
     }
 }
@@ -124,10 +110,7 @@ async function obtenerEstadisticas() {
         };
 
     } catch (err) {
-        console.error(
-            "❌ Error obteniendo estadísticas:",
-            err.message
-        );
+        console.error("❌ Error obteniendo estadísticas:", err.message);
         return {
             totalOperaciones: 0,
             volumenTotal: 0,
