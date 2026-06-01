@@ -3,6 +3,7 @@ const pool = require("../../db");
 // ========================
 // SALVAR / ATUALIZAR CLIENTE
 // ========================
+
 async function guardarCliente({
     phone,
     nombre = "",
@@ -15,18 +16,15 @@ async function guardarCliente({
     fechaCotizacion = null,
     fechaPix = null
 }) {
-
     if (!phone) return null;
 
     try {
-
         const existe = await pool.query(
             "SELECT * FROM customers WHERE phone = $1",
             [phone]
         );
 
         if (existe.rows.length === 0) {
-
             await pool.query(`
                 INSERT INTO customers (
                     phone,
@@ -57,13 +55,15 @@ async function guardarCliente({
                 fechaCotizacion,
                 fechaPix
             ]);
-
         } else {
-
             await pool.query(`
                 UPDATE customers
                 SET
-                    nombre = COALESCE($2,nombre),
+                    nombre = CASE
+                        WHEN $2 IS NOT NULL AND $2 <> ''
+                        THEN $2
+                        ELSE nombre
+                    END,
                     ultimo_monto = CASE
                         WHEN $3 > 0 THEN $3
                         ELSE ultimo_monto
@@ -94,12 +94,7 @@ async function guardarCliente({
         return true;
 
     } catch (err) {
-
-        console.error(
-            "❌ Error guardando cliente:",
-            err.message
-        );
-
+        console.error("❌ Error guardando cliente:", err.message);
         return false;
     }
 }
@@ -107,24 +102,16 @@ async function guardarCliente({
 // ========================
 // OBTENER CLIENTE
 // ========================
+
 async function obtenerCliente(phone) {
-
     try {
-
         const result = await pool.query(
             "SELECT * FROM customers WHERE phone = $1",
             [phone]
         );
-
         return result.rows[0] || null;
-
     } catch (err) {
-
-        console.error(
-            "❌ Error obteniendo cliente:",
-            err.message
-        );
-
+        console.error("❌ Error obteniendo cliente:", err.message);
         return null;
     }
 }
@@ -132,25 +119,17 @@ async function obtenerCliente(phone) {
 // ========================
 // TODOS LOS CLIENTES
 // ========================
+
 async function obtenerTodos() {
-
     try {
-
         const result = await pool.query(`
             SELECT *
             FROM customers
             ORDER BY updated_at DESC
         `);
-
         return result.rows;
-
     } catch (err) {
-
-        console.error(
-            "❌ Error obteniendo clientes:",
-            err.message
-        );
-
+        console.error("❌ Error obteniendo clientes:", err.message);
         return [];
     }
 }
@@ -158,24 +137,16 @@ async function obtenerTodos() {
 // ========================
 // ELIMINAR CLIENTE
 // ========================
+
 async function eliminarCliente(phone) {
-
     try {
-
         await pool.query(
             "DELETE FROM customers WHERE phone = $1",
             [phone]
         );
-
         return true;
-
     } catch (err) {
-
-        console.error(
-            "❌ Error eliminando cliente:",
-            err.message
-        );
-
+        console.error("❌ Error eliminando cliente:", err.message);
         return false;
     }
 }
