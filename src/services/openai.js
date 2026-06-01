@@ -40,7 +40,7 @@ async function detectarTarjetaEnImagen(imageUrl) {
                     content: [
                         {
                             type: "text",
-                            text: `Extrae únicamente un número de tarjeta de 16 dígitos visible en la imagen.\n\nReglas:\n- Responde SOLO los 16 números.\n- Si no existe una tarjeta visible responde:\nNO_ENCONTRADA`
+                            text: `Analiza la imagen y responde EXCLUSIVAMENTE en JSON.\n\nFormato:\n\n{\n  "tarjeta":"numero de 16 digitos",\n  "titular":"nombre del titular",\n  "banco":"nombre del banco"\n}\n\nReglas:\n- tarjeta debe contener únicamente los 16 números.\n- titular debe contener el nombre visible.\n- banco debe contener el nombre del banco.\n- si algún dato no existe usar null.\n- no agregues texto fuera del JSON.`
                         },
                         {
                             type: "image_url",
@@ -51,7 +51,7 @@ async function detectarTarjetaEnImagen(imageUrl) {
                     ]
                 }
             ],
-            max_tokens: 30
+            max_tokens: 100
         });
 
         return response.choices?.[0]?.message?.content?.trim();
@@ -161,16 +161,30 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         if (imageUrl) {
             console.log("💳 Analizando imagen...");
 
-            const tarjetaDetectada = await detectarTarjetaEnImagen(imageUrl);
+            const respuestaGPT = await detectarTarjetaEnImagen(imageUrl);
 
-            const tarjetaLimpia = String(tarjetaDetectada || "").replace(/\D/g, "");
+            console.log("💳 GPT RAW:", respuestaGPT);
 
-            console.log("💳 Resultado GPT:", tarjetaLimpia);
+            let datos = {};
+
+            try {
+                datos = JSON.parse(respuestaGPT);
+            } catch (e) {
+                console.log("❌ Error parseando JSON:", e.message);
+            }
+
+            const tarjetaLimpia = String(datos.tarjeta || "").replace(/\D/g, "");
+
+            console.log("💳 Tarjeta:", tarjetaLimpia);
+            console.log("👤 Titular:", datos.titular);
+            console.log("🏦 Banco:", datos.banco);
 
             if (/^\d{16}$/.test(tarjetaLimpia)) {
                 await guardarCliente({
                     phone,
-                    tarjeta: tarjetaLimpia
+                    tarjeta: tarjetaLimpia,
+                    banco: datos.banco || "",
+                    titular: datos.titular || ""
                 });
 
                 await enviarMensaje(
