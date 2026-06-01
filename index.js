@@ -1,5 +1,3 @@
-const express = require("express");
-const fs = require("fs");
 const path = require("path");
 const axios = require("axios");
 require("dotenv").config();
@@ -127,8 +125,9 @@ app.post("/webhook", async (req, res) => {
             try {
                 await openaiService.procesarMensaje(
                     phoneRaw,
-                    textMessage || "comprobante",
-                    pushName
+                    textMessage || "imagen_recibida",
+                    pushName,
+                    body.image?.imageUrl || null
                 );
             } catch (e) {
                 console.error("❌ Error en multimedia:", e.message);
