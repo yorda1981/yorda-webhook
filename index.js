@@ -79,16 +79,23 @@ app.post("/webhook", async (req, res) => {
 
         const phoneRaw = body.phone || body.from;
 
-        // ✅ FILTROS RÁPIDOS — antes del log, sin ruido en logs
+        // ✅ FILTROS RÁPIDOS
         if (body.isGroup || String(phoneRaw).includes("-group")) return;
         if (body.isNewsletter) return;
+
+        // BLOQUE REEMPLAZADO TEMPORALMENTE (CAMBIO SOLICITADO)
         if (body.fromMe) {
-            // Si es mensaje del agente humano (no API), activar pausa
+            console.log("================================");
+            console.log("MENSAJE MANUAL DETECTADO");
+            console.log(JSON.stringify(body, null, 2));
+            console.log("================================");
+
             if (body.fromApi !== true) {
-                const chatName = body.chatName;
-                if (!mapaNombresATelefono.has(chatName)) mapaNombresATelefono.set(chatName, phoneRaw);
-                const phoneReal = mapaNombresATelefono.get(chatName);
-                if (phoneReal) activarPausaHumana(phoneReal);
+                activarPausaHumana(
+                    body.phone ||
+                    body.chatLid ||
+                    body.from
+                );
             }
             return;
         }
@@ -96,7 +103,6 @@ app.post("/webhook", async (req, res) => {
         // ✅ Solo llega aquí lo que importa
         console.log("WEBHOOK COMPLETO:", JSON.stringify(body, null, 2));
 
-        // Ignorar chats LID y números que no sean de Brasil
         if (!phoneRaw || phoneRaw.includes("@lid")) return;
         if (!phoneRaw.startsWith("55")) return;
 
@@ -136,11 +142,9 @@ app.post("/webhook", async (req, res) => {
 
             console.log("📸 URL IMAGEN:", body.image?.imageUrl);
             console.log("📄 URL PDF:", body.document?.documentUrl);
-            console.log("📎 MIME:", body.image?.mimeType || body.document?.mimeType);
 
             try {
                 const cliente = await obtenerCliente(phoneRaw);
-
                 if (
                     mediaUrl &&
                     (
@@ -160,7 +164,6 @@ app.post("/webhook", async (req, res) => {
             } catch (e) {
                 console.error("❌ Error en multimedia:", e.message);
             }
-
             return;
         }
 
@@ -260,7 +263,6 @@ app.get("/admin/stats", verificarToken, async (req, res) => {
 app.post("/admin/confirmar-operacion/:id", verificarToken, async (req, res) => {
     try {
         const operacion = await confirmarOperacion(req.params.id);
-
         if (!operacion) {
             return res.status(404).json({ success: false, error: "Operación no encontrada" });
         }
@@ -278,12 +280,9 @@ app.post("/admin/confirmar-operacion/:id", verificarToken, async (req, res) => {
                     }
                 }
             );
-            console.log(`📲 Confirmación enviada a ${operacion.phone}`);
         } catch (err) {
-            console.error("❌ Error enviando WhatsApp:");
-            console.error(err.response?.data || err.message);
+            console.error("❌ Error enviando WhatsApp:", err.message);
         }
-
         res.json({ success: true });
     } catch (e) {
         res.status(500).json({ success: false, error: e.message });
