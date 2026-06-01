@@ -34,6 +34,9 @@ function formatearNumero(numero) {
 }
 
 async function procesarMensaje(phone, text, pushName = "") {
+
+    console.log("NOMBRE CLIENTE:", pushName);
+
     try {
 
         if (!text || !phone) return "";
