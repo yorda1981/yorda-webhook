@@ -222,7 +222,8 @@ app.post("/admin/confirmar-operacion/:id", verificarToken, async (req, res) => {
             );
             console.log(`📲 Confirmación enviada a ${operacion.phone}`);
         } catch (err) {
-            console.error("❌ Error enviando WhatsApp:", err.message);
+            console.error("❌ Error enviando WhatsApp:");
+            console.error(err.response?.data || err.message);
         }
 
         res.json({ success: true });
