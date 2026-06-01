@@ -59,11 +59,7 @@ async function guardarCliente({
             await pool.query(`
                 UPDATE customers
                 SET
-                    nombre = CASE
-                        WHEN $2 IS NOT NULL AND $2 <> ''
-                        THEN $2
-                        ELSE nombre
-                    END,
+                    nombre = COALESCE($2,nombre),
                     ultimo_monto = CASE
                         WHEN $3 > 0 THEN $3
                         ELSE ultimo_monto
