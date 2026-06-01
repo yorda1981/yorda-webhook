@@ -121,8 +121,12 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         // ---------------------------------------------------------
         // 5. INTENCIÓN: COMPROBANTES
         // ---------------------------------------------------------
+        console.log("DEBUG IMAGEN:", {
+            imageUrl,
+            estado: cliente?.estado,
+            texto
+        });
 
-        // Si llegó una imagen Y el cliente está esperando comprobante → es comprobante
         const esComprobante =
             (imageUrl && cliente?.estado === "aguardando_comprovante") ||
             /paguei|pague|comprovante|comprobante|feito|realizado|ya envie|ya mande/i.test(texto);
