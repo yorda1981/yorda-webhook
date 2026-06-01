@@ -11,6 +11,8 @@ async function guardarCliente({
     tipo = "brl_cup",
     banco = "",
     tarjeta = "",
+    titular = "",
+    bancoDetectado = "",
     estado = null,
     fechaEstado = null,
     fechaCotizacion = null,
@@ -33,6 +35,8 @@ async function guardarCliente({
                     tipo_favorito,
                     banco_favorito,
                     tarjeta_frecuente,
+                    titular_frecuente,
+                    banco_detectado,
                     estado,
                     fecha_estado,
                     fecha_cotizacion,
@@ -41,7 +45,7 @@ async function guardarCliente({
                     updated_at
                 )
                 VALUES (
-                    $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW(),NOW()
+                    $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,NOW(),NOW()
                 )
             `, [
                 phone,
@@ -50,11 +54,14 @@ async function guardarCliente({
                 tipo,
                 banco,
                 tarjeta,
+                titular,
+                bancoDetectado,
                 estado,
                 fechaEstado,
                 fechaCotizacion,
                 fechaPix
             ]);
+
         } else {
             await pool.query(`
                 UPDATE customers
@@ -67,10 +74,12 @@ async function guardarCliente({
                     tipo_favorito = COALESCE($4,tipo_favorito),
                     banco_favorito = COALESCE($5,banco_favorito),
                     tarjeta_frecuente = COALESCE($6,tarjeta_frecuente),
-                    estado = COALESCE($7,estado),
-                    fecha_estado = COALESCE($8,fecha_estado),
-                    fecha_cotizacion = COALESCE($9,fecha_cotizacion),
-                    fecha_pix = COALESCE($10,fecha_pix),
+                    titular_frecuente = COALESCE($7,titular_frecuente),
+                    banco_detectado = COALESCE($8,banco_detectado),
+                    estado = COALESCE($9,estado),
+                    fecha_estado = COALESCE($10,fecha_estado),
+                    fecha_cotizacion = COALESCE($11,fecha_cotizacion),
+                    fecha_pix = COALESCE($12,fecha_pix),
                     updated_at = NOW()
                 WHERE phone = $1
             `, [
@@ -80,6 +89,8 @@ async function guardarCliente({
                 tipo,
                 banco,
                 tarjeta,
+                titular,
+                bancoDetectado,
                 estado,
                 fechaEstado,
                 fechaCotizacion,
