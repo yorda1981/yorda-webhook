@@ -1,4 +1,5 @@
-require("dotenv").config();
+Aquí tienes el archivo completo actualizado con ese bloque reemplazado:
+jsrequire("dotenv").config();
 
 const OpenAI = require("openai");
 
@@ -222,17 +223,20 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
 
             const tarjetaDetectada = await detectarTarjetaEnImagen(imageUrl);
 
-            console.log("💳 Resultado GPT:", tarjetaDetectada);
+            const tarjetaLimpia = String(tarjetaDetectada || "").replace(/\D/g, "");
 
-            if (tarjetaDetectada && /^\d{16}$/.test(tarjetaDetectada)) {
+            console.log("💳 Resultado GPT ORIGINAL:", tarjetaDetectada);
+            console.log("💳 Resultado LIMPIO:", tarjetaLimpia);
+
+            if (/^\d{16}$/.test(tarjetaLimpia)) {
                 await guardarCliente({
                     phone,
-                    tarjeta: tarjetaDetectada
+                    tarjeta: tarjetaLimpia
                 });
 
                 await enviarMensaje(
                     phone,
-                    `💳 Tarjeta detectada:\n${tarjetaDetectada}`
+                    `💳 Tarjeta detectada:\n${tarjetaLimpia}`
                 );
 
                 return "";
