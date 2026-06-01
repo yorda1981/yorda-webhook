@@ -3,8 +3,11 @@ require("dotenv").config();
 const OpenAI = require("openai");
 
 const { enviarMensaje, enviarImagen } = require("./zapi");
+
 const { calcularOperacion } = require("./calculator");
+
 const { guardarCliente, obtenerCliente } = require("./customer-memory");
+
 const { agregarOperacion, obtenerTodas } = require("./operations");
 
 const openai = new OpenAI({
@@ -59,9 +62,43 @@ async function detectarTarjetaEnImagen(imageUrl) {
         });
 
         return response.choices?.[0]?.message?.content?.trim();
-
     } catch (error) {
         console.error("❌ Error detectando tarjeta:", error.message);
+        return null;
+    }
+}
+
+// ==========================================
+// DETECCIÓN DE COMPROBANTE PIX
+// ==========================================
+
+async function detectarComprobantePIX(imageUrl) {
+    try {
+        const response = await openai.chat.completions.create({
+            model: "gpt-4o",
+            messages: [
+                {
+                    role: "user",
+                    content: [
+                        {
+                            type: "text",
+                            text: `Analiza la imagen y responde EXCLUSIVAMENTE en JSON.\n\nFormato:\n\n{\n  "tipo": "comprovante_pix",\n  "valor": "monto con decimales",\n  "fecha": "DD/MM/AAAA",\n  "hora": "HH:MM",\n  "banco": "nombre del banco origen",\n  "destinatario": "nombre del destinatario"\n}\n\nReglas:\n- valor debe ser el monto transferido, con decimales (ej: "130.00").\n- fecha en formato DD/MM/AAAA.\n- hora en formato HH:MM.\n- banco es el banco desde el que se realizó el pago.\n- destinatario es el nombre de quien recibió el pago.\n- si algún dato no existe o no se ve, usar null.\n- no agregues texto fuera del JSON.`
+                        },
+                        {
+                            type: "image_url",
+                            image_url: {
+                                url: imageUrl
+                            }
+                        }
+                    ]
+                }
+            ],
+            max_tokens: 150
+        });
+
+        return response.choices?.[0]?.message?.content?.trim();
+    } catch (error) {
+        console.error("❌ Error detectando comprobante PIX:", error.message);
         return null;
     }
 }
@@ -82,7 +119,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         // 1. DETECCIÓN DE IDIOMA
         const esEspanol = /hola|buenas|buenos dias|buen dia|quiero|cuanto|enviar|mandar|giro|transferencia|dinero|cuba|pesos|cup|reales|usd|dolares|dolar/i.test(texto);
 
-        // 2. MEMORIA DE CLIENTE (Asíncrono)
+        // 2. MEMORIA DE CLIENTE
         const cliente = await obtenerCliente(phone);
 
         // 3. ATENCIÓN HUMANA
@@ -115,6 +152,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         // ---------------------------------------------------------
         // 4. LÓGICA DE ENVÍO DE PIX
         // ---------------------------------------------------------
+
         if (/pix|envia el pix|envía el pix|pasame el pix|pásame el pix|quiero hacerlo|voy a pagar/i.test(texto)) {
             if (!cliente || !cliente.ultimo_monto || cliente.ultimo_monto <= 0) {
                 const msg = esEspanol
@@ -166,31 +204,25 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         // 5. DETECCIÓN DE TARJETA EN IMAGEN (GPT-4o Vision)
         // DEBE IR ANTES que el bloque de comprobantes
         // ---------------------------------------------------------
+
         if (imageUrl) {
             console.log("💳 Analizando imagen...");
-
             const respuestaGPT = await detectarTarjetaEnImagen(imageUrl);
-
             console.log("💳 GPT RAW:", respuestaGPT);
 
             let datos = {};
-
             try {
                 const jsonLimpio = respuestaGPT
                     .replace(/```json/g, "")
                     .replace(/```/g, "")
                     .trim();
-
                 console.log("JSON LIMPIO:", jsonLimpio);
-
                 datos = JSON.parse(jsonLimpio);
-
             } catch (e) {
                 console.log("❌ Error parseando JSON:", e.message);
             }
 
             const tarjetaLimpia = String(datos.tarjeta || "").replace(/\D/g, "");
-
             console.log("💳 Tarjeta:", tarjetaLimpia);
             console.log("👤 Titular:", datos.titular);
             console.log("🏦 Banco:", datos.banco);
@@ -217,6 +249,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         // ---------------------------------------------------------
         // 6. INTENCIÓN: COMPROBANTES
         // ---------------------------------------------------------
+
         console.log("DEBUG IMAGEN:", {
             imageUrl,
             estado: cliente?.estado,
@@ -240,6 +273,12 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                 console.log("⏰ Sesión de pago vencida.");
                 await guardarCliente({ phone, estado: null, fechaEstado: null, fechaPix: null });
                 return "";
+            }
+
+            // LECTURA DEL COMPROBANTE CON GPT-4o Vision
+            if (imageUrl) {
+                const resultado = await detectarComprobantePIX(imageUrl);
+                console.log("📄 COMPROBANTE GPT:", resultado);
             }
 
             if (cliente.ultimo_monto > 0) {
@@ -277,6 +316,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         // ---------------------------------------------------------
         // 7. CÁLCULO USD -> CUP
         // ---------------------------------------------------------
+
         if (esMontoValido && (texto.includes("usd") || texto.includes("dolar") || texto.includes("dolares")) && !texto.includes("real") && !texto.includes("brl")) {
             const tipoUsd = texto.includes("prepago") ? "usd_prepago" : "usd_clasica";
             const resultado = await calcularOperacion({ tipo: tipoUsd, valor });
@@ -301,6 +341,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         // ---------------------------------------------------------
         // 8. CÁLCULO BRL -> CUP (Con Mensajes de Incentivo)
         // ---------------------------------------------------------
+
         if (esMontoValido && !texto.includes("usd") && !texto.includes("dolar") && !texto.includes("dolares") && !texto.includes("cup") && !texto.includes("mlc")) {
             const resultado = await calcularOperacion({ tipo: "brl_cup", valor });
 
@@ -335,6 +376,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         // ---------------------------------------------------------
         // 9. IA COMO RESPALDO (Solo si hay gatillo)
         // ---------------------------------------------------------
+
         const activarIA = gatilhos.some(g => texto.includes(normalizarTexto(g)));
         if (!activarIA) return "";
 
@@ -360,4 +402,4 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
     }
 }
 
-module.exports = { procesarMensaje };
+module.exports = { detectarTarjetaEnImagen, detectarComprobantePIX, procesarMensaje };
