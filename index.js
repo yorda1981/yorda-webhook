@@ -211,7 +211,7 @@ app.post("/admin/tasas", verificarToken, async (req, res) => {
                 brl_1000=$4,
                 usd1=$5,
                 usd2=$6,
-                actualizado_en=NOW()
+                updated_at=NOW()
             WHERE id=1
         `, [
             brl_0,
