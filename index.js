@@ -209,9 +209,11 @@ app.get("/admin/tasas", verificarToken, async (req, res) => {
 
 app.post("/admin/tasas", verificarToken, async (req, res) => {
     try {
+        console.log("🔥 GUARDAR TASAS EJECUTADO");
+        console.log(req.body);
+
         const { brl_0, brl_100, brl_500, brl_1000, usd1, usd2 } = req.body;
         
-        // ✅ CORRECCIÓN DE COLUMNAS REALES DE LA BD
         await pool.query(`
             UPDATE rates
             SET
@@ -231,9 +233,14 @@ app.post("/admin/tasas", verificarToken, async (req, res) => {
             usd1,
             usd2
         ]);
+
+        console.log("✅ UPDATE EJECUTADO");
         
         res.json({ success: true });
-    } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+    } catch (e) { 
+        console.error("❌ ERROR TASAS:", e);
+        res.status(500).json({ success: false, error: e.message }); 
+    }
 });
 
 app.get("/admin/clientes", verificarToken, async (req, res) => {
