@@ -87,7 +87,6 @@ app.post("/webhook", async (req, res) => {
 
         const phoneRaw = body.phone || body.from;
 
-        // ✅ VINCULACIÓN PROTEGIDA: Solo mapear si el mensaje NO es mío
         if (
             body.chatLid &&
             body.phone &&
@@ -97,11 +96,9 @@ app.post("/webhook", async (req, res) => {
             mapaLidATelefono.set(body.chatLid, body.phone);
         }
 
-        // ✅ FILTROS RÁPIDOS
         if (body.isGroup || String(phoneRaw).includes("-group")) return;
         if (body.isNewsletter) return;
 
-        // ✅ DETECCIÓN DE MENSAJE MANUAL (Pausa Humana)
         if (body.fromMe) {
             if (body.fromApi !== true) {
                 const telefonoCliente = mapaLidATelefono.get(body.chatLid);
@@ -112,7 +109,6 @@ app.post("/webhook", async (req, res) => {
             return;
         }
 
-        // Ignorar chats LID directos y números fuera de Brasil
         if (!phoneRaw || phoneRaw.includes("@lid")) return;
         if (!phoneRaw.startsWith("55")) return;
 
@@ -128,7 +124,6 @@ app.post("/webhook", async (req, res) => {
 
         const pushName = body.senderName || "Cliente";
 
-        // ✅ VERIFICAR SILENCIO DEL BOT
         if (enPausaHumana(phoneRaw)) {
             console.log(`🤫 BOT SILENCIADO PARA ${phoneRaw} (Pausa humana activa)`);
             return;
@@ -143,10 +138,6 @@ app.post("/webhook", async (req, res) => {
             body.document;
 
         const textMessage = body.text?.message || body.body || body.caption || "";
-
-        // ==========================================
-        // MANEJO DE MULTIMEDIA
-        // ==========================================
 
         if (esMultimedia) {
             const mediaUrl = body.image?.imageUrl || body.document?.documentUrl || null;
@@ -163,10 +154,6 @@ app.post("/webhook", async (req, res) => {
             }
             return;
         }
-
-        // ==========================================
-        // MANEJO DE MENSAJES DE TEXTO (Buffer 3.5s)
-        // ==========================================
 
         if (!textMessage) return;
 
@@ -214,6 +201,7 @@ app.post("/admin/tasas", verificarToken, async (req, res) => {
 
         const { brl_0, brl_100, brl_500, brl_1000, usd1, usd2 } = req.body;
         
+        // ✅ CORREGIDO: Usando nombres de columna estándar (usd1, usd2)
         await pool.query(`
             UPDATE rates
             SET
@@ -221,8 +209,8 @@ app.post("/admin/tasas", verificarToken, async (req, res) => {
                 brl_100=$2,
                 brl_500=$3,
                 brl_1000=$4,
-                "USD1"=$5,
-                "2 dólares"=$6,
+                usd1=$5,
+                usd2=$6,
                 actualizado_en=NOW()
             WHERE id=1
         `, [
