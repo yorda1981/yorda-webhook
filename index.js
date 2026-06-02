@@ -210,8 +210,28 @@ app.get("/admin/tasas", verificarToken, async (req, res) => {
 app.post("/admin/tasas", verificarToken, async (req, res) => {
     try {
         const { brl_0, brl_100, brl_500, brl_1000, usd1, usd2 } = req.body;
-        await pool.query(`UPDATE rates SET brl_0=$1, brl_100=$2, brl_500=$3, brl_1000=$4, usd1=$5, usd2=$6, updated_at=NOW() WHERE id=1`, 
-        [brl_0, brl_100, brl_500, brl_1000, usd1, usd2]);
+        
+        // ✅ CORRECCIÓN DE COLUMNAS REALES DE LA BD
+        await pool.query(`
+            UPDATE rates
+            SET
+                brl_0=$1,
+                brl_100=$2,
+                brl_500=$3,
+                brl_1000=$4,
+                "USD1"=$5,
+                "2 dólares"=$6,
+                actualizado_en=NOW()
+            WHERE id=1
+        `, [
+            brl_0,
+            brl_100,
+            brl_500,
+            brl_1000,
+            usd1,
+            usd2
+        ]);
+        
         res.json({ success: true });
     } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
