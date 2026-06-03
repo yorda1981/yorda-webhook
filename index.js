@@ -190,29 +190,32 @@ app.post("/webhook", async (req, res) => {
 app.get("/admin/tasas", verificarToken, async (req, res) => {
     try {
         const result = await pool.query("SELECT * FROM rates LIMIT 1");
+        console.log("📊 ENVIANDO TASAS AL DASHBOARD:", result.rows[0]);
         res.json(result.rows[0] || {});
-    } catch (e) { res.status(500).json({ error: e.message }); }
+    } catch (e) { 
+        res.status(500).json({ error: e.message }); 
+    }
 });
 
 app.post("/admin/tasas", verificarToken, async (req, res) => {
     try {
         console.log("🔥 GUARDAR TASAS EJECUTADO");
-        console.log(req.body);
+        console.log("Body recibido:", req.body);
 
         const { brl_0, brl_100, brl_500, brl_1000, usd1, usd2 } = req.body;
         
-        // ✅ CORREGIDO: Usando nombres de columna estándar (usd1, usd2)
+        // Uso de COALESCE para protección de datos parciales
         await pool.query(`
             UPDATE rates
             SET
-                brl_0=$1,
-                brl_100=$2,
-                brl_500=$3,
-                brl_1000=$4,
-                usd1=$5,
-                usd2=$6,
-                updated_at=NOW()
-            WHERE id=1
+                brl_0 = COALESCE($1, brl_0),
+                brl_100 = COALESCE($2, brl_100),
+                brl_500 = COALESCE($3, brl_500),
+                brl_1000 = COALESCE($4, brl_1000),
+                usd1 = COALESCE($5, usd1),
+                usd2 = COALESCE($6, usd2),
+                updated_at = NOW()
+            WHERE id = 1
         `, [
             brl_0,
             brl_100,
@@ -223,7 +226,6 @@ app.post("/admin/tasas", verificarToken, async (req, res) => {
         ]);
 
         console.log("✅ UPDATE EJECUTADO");
-        
         res.json({ success: true });
     } catch (e) { 
         console.error("❌ ERROR TASAS:", e);
@@ -237,6 +239,10 @@ app.get("/admin/clientes", verificarToken, async (req, res) => {
 
 app.get("/admin/operaciones", verificarToken, async (req, res) => {
     try { res.json(await obtenerTodas()); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get("/admin/stats", verificarToken, async (req, res) => {
+    try { res.json(await obtenerEstadisticas()); } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post("/admin/confirmar-operacion/:id", verificarToken, async (req, res) => {
