@@ -18,8 +18,28 @@ const openai = new OpenAI({
 // ==========================================
 
 const DOS_HORAS = 2 * 60 * 60 * 1000;
-const gatilhos = ["yordanys", "asesor", "humano", "ayuda", "informacion", "contacto"];
 
+// ✅ GATILLOS DE NEGOCIO OPTIMIZADOS (Excluye saludos/palabras irrelevantes)
+const gatilhos = [
+    "remesa", "transferencia", "transferir", "enviar dinero", "mandar dinero",
+    "quiero enviar", "necesito enviar", "quiero mandar", "enviar a cuba",
+    "mandar a cuba", "dinero para cuba", "envio", "tasa", "cotizacion",
+    "cotizar", "cuanto recibe", "cuanto llega", "cuanto pagan",
+    "cup", "peso cubano", "pesos cubanos", "usd", "dolar", "dolares",
+    "recarga","saldo", "pix", "clave pix", "qr pix",
+    "tarjeta", "bpa", "bandec", "metropolitano",
+    "quiero hacer una transferencia", "hacer una transferencia", "quiero una remesa",
+    "necesito una remesa", "como envio dinero", "como mandar dinero",
+    "quiero cotizar", "pasame el pix", "mandame el pix", "quiero hacer un envio",
+    "me interesa enviar", "quiero pagar", "voy a pagar"
+];
+
+// ✅ DETECTOR DE PALABRAS CLAVE DE ALTO VALOR
+const palabrasNegocio = [
+    "cuba", "cup", "usd", "mlc", "transferencia", "remesa", "pix", "recarga", "etecsa", "tarjeta"
+];
+
+// ✅ CORRECCIÓN 1: Nombre de la función normalizarTexto consistente en todo el archivo
 function normalizarTexto(texto) {
     return String(texto || "")
         .toLowerCase()
@@ -39,7 +59,8 @@ function limpiarJSONGPT(texto) {
     try {
         return JSON.parse(
             String(texto || "")
-                .replace(/```json/g, "")
+                .replace(/```json/gi, "")
+                // ✅ CORRECCIÓN 2: Regex corregida para evitar fallos de parseo
                 .replace(/```/g, "")
                 .trim()
         );
@@ -181,7 +202,7 @@ async function clasificarImagen(imageUrl) {
 }
 
 // ==========================================
-// HELPER: envío seguro
+// HELPERS AUXILIARES
 // ==========================================
 
 async function enviarSeguro(phone, mensaje) {
@@ -192,10 +213,6 @@ async function enviarSeguro(phone, mensaje) {
     console.log("📤 ENVIANDO:", mensaje);
     await enviarMensaje(phone, mensaje);
 }
-
-// ==========================================
-// HELPER: limpiar sesión
-// ==========================================
 
 async function limpiarSesion(phone) {
     await guardarCliente({
@@ -219,11 +236,14 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
 
     try {
         if (!text || !phone) return "";
+        
+        // ✅ CORRECCIÓN 1: Aplicación correcta del helper normalizarTexto corregido
         const texto = normalizarTexto(text);
 
         const esEspanol = /hola|buenas|buenos dias|buen dia|quiero|cuanto|enviar|mandar|giro|transferencia|dinero|cuba|pesos|cup|reales|usd|dolares|dolar/i.test(texto);
         const cliente = await obtenerCliente(phone);
 
+        // Derivación directa y protección humana
         if (
             /yordanys|humano|asesor|tengo cup|dinero en cuba|enviar para brasil|traer para brasil|vender cup|cup por reales/i.test(texto) ||
             ((texto.includes("usd") || texto.includes("dolar") || texto.includes("dolares")) && (texto.includes("real") || texto.includes("brl") || texto.includes("brasil"))) ||
@@ -240,6 +260,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         const soloNumeros = texto.replace(/\D/g, "");
         const valor = soloNumeros.length > 0 ? Number(soloNumeros) : null;
 
+        // Tarjeta por texto directo
         if (soloNumeros.length === 16) {
             console.log("💳 Tarjeta detectada por texto, guardando silencio.");
             await guardarCliente({ phone, tarjeta: soloNumeros });
@@ -268,6 +289,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             });
         }
 
+        // Caso QR ilegible
         if (/no consigo escanear|nao consigo escanear|no puedo escanear|no funciona el qr|qr no funciona|escanear/i.test(texto)) {
             const llaveFallback = process.env.PIX_KEY || "8becaaf5-f296-4cbc-a115-46e3d23b042a";
             const msg = `No hay problema 😊\n\nTambién puede copiar y pegar la clave PIX:\n\n${llaveFallback}\n\nTitular: Yordanys Rafael Sosa Reyes\n🏦 Nubank`;
@@ -275,6 +297,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             return msg;
         }
 
+        // Flujo de pago PIX
         const quierePagar =
             /^(pix|envia el pix|envía el pix|envia pix|envía pix|pasame el pix|pásame el pix|quiero hacerlo|voy a pagar|hacer pix|fazer pix)$/.test(texto.trim()) ||
             /\bquiero (hacer|enviar|mandar) (el )?pix\b/.test(texto) ||
@@ -320,25 +343,20 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             return llavePix;
         }
 
+        // Manejo de tarjetas por imagen
         if (imageUrl && !imageUrl.toLowerCase().endsWith(".pdf")) {
             const clasificacion = await clasificarImagen(imageUrl);
             if (clasificacion.tipo === "tarjeta") {
                 const datos = await detectarTarjetaEnImagen(imageUrl);
                 const tarjetaLimpia = String(datos.tarjeta || "").replace(/\D/g, "");
 
-                if (
-                    datos.banco &&
-                    datos.banco.toLowerCase().includes("bpa")
-                ) {
-                    if (
-                        tarjetaLimpia.startsWith("1239")
-                    ) {
-                        await enviarSeguro(
-                            phone,
-                            "⚠️ No pude leer correctamente la tarjeta BPA. Envíe una foto más clara."
-                        );
-                        return "";
-                    }
+                // ✅ CORRECCIÓN 3: Evaluación BPA corregida evitando asignación accidental
+                if (datos.banco && datos.banco.toLowerCase().includes("bpa") && tarjetaLimpia.startsWith("1239")) {
+                    await enviarSeguro(
+                        phone,
+                        "⚠️ No pude leer correctamente la tarjeta BPA. Envíe una foto más clara."
+                    );
+                    return "";
                 }
 
                 if (
@@ -364,6 +382,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             }
         }
 
+        // Validación de comprobante
         const esComprobante =
             (
                 imageUrl &&
@@ -479,6 +498,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             return respuesta;
         }
 
+        // Cotizaciones USD
         if (esMontoValido && (texto.includes("usd") || texto.includes("dolar") || texto.includes("dolares")) && !texto.includes("real") && !texto.includes("brl")) {
             const tipoUsd = texto.includes("prepago") ? "usd_prepago" : "usd_clasica";
             const resultado = await calcularOperacion({ tipo: tipoUsd, valor });
@@ -498,6 +518,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             }
         }
 
+        // Cotizaciones BRL -> CUP estándar
         if (esMontoValido && !texto.includes("usd") && !texto.includes("dolar") && !texto.includes("dolares") && !texto.includes("cup") && !texto.includes("mlc")) {
             const resultado = await calcularOperacion({ tipo: "brl_cup", valor });
             if (resultado) {
@@ -528,8 +549,11 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
 
         if (valor && !esMontoValido) return "";
 
-        const activarIA = gatilhos.some(g => texto.includes(normalizarTexto(g)));
-        if (!activarIA) return "";
+        // ✅ LÓGICA DE FILTRADO ULTRA-SEGURO (Evita saludos y despedidas improductivas)
+        const activarPorFrase = gatilhos.some(g => texto.includes(normalizarTexto(g)));
+        const activarPorPalabra = palabrasNegocio.some(p => texto.includes(p));
+
+        if (!activarPorFrase && !activarPorPalabra) return "";
 
         const completion = await openai.chat.completions.create({
             model: "gpt-4o-mini",
