@@ -135,26 +135,37 @@
         const token = new URLSearchParams(window.location.search).get("token");
 
         async function refreshData() {
-            if (!token) return alert("Error: Token de acceso no válido.");
+            if (!token) {
+                alert("Error: Token de acceso no válido.");
+                return;
+            }
 
             try {
-                const [resTasas, resClientes, resStats, resOps] = await Promise.all([
-                    fetch(`/admin/tasas?token=${token}`),
-                    fetch(`/admin/clientes?token=${token}`),
-                    fetch(`/admin/stats?token=${token}`),
-                    fetch(`/admin/operaciones?token=${token}`)
-                ]);
-
+                // TASAS SIEMPRE PRIMERO
+                const resTasas = await fetch(`/admin/tasas?token=${token}`);
                 const tasas = await resTasas.json();
-                const clientes = await resClientes.json();
-                const stats = await resStats.json();
-                const operaciones = await resOps.json();
 
-                // 1. Llenar Tasas
+                console.log("📊 TASAS RECIBIDAS:", tasas);
+
                 Object.keys(tasas).forEach(key => {
                     const input = document.getElementById(key);
-                    if (input) input.value = tasas[key];
+                    if (input && tasas[key] !== null) {
+                        input.value = tasas[key];
+                    }
                 });
+            } catch (e) {
+                console.error("❌ Error cargando tasas:", e);
+            }
+
+            try {
+                const resClientes = await fetch(`/admin/clientes?token=${token}`);
+                const clientes = await resClientes.json();
+
+                const resStats = await fetch(`/admin/stats?token=${token}`);
+                const stats = await resStats.json();
+
+                const resOps = await fetch(`/admin/operaciones?token=${token}`);
+                const operaciones = await resOps.json();
 
                 // 2. Cards Superiores
                 const listaClientes = Array.isArray(clientes) ? clientes : Object.values(clientes);
@@ -211,9 +222,8 @@
                         </tr>
                     `;
                 });
-
             } catch (e) {
-                console.error("Error en carga de datos:", e);
+                console.error("❌ Error dashboard:", e);
             }
         }
 
@@ -227,19 +237,36 @@
         async function guardarTasas() {
             const btn = document.querySelector(".btn-save");
             btn.innerText = "Guardando...";
+
             const data = {};
-            document.querySelectorAll('#tasasForm input').forEach(i => data[i.id] = Number(i.value));
+
+            document.querySelectorAll('#tasasForm input').forEach(i => {
+                data[i.id] = i.value === "" ? null : Number(i.value);
+            });
+
+            console.log("📤 ENVIANDO TASAS:", data);
 
             try {
-                await fetch(`/admin/tasas?token=${token}`, {
+                const res = await fetch(`/admin/tasas?token=${token}`, {
                     method: "POST",
-                    headers: { "Content-Type": "application/json" },
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
                     body: JSON.stringify(data)
                 });
-                alert("✅ Tasas actualizadas globalmente.");
-                refreshData();
+
+                const resultado = await res.json();
+                console.log("📥 RESPUESTA:", resultado);
+
+                if (resultado.success) {
+                    alert("✅ Tasas actualizadas correctamente");
+                    refreshData();
+                } else {
+                    alert("❌ Error guardando tasas");
+                }
             } catch (e) {
-                alert("Error al guardar.");
+                console.error("❌ Error:", e);
+                alert("❌ Error al guardar");
             } finally {
                 btn.innerText = "Guardar Cambios de Tasas";
             }
