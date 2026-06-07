@@ -24,7 +24,7 @@ const openai = new OpenAI({
 
 const DOS_HORAS = 2 * 60 * 60 * 1000;
 
-// ✅ GATILLOS DE NEGOCIO OPTIMIZADOS
+// ✅ GATILLOS DE NEGOCIO — ampliados con frases cubanas comunes
 const gatilhos = [
     "remesa", "transferencia", "transferir", "enviar dinero", "mandar dinero",
     "quiero enviar", "necesito enviar", "quiero mandar", "enviar a cuba",
@@ -36,7 +36,12 @@ const gatilhos = [
     "quiero hacer una transferencia", "hacer una transferencia", "quiero una remesa",
     "necesito una remesa", "como envio dinero", "como mandar dinero",
     "quiero cotizar", "pasame el pix", "mandame el pix", "quiero hacer un envio",
-    "me interesa enviar", "quiero pagar", "voy a pagar"
+    "me interesa enviar", "quiero pagar", "voy a pagar",
+    // ✅ CORRECCIÓN: frases cubanas comunes que antes caían en GPT genérico
+    "pasar dinero", "pasar un dinero", "quiero pasar dinero", "quiero pasar un dinero",
+    "mandar plata", "enviar plata",
+    "enviar para mi familia", "ayudar a mi familia",
+    "enviar para cuba", "mandar para cuba"
 ];
 
 // ✅ DETECTOR DE PALABRAS CLAVE DE ALTO VALOR
@@ -267,7 +272,6 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             confirmaOperacion.includes(texto.trim())
         ) {
             if (!cliente.tarjeta && !cliente.tarjeta_frecuente) {
-                // ✅ MEJORA FINAL: Mensaje más claro para el cliente
                 await enviarSeguro(
                     phone,
                     "Perfecto 😊\n\nVoy a ayudarte con el envío.\n\nPuedes enviarme una foto de la tarjeta o los datos de destino y continuamos enseguida. 👌"
@@ -633,6 +637,22 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         const activarPorPalabra = palabrasNegocio.some(p => texto.includes(p));
 
         if (!activarPorFrase && !activarPorPalabra) return "";
+
+        // ✅ CORRECCIÓN: Intención de remesa clara hacia Cuba — respuesta directa sin pasar por GPT
+        if (
+            texto.includes("cuba") &&
+            (
+                texto.includes("dinero") ||
+                texto.includes("enviar") ||
+                texto.includes("mandar") ||
+                texto.includes("pasar") ||
+                texto.includes("plata")
+            )
+        ) {
+            const msg = "Perfecto 😊\n\n¿Cuánto deseas enviar?";
+            await enviarSeguro(phone, msg);
+            return msg;
+        }
 
         const completion = await openai.chat.completions.create({
             model: "gpt-4o-mini",
