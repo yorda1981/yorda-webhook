@@ -311,7 +311,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             texto.includes("mlc")
         ) {
             const respuesta = esEspanol
-                ? "Perfecto 😊\nYordanys te atenderá enseguida para darte la cotización exacta de esa operación. 👌"
+                ? "Perfecto 😊\nYordanys te atenderá enseguida para darte las tasas cambio exacta de esa operación. 👌"
                 : "Perfeito 😊\nYordanys irá atendê-lo imediatamente para lhe dar a cotação exata dessa operação. 👌";
             await enviarSeguro(phone, respuesta);
             return respuesta;
@@ -594,7 +594,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                     fechaCotizacion: new Date().toISOString()
                 });
 
-                const respuesta = `💵 ${valor} USD hoy rinden ${formatearNumero(resultado.cup)} CUP 🇨🇺\n\n¿Deseas continuar?`;
+                const respuesta = `💵 ${valor} USD hoy serían ${formatearNumero(resultado.cup)} CUP 🇨🇺\n\n¿Deseas continuar?`;
                 await enviarSeguro(phone, respuesta);
                 return respuesta;
             }
