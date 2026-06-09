@@ -78,7 +78,6 @@ function limpiarJSONGPT(texto) {
 
 // ==========================================
 // HELPER: detectar si URL es PDF
-// ✅ Tolerante con URLs sin extensión
 // ==========================================
 
 function esPDF(url) {
@@ -89,8 +88,6 @@ function esPDF(url) {
 
 // ==========================================
 // DETECCIÓN DE TARJETA EN IMAGEN
-// gpt-4o para mayor precisión
-// Log OCR bruto antes del parse
 // ==========================================
 
 async function detectarTarjetaEnImagen(imageUrl) {
@@ -129,8 +126,6 @@ async function detectarTarjetaEnImagen(imageUrl) {
 
 // ==========================================
 // DETECCIÓN UNIFICADA: TARJETA O COMPROBANTE PIX
-// Una sola llamada gpt-4o, sin clasificarImagen() separado
-// Detectar clave PIX como destino_correcto
 // ==========================================
 
 async function detectarImagenUnificada(imageUrl) {
@@ -169,7 +164,6 @@ async function detectarImagenUnificada(imageUrl) {
 
 // ==========================================
 // DETECCIÓN DE COMPROBANTE PDF
-// Detectar clave PIX en PDF también
 // ==========================================
 
 async function detectarComprobantePDF(pdfUrl) {
@@ -280,6 +274,13 @@ async function procesarComprobanteConfirmado(phone, pushName, cliente, datosComp
             valor: cliente.ultimo_monto
         });
 
+        // ✅ CAMBIO 2 — guardar estado del comprobante antes de registrar la operación
+        await guardarCliente({
+            phone,
+            comprobantePendiente: false,
+            valorComprobante: datosComprobante.valor ?? null
+        });
+
         await agregarOperacion({
             phone,
             nombre: pushName || cliente.nombre || "Cliente",
@@ -322,6 +323,12 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         const esEspanol = /hola|buenas|buenos dias|buen dia|quiero|cuanto|enviar|mandar|giro|transferencia|dinero|cuba|pesos|cup|reales|usd|dolares|dolar/i.test(texto);
 
         const cliente = await obtenerCliente(phone);
+
+        // ✅ CAMBIO 1 — registrar última interacción en cada mensaje
+        await guardarCliente({
+            phone,
+            ultimaInteraccion: new Date().toISOString()
+        });
 
         // ✅ Confirmación post-cotización
         if (
@@ -495,8 +502,16 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                     datosComprobante = await detectarComprobantePDF(imageUrl);
                 } else {
                     const datos = await detectarImagenUnificada(imageUrl);
+
                     if (datos.tipo === "comprovante_pix") {
+                        // ✅ CAMBIO 3 — guardar comprobante detectado aunque falten datos
+                        await guardarCliente({
+                            phone,
+                            comprobantePendiente: true,
+                            valorComprobante: datos.valor ?? null
+                        });
                         datosComprobante = datos;
+
                     } else if (datos.tipo === "tarjeta" && datos.valida) {
                         const tarjetaLimpia = String(datos.tarjeta || "").replace(/\D/g, "");
                         if (/^\d{15,16}$/.test(tarjetaLimpia)) {
@@ -519,6 +534,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                             return "";
                         }
                     }
+
                     if (!datosComprobante.valido && datos.tipo !== "comprovante_pix") return "";
                 }
 
@@ -571,6 +587,12 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                 }
 
                 if (datos.tipo === "comprovante_pix") {
+                    // ✅ CAMBIO 3 — guardar comprobante incluso fuera de flujo
+                    await guardarCliente({
+                        phone,
+                        comprobantePendiente: true,
+                        valorComprobante: datos.valor ?? null
+                    });
                     await enviarSeguro(
                         phone,
                         "⚠️ Recibimos el comprobante pero no hay una operación activa. Si ya realizó el pago, indícanos el monto enviado."
@@ -602,7 +624,6 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
 
         // ==========================================
         // COTIZACIONES USD
-        // ✅ Detectar tipo correcto: usd_efectivo vs usd_prepago vs usd_clasica
         // ==========================================
 
         if (esMontoValido && (texto.includes("usd") || texto.includes("dolar") || texto.includes("dolares")) && !texto.includes("real") && !texto.includes("brl")) {
