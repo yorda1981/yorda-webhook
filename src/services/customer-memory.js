@@ -33,11 +33,9 @@ async function guardarCliente({
     if (comprobantePendiente !== null) {
         console.log("📌 COMPROBANTE PENDIENTE:", comprobantePendiente);
     }
-    // ✅ AJUSTE 1 — usar !== null para no perder el valor 0
     if (valorComprobante !== null) {
         console.log("📌 VALOR COMPROBANTE:", valorComprobante);
     }
-    // ✅ AJUSTE 2 — log para ultimaInteraccion
     if (ultimaInteraccion) {
         console.log("📌 ÚLTIMA INTERACCIÓN:", ultimaInteraccion);
     }
@@ -64,10 +62,20 @@ async function guardarCliente({
                     fecha_cotizacion,
                     fecha_pix,
                     created_at,
-                    updated_at
+                    updated_at,
+                    tarjetas,
+                    comprobante_pendiente,
+                    valor_comprobante,
+                    ultima_interaccion
                 )
                 VALUES (
-                    $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,NOW(),NOW()
+                    $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,
+                    NOW(),
+                    NOW(),
+                    $13,
+                    $14,
+                    $15,
+                    $16
                 )
             `, [
                 phone,
@@ -81,7 +89,11 @@ async function guardarCliente({
                 estado,
                 fechaEstado,
                 fechaCotizacion,
-                fechaPix
+                fechaPix,
+                tarjetas ? JSON.stringify(tarjetas) : null,
+                comprobantePendiente,
+                valorComprobante,
+                ultimaInteraccion
             ]);
 
         } else {
@@ -99,6 +111,10 @@ async function guardarCliente({
                     fecha_estado = COALESCE($10,fecha_estado),
                     fecha_cotizacion = COALESCE($11,fecha_cotizacion),
                     fecha_pix = COALESCE($12,fecha_pix),
+                    tarjetas = COALESCE($13,tarjetas),
+                    comprobante_pendiente = COALESCE($14,comprobante_pendiente),
+                    valor_comprobante = COALESCE($15,valor_comprobante),
+                    ultima_interaccion = COALESCE($16,ultima_interaccion),
                     updated_at = NOW()
                 WHERE phone = $1
             `, [
@@ -113,7 +129,11 @@ async function guardarCliente({
                 estado,
                 fechaEstado,
                 fechaCotizacion,
-                fechaPix
+                fechaPix,
+                tarjetas ? JSON.stringify(tarjetas) : null,
+                comprobantePendiente,
+                valorComprobante,
+                ultimaInteraccion
             ]);
         }
 
