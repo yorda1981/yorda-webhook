@@ -221,6 +221,25 @@ async function enviarPIX(phone, cliente, esEs) {
         return msg;
     }
 
+    // Si tiene múltiples tarjetas, preguntar cuál usar
+    const tarjetas = Array.isArray(cliente?.tarjetas) ? cliente.tarjetas.filter(t => /^\d{15,16}$/.test(t)) : [];
+    if (!esRecarga && tarjetas.length > 1) {
+        const opciones = tarjetas.map((t, i) => {
+            const ultimos = t.slice(-4);
+            const titular = cliente.titular_frecuente || "";
+            return `${i + 1}️⃣ •••• ${ultimos}${titular ? " — " + titular.split(" ")[0] : ""}`;
+        }).join("\n");
+        const msg = `¿A cuál tarjeta envío hoy? 💳\n\n${opciones}`;
+        await guardarCliente({ phone, estado: "seleccionando_tarjeta", fechaEstado: new Date().toISOString() });
+        await enviarSeguro(phone, msg);
+        return msg;
+    }
+
+    return await _enviarPIXFinal(phone, cliente, esEs);
+}
+
+// Envía el PIX con la tarjeta ya definida
+async function _enviarPIXFinal(phone, cliente, esEs) {
     const key = getPIXKey(); const holder = getPIXHolder();
     const bank = getPIXBank(); const img = getPIXImage();
 
@@ -575,6 +594,25 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         const soloNums = txt.replace(/\D/g, "");
         const valor    = soloNums.length > 0 ? Number(soloNums) : null;
         const montoValido = valor && valor >= 10 && valor <= 50000;
+
+        // — Selección de tarjeta cuando el bot preguntó cuál usar
+        if (cliente?.estado === "seleccionando_tarjeta" && /^[1-9]$/.test(txt.trim())) {
+            const tarjetas = Array.isArray(cliente?.tarjetas) ? cliente.tarjetas.filter(t => /^\d{15,16}$/.test(t)) : [];
+            const idx = parseInt(txt.trim()) - 1;
+            if (idx >= 0 && idx < tarjetas.length) {
+                const tarjetaElegida = tarjetas[idx];
+                await guardarCliente({
+                    phone,
+                    tarjeta: tarjetaElegida,
+                    tarjeta_frecuente: tarjetaElegida,
+                    estado: "aguardando_comprovante",
+                    fechaEstado: new Date().toISOString(),
+                    fechaPix: new Date().toISOString()
+                });
+                const cli2 = await obtenerCliente(phone);
+                return await _enviarPIXFinal(phone, cli2, esEs);
+            }
+        }
 
         // — Selección de tipo cuando el bot lo preguntó
         if (cliente?.comprobante_pendiente && !cliente?.tipo_favorito && /^[123]$/.test(txt.trim())) {
