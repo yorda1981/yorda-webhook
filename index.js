@@ -1,215 +1,778 @@
-const express = require("express");
-const fs = require("fs");
-const path = require("path");
-const axios = require("axios");
 require("dotenv").config();
 
-const pool = require("./db");
+const OpenAI   = require("openai");
+const pdfParse = require("pdf-parse");
 
-const openaiService = require("./src/services/openai");
-const { obtenerTodos, obtenerCliente } = require("./src/services/customer-memory");
-const { obtenerTodas, confirmarOperacion, obtenerEstadisticas } = require("./src/services/operations");
+const { enviarMensaje, enviarImagen }                     = require("./zapi");
+const { calcularOperacion }                               = require("./calculator");
+const { guardarCliente, obtenerCliente, limpiarSesionDB } = require("./customer-memory");
+const { agregarOperacion, obtenerTodas }                  = require("./operations");
+const env = require("../config/env");
 
-const app = express();
-const PORT = process.env.PORT || 8080;
-app.set("trust proxy", 1);
+const openai = new OpenAI({ apiKey: env.OPENAI_API_KEY });
 
-const buffers          = new Map();
-const pendingMessages  = new Map();
-const pausasHumanas    = new Map();
-const mapaLidATelefono = new Map();
-const mensajesProcesados = new Set();
+// ─────────────────────────────────────────
+// CONSTANTES
+// ─────────────────────────────────────────
 
-const MINUTOS_PAUSA = 10;
+const DOS_HORAS = 2 * 60 * 60 * 1000;
 
-function activarPausaHumana(phone) {
-    if (!phone) return;
-    if (!String(phone).startsWith("55")) return;
-    const finActual = pausasHumanas.get(phone);
-    if (finActual && finActual > Date.now()) return;
-    pausasHumanas.set(phone, Date.now() + (MINUTOS_PAUSA * 60 * 1000));
-    console.log(`⏸️ Pausa humana: ${MINUTOS_PAUSA} min para ${phone}`);
+function getPIXKey()     { return env.PIX_KEY         || ""; }
+function getPIXHolder()  { return env.PIX_HOLDER_NAME || ""; }
+function getPIXBank()    { return env.PIX_BANK        || ""; }
+function getPIXImage()   { return env.PIX_IMAGE_URL   || ""; }
+function getAdminPhone() { return env.ADMIN_PHONE     || ""; }
+function getPIXAliases() {
+    return (env.PIX_HOLDER_ALIASES || "").split("|").map(s => s.trim()).filter(Boolean);
 }
 
-function enPausaHumana(phone) {
-    const fin = pausasHumanas.get(phone);
-    if (!fin) return false;
-    if (Date.now() > fin) { pausasHumanas.delete(phone); return false; }
+// ─────────────────────────────────────────
+// GATILLOS — solo activan el bot si aparecen
+// ─────────────────────────────────────────
+
+const gatilhos = [
+    "remesa","transferencia","transferir","enviar dinero","mandar dinero",
+    "quiero enviar","necesito enviar","quiero mandar","enviar a cuba","mandar a cuba",
+    "dinero para cuba","tasa","cotizacion","cotizar","a como esta","a cuanto esta",
+    "cuanto recibe","cuanto llega","cuanto pagan","cuanto da","el cambio","cambio de hoy",
+    "cup","peso cubano","pesos cubanos","usd","dolar","dolares",
+    "recarga","saldo","pix","clave pix","qr pix","tarjeta","bpa","bandec","metropolitano",
+    "como envio","como mando","quiero cotizar","pasame el pix","mandame el pix",
+    "me interesa","quiero pagar","voy a pagar","pasar dinero","mandar plata","enviar plata",
+    "mi familia en cuba","ayuda a mi familia","enviar para cuba","mandar para cuba",
+    "hacer una remesa","necesito una remesa","quiero hacer un envio","quiero mandar dinero"
+];
+
+const palabrasNegocio = [
+    "cuba","cup","usd","mlc","transferencia","remesa","pix","recarga","etecsa","tarjeta"
+];
+
+// Cuba→Brasil — parada total, derivar a humano
+const triggersCubaBrasil = [
+    "tengo cup","vender cup","cup por reales","dinero en cuba","traer para brasil",
+    "traer dinero","enviar desde cuba","pesos cubanos","cambiar cup","cambio de cup",
+    "cup a reales","cup a brl","tengo pesos cubanos","vendo cup","vendo pesos"
+];
+
+const confirmaOperacion = [
+    "si","sí","ok","dale","vamos","quiero hacerlo","continuar","deseo continuar",
+    "de acuerdo","hagamoslo","hagámoslo","continuemos","perfecto","listo","va",
+    "claro","seguro","exacto","adelante","procede","procedemos","quiero","acepto"
+];
+
+const CIERRES_COT = [
+    "¿Hacemos la operación ahora? 💸",
+    "¿Quieres que te envíe el PIX para pagar?",
+    "¿Continuamos? 👌",
+    "¿Procedemos? Si tienes la tarjeta ya podemos cerrar.",
+    "¿Lo hacemos ahora? Es rápido 🚀"
+];
+
+const CONFIRMA_TARJETA_SIN_MONTO = [
+    "¡Listo! 💳 ¿Cuánto vas a enviar?",
+    "¡Perfecto, tarjeta guardada! 💳 ¿Qué monto quieres enviar?",
+    "¡Anotado! 💳 ¿Cuánto vas a mandar hoy?"
+];
+
+function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+// ─────────────────────────────────────────
+// UTILITIES
+// ─────────────────────────────────────────
+
+function norm(t) {
+    return String(t || "").toLowerCase()
+        .normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+function fmt(n) { return Number(n).toLocaleString("es-ES"); }
+
+function parseGPT(t) {
+    try {
+        return JSON.parse(
+            String(t || "").replace(/```json/gi,"").replace(/```/g,"").trim()
+        );
+    } catch { return {}; }
+}
+
+function esPDF(url) {
+    if (!url) return false;
+    const u = url.toLowerCase();
+    return u.includes(".pdf") || u.includes("mimetype=pdf") || u.includes("type=pdf");
+}
+
+async function enviarSeguro(phone, msg) {
+    if (!msg || !phone) return;
+    await enviarMensaje(phone, msg);
+}
+
+async function limpiarSesion(phone) { await limpiarSesionDB(phone); }
+
+// ─────────────────────────────────────────
+// PROMPTS OCR
+// ─────────────────────────────────────────
+
+function promptImagen() {
+    const aliases = getPIXAliases().join(", ");
+    const key     = getPIXKey();
+    return `Analiza la imagen. ¿Es tarjeta bancaria, comprobante PIX u otra cosa? Responde SOLO en JSON.
+
+TARJETA: {"tipo":"tarjeta","tarjeta":"SOLO_DIGITOS","titular":"NOMBRE","banco":"banco","valida":true}
+COMPROBANTE: {"tipo":"comprovante_pix","valor":200,"fecha":"DD/MM/AAAA","hora":"HH:MM","banco":"banco origen","destinatario":"nombre","destino_correcto":true,"valido":true}
+OTRO: {"tipo":"otro"}
+
+- tarjeta: solo dígitos, 15 o 16 caracteres.
+- valor: número puro (200, no "R$200,00").
+- destino_correcto=true si destinatario coincide con: ${aliases}.
+${key ? `- destino_correcto=true si aparece la clave: ${key}` : ""}
+- datos faltantes → null. Sin texto extra.`;
+}
+
+function promptPDF() {
+    const aliases = getPIXAliases().join(", ");
+    const key     = getPIXKey();
+    return `Analiza el texto del comprobante. Responde SOLO en JSON.
+{"tipo":"comprovante_pdf","valor":200,"fecha":"DD/MM/AAAA","hora":"HH:MM","banco":"banco origen","destinatario":"nombre","destino_correcto":true,"valido":true}
+- valor: número puro. datos faltantes → null. Sin texto extra.
+- destino_correcto=true si destinatario coincide con: ${aliases}.
+${key ? `- destino_correcto=true si el texto contiene: ${key}` : ""}`;
+}
+
+// ─────────────────────────────────────────
+// RESPONSES API — Asistente OpenAI
+// Solo para mensajes conversacionales
+// que no encajaron en ningún flujo
+// ─────────────────────────────────────────
+
+async function llamarAsistente(mensajeUsuario, lastResponseId = null) {
+    const params = {
+        model: "gpt-4o-mini",
+        input: mensajeUsuario,
+        ...(lastResponseId && { previous_response_id: lastResponseId }),
+        ...(env.OPENAI_ASSISTANT_ID && { assistant_id: env.OPENAI_ASSISTANT_ID })
+    };
+
+    const response = await openai.responses.create(params);
+
+    const texto = response.output
+        ?.filter(b => b.type === "message")
+        ?.flatMap(b => b.content)
+        ?.filter(c => c.type === "output_text")
+        ?.map(c => c.text)
+        ?.join("") || "";
+
+    return { texto: texto.trim(), responseId: response.id };
+}
+
+// ─────────────────────────────────────────
+// OCR
+// ─────────────────────────────────────────
+
+async function detectarImagenUnificada(imageUrl) {
+    try {
+        const r = await openai.chat.completions.create({
+            model: "gpt-4o",
+            messages: [{ role: "user", content: [
+                { type: "text",      text: promptImagen() },
+                { type: "image_url", image_url: { url: imageUrl } }
+            ]}],
+            max_tokens: 220
+        });
+        return parseGPT(r.choices?.[0]?.message?.content);
+    } catch (e) {
+        console.error("❌ OCR:", e.message);
+        return { tipo: "otro" };
+    }
+}
+
+async function detectarComprobantePDF(pdfUrl) {
+    try {
+        const resp     = await fetch(pdfUrl);
+        const buf      = Buffer.from(await resp.arrayBuffer());
+        const { text } = await pdfParse(buf);
+        const r = await openai.chat.completions.create({
+            model: "gpt-4o-mini",
+            messages: [{ role: "user", content: promptPDF() + `\n\nTexto:\n${text}` }],
+            max_tokens: 200
+        });
+        return parseGPT(r.choices?.[0]?.message?.content);
+    } catch (e) {
+        console.error("❌ PDF:", e.message);
+        return {};
+    }
+}
+
+// ─────────────────────────────────────────
+// ENVIAR PIX — con validación completa
+// ─────────────────────────────────────────
+
+async function enviarPIX(phone, cliente, esEs) {
+    if (!cliente?.ultimo_monto || Number(cliente.ultimo_monto) <= 0) {
+        const msg = esEs ? "Primero dime cuánto vas a enviar 😊" : "Primeiro me diz quanto vai enviar 😊";
+        await enviarSeguro(phone, msg);
+        return msg;
+    }
+    const esRecarga = cliente?.tipo_favorito === "recarga_etecsa";
+    if (!esRecarga && !cliente?.tarjeta && !cliente?.tarjeta_frecuente) {
+        const msg = esEs
+            ? "Solo me falta la tarjeta de destino 💳\n\nEnvíame una foto o los 16 dígitos."
+            : "Só falta o cartão de destino 💳\n\nEnvie uma foto ou os 16 dígitos.";
+        await enviarSeguro(phone, msg);
+        return msg;
+    }
+
+    const key = getPIXKey(); const holder = getPIXHolder();
+    const bank = getPIXBank(); const img = getPIXImage();
+
+    if (img)    await enviarImagen(phone, img, "📲 Escanea el QR para pagar.");
+    if (key)    await enviarSeguro(phone, key);
+    if (holder) await enviarSeguro(phone, `Titular: ${holder}${bank ? `\n🏦 ${bank}` : ""}`);
+    await enviarSeguro(phone, esEs
+        ? "Después del pago envíame el comprobante 📎 y proceso tu envío enseguida 🚀"
+        : "Após o pagamento envie o comprovante 📎 e processo imediatamente 🚀"
+    );
+    return key;
+}
+
+// ─────────────────────────────────────────
+// NOTIFICACIÓN AL ADMIN
+// Se envía al ADMIN_PHONE, nunca al cliente
+// ─────────────────────────────────────────
+
+async function notificarAdmin(pushName, phone, monto, cup, banco, tarjeta, titular) {
+    const adminPhone = getAdminPhone();
+    if (!adminPhone) {
+        console.warn("⚠️ ADMIN_PHONE no configurado — notificación no enviada");
+        return;
+    }
+    await enviarSeguro(adminPhone,
+        `📥 *NUEVA OPERACIÓN*\n👤 ${pushName}\n📱 ${phone}\n💵 R$${monto} → ${fmt(cup)} CUP\n🏦 ${banco || "-"}\n💳 ${tarjeta || "-"}\n👤 ${titular || "-"}\n⏳ Pendiente`
+    );
+}
+
+// ─────────────────────────────────────────
+// INTENTAR COMPLETAR OPERACIÓN
+// Flujo flexible: verifica si ya tenemos
+// todos los datos para crear la operación,
+// sin importar el orden en que llegaron.
+// ─────────────────────────────────────────
+
+async function intentarCompletarOperacion(phone, pushName, cliente, esEs) {
+    // Necesitamos: monto + tarjeta (o recarga) + comprobante recibido
+    const tieneMonto     = Number(cliente.ultimo_monto) > 0;
+    const tieneTarjeta   = !!(cliente.tarjeta || cliente.tarjeta_frecuente);
+    const tieneComprobante = !!cliente.comprobante_pendiente;
+    const esRecarga      = cliente.tipo_favorito === "recarga_etecsa";
+
+    const tieneTipo = !!cliente.tipo_favorito;
+
+    if (!tieneMonto || !tieneComprobante || (!tieneTarjeta && !esRecarga) || !tieneTipo) {
+        // Faltan datos — pedir solo el que falta, en orden de prioridad
+        if (!tieneMonto) {
+            const msg = esEs ? "¿Cuánto vas a enviar? 😊" : "Quanto vai enviar? 😊";
+            await enviarSeguro(phone, msg);
+            return false;
+        }
+        if (!tieneTipo) {
+            // Tenemos monto del comprobante pero no sabemos qué tipo de operación es
+            const msg = esEs
+                ? "¿Qué tipo de envío es? 😊\n\n1️⃣ Reales → CUP\n2️⃣ USD Clásica\n3️⃣ USD Prepago"
+                : "Que tipo de envio é? 😊\n\n1️⃣ Reais → CUP\n2️⃣ USD Clássica\n3️⃣ USD Pré-pago";
+            await enviarSeguro(phone, msg);
+            return false;
+        }
+        if (!tieneTarjeta && !esRecarga) {
+            const msg = esEs
+                ? "Solo me falta la tarjeta de destino 💳\n\nEnvíame foto o los 16 dígitos."
+                : "Só falta o cartão 💳\n\nFoto ou 16 dígitos.";
+            await enviarSeguro(phone, msg);
+            return false;
+        }
+        return false; // Falta comprobante — esperar
+    }
+
+    // ¡Tenemos todo! Verificar que no exista ya
+    const ops = await obtenerTodas();
+    const yaExiste = ops.find(o =>
+        o.phone === phone && o.status === "pendiente" &&
+        Number(o.monto) === Number(cliente.ultimo_monto)
+    );
+    if (yaExiste) return true;
+
+    const resultado = await calcularOperacion({ tipo: cliente.tipo_favorito, valor: cliente.ultimo_monto });
+
+    await guardarCliente({ phone, comprobantePendiente: false });
+    await agregarOperacion({
+        phone,
+        nombre:  pushName || cliente.nombre || "Cliente",
+        monto:   cliente.ultimo_monto,
+        cup:     resultado?.cup || 0,
+        tarjeta: cliente.tarjeta || cliente.tarjeta_frecuente || "",
+        titular: cliente.titular || cliente.titular_frecuente || "",
+        banco:   cliente.banco_detectado || "",
+        tipo:    cliente.tipo_favorito
+    });
+
+    // Confirmar al cliente
+    await enviarSeguro(phone, esEs
+        ? "¡Todo listo! ✅ Tu operación está siendo procesada 🚀"
+        : "Tudo certo! ✅ Sua operação está sendo processada 🚀"
+    );
+
+    // Notificar al admin (no al cliente)
+    await notificarAdmin(
+        pushName || cliente.nombre || "Cliente",
+        phone,
+        cliente.ultimo_monto,
+        resultado?.cup || 0,
+        cliente.banco_detectado || "",
+        cliente.tarjeta || cliente.tarjeta_frecuente || "",
+        cliente.titular || cliente.titular_frecuente || ""
+    );
+
+    await limpiarSesion(phone);
     return true;
 }
 
-app.use(express.json({ limit: "10mb" }));
-app.use(express.static(path.join(__dirname, "public")));
+// ─────────────────────────────────────────
+// PROCESAR COMPROBANTE
+// ─────────────────────────────────────────
 
-const verificarToken = (req, res, next) => {
-    const token  = req.headers["x-admin-token"] || req.query.token;
-    const secret = process.env.ADMIN_TOKEN?.trim();
-    if (!token || token.trim() !== secret) return res.status(401).json({ error: "No autorizado" });
-    next();
-};
+async function procesarComprobante(phone, pushName, cliente, datos, esEs) {
+    if (datos.destino_correcto === false) {
+        await enviarSeguro(phone, "⚠️ El comprobante no es para nuestra cuenta.\n\nVerifica el destinatario y reenvíalo.");
+        return "";
+    }
 
-// ==========================================
-// WEBHOOK
-// ==========================================
+    // Guardar que llegó el comprobante.
+    // Si el cliente no tenía monto, tomarlo del comprobante.
+    // NO asumir tipo — se pedirá al cliente si no hay cotización previa.
+    await guardarCliente({
+        phone,
+        comprobantePendiente: true,
+        valorComprobante: datos.valor ?? null,
+        ...(datos.valor && !cliente.ultimo_monto && {
+            monto: datos.valor
+            // tipo intencionalmente omitido — se confirma con el cliente
+        })
+    });
 
-app.post("/webhook", async (req, res) => {
-    res.status(200).send("OK");
+    // Verificar monto contra operación pendiente existente
+    const ops = await obtenerTodas();
+    const opPend = ops.filter(o => o.phone === phone && o.status === "pendiente")
+                      .sort((a, b) => b.id - a.id)[0];
+
+    if (opPend && datos.valor &&
+        Math.round(Number(datos.valor)) !== Math.round(Number(opPend.monto))
+    ) {
+        await enviarSeguro(phone,
+            `⚠️ El comprobante es R$${datos.valor} pero la operación es R$${opPend.monto}.\n\nVerifica y reenvíalo.`
+        );
+        return "";
+    }
+
+    // Recargar cliente con los datos recién guardados
+    const clienteActualizado = await obtenerCliente(phone);
+
+    // Intentar completar con lo que tenemos
+    const completado = await intentarCompletarOperacion(phone, pushName, clienteActualizado, esEs);
+
+    if (!completado) {
+        // Solo confirmar recepción si no se completó aún
+        await enviarSeguro(phone, esEs
+            ? "¡Comprobante recibido! ✅"
+            : "Comprovante recebido! ✅"
+        );
+    }
+
+    return "";
+}
+
+// ─────────────────────────────────────────
+// GUARDAR TARJETA — helper reutilizable
+// ─────────────────────────────────────────
+
+async function guardarTarjeta(phone, num, titular, banco, cliente) {
+    const arr = Array.isArray(cliente?.tarjetas) ? [...cliente.tarjetas] : [];
+    if (!arr.includes(num)) arr.push(num);
+    await guardarCliente({
+        phone, tarjeta: num, titular: titular || "",
+        bancoDetectado: banco || "", tarjeta_frecuente: num,
+        titular_frecuente: titular || "", banco_detectado: banco || "",
+        tarjetas: arr
+    });
+}
+
+// ─────────────────────────────────────────
+// PROCESAR MENSAJE
+// ─────────────────────────────────────────
+
+async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
     try {
-        const body = req.body;
-        if (!body) return;
+        if (!text || !phone) return "";
 
-        const phoneRaw = body.phone || body.from;
+        const txt  = norm(text);
+        const esEs = /hola|buenas|buenos|quiero|cuanto|enviar|mandar|giro|transferencia|dinero|cuba|pesos|cup|reales|usd|dolares|dolar|tasa|cambio/.test(txt);
 
-        if (body.chatLid && body.phone && body.phone.startsWith("55") && !body.fromMe) {
-            mapaLidATelefono.set(body.chatLid, body.phone);
+        const cliente    = await obtenerCliente(phone);
+        const yaSaludado = !!cliente?.saludo_enviado;
+
+        await guardarCliente({ phone, ultimaInteraccion: new Date().toISOString() });
+
+        // ══════════════════════════════════════
+        // GATILLO NEGATIVO: Cuba→Brasil
+        // Para total — solo humano
+        // ══════════════════════════════════════
+
+        const esCubaBrasil =
+            triggersCubaBrasil.some(t => txt.includes(norm(t))) ||
+            (txt.includes("cup") && !txt.includes("usd") && !txt.includes("dolar") &&
+             !txt.includes("real") && !txt.includes("brl") && !txt.includes("recibe")) ||
+            txt.includes("mlc");
+
+        if (esCubaBrasil) {
+            const msg = "Perfecto 😊\n\nYordanys te atenderá enseguida para ayudarte con esa operación.\n\nPor favor aguarda un momento. 👌";
+            await enviarSeguro(phone, msg);
+            return msg;
         }
 
-        if (body.isGroup || String(phoneRaw).includes("-group")) return;
-        if (body.isNewsletter) return;
+        // ══════════════════════════════════════
+        // SALUDO ÚNICO
+        // ══════════════════════════════════════
 
-        if (body.fromMe) {
-            if (body.fromApi !== true) {
-                const telefonoCliente = mapaLidATelefono.get(body.chatLid);
-                if (telefonoCliente) activarPausaHumana(telefonoCliente);
+        const esSaludo = /^(hola|oi|bom dia|buenas|buenos dias|boa tarde|boa noite|buen dia|hey|hi|hello|e ai|eai|buenas tardes|buenas noches|good morning)[\s!?.]*$/.test(txt);
+
+        if (esSaludo) {
+            if (!yaSaludado) {
+                const nombre     = pushName ? `, ${pushName.split(" ")[0]}` : "";
+                const esFrecuente = !!cliente?.tipo_favorito;
+                const msg = esFrecuente
+                    ? `¡Hola${nombre}! 👋 Bienvenido de vuelta.\n\n¿Vamos con otro envío a Cuba? 💸`
+                    : `¡Hola${nombre}! 👋\n\n¿Cuánto quieres enviar a Cuba hoy?`;
+                await guardarCliente({ phone, saludoEnviado: true });
+                await enviarSeguro(phone, msg);
+                return msg;
             }
-            return;
+            // Ya saludado — retomar desde contexto actual
+            if (cliente?.estado === "cotizacion_realizada" && cliente?.ultimo_monto) {
+                const msg = `¿Continuamos con el envío de R$${cliente.ultimo_monto}? 💸`;
+                await enviarSeguro(phone, msg);
+                return msg;
+            }
+            if (cliente?.estado === "aguardando_comprovante") {
+                await enviarSeguro(phone, esEs ? "Esperando tu comprobante 📎" : "Aguardando seu comprovante 📎");
+                return "";
+            }
+            const msg = esEs ? "¿Cuánto quieres enviar? 😊" : "Quanto quer enviar? 😊";
+            await enviarSeguro(phone, msg);
+            return msg;
         }
 
-        if (!phoneRaw || phoneRaw.includes("@lid")) return;
-        if (!phoneRaw.startsWith("55")) return;
+        // ══════════════════════════════════════
+        // FILTRO GATILLO — antes de cualquier lógica
+        // Si no hay gatillo ni intención ni imagen
+        // ni estado activo → silencio total
+        // ══════════════════════════════════════
 
-        const tiposValidos = ["ReceivedCallback", "image", "document", "audio", "video"];
-        if (!tiposValidos.includes(body.type)) return;
+        const hayGatillo  = gatilhos.some(g => txt.includes(norm(g)));
+        const hayNegocio  = palabrasNegocio.some(p => txt.includes(p));
+        const hayEstado   = !!cliente?.estado;
+        const hayImagen   = !!imageUrl;
+        const esNumero    = /^\d+([.,]\d{1,2})?$/.test(txt.trim());
+        const esSolo16    = txt.replace(/\D/g,"").length === 16;
+        const esConfirma  = confirmaOperacion.includes(txt.trim());
 
-        const messageId = body.messageId || body.id || body.zeId;
-        if (messageId && mensajesProcesados.has(messageId)) return;
-        if (messageId) {
-            mensajesProcesados.add(messageId);
-            setTimeout(() => mensajesProcesados.delete(messageId), 300000);
+        // Pasar solo si hay gatillo, negocio, estado activo, imagen, número o confirmación
+        const debeResponder = hayGatillo || hayNegocio || hayEstado || hayImagen || esNumero || esSolo16 || esConfirma;
+        if (!debeResponder) return "";
+
+        // ══════════════════════════════════════
+        // DERIVACIÓN HUMANO EXPLÍCITA
+        // ══════════════════════════════════════
+
+        if (/yordanys|hablar con alguien|operador|asesor humano|hablar con una persona/.test(txt)) {
+            const msg = esEs ? "Yordanys te atiende enseguida 😊 👌" : "Yordanys te atende agora 😊 👌";
+            await enviarSeguro(phone, msg);
+            return msg;
         }
 
-        const pushName = body.senderName || "Cliente";
-
-        if (enPausaHumana(phoneRaw)) {
-            console.log(`🤫 BOT SILENCIADO PARA ${phoneRaw}`);
-            return;
+        if ((txt.includes("usd") || txt.includes("dolar")) &&
+            (txt.includes("real") || txt.includes("brl") || txt.includes("brasil"))) {
+            const msg = esEs ? "Eso lo maneja Yordanys directamente 😊 Te atenderá enseguida." : "Isso o Yordanys resolve 😊 Te atende já.";
+            await enviarSeguro(phone, msg);
+            return msg;
         }
 
-        const esMultimedia =
-            body.messageType === "image"    ||
-            body.messageType === "document" ||
-            body.type === "image"           ||
-            body.type === "document"        ||
-            body.image || body.document;
+        // ══════════════════════════════════════
+        // IMÁGENES — procesamiento flexible
+        // Acepta tarjeta o comprobante en cualquier orden
+        // ══════════════════════════════════════
 
-        const textMessage = body.text?.message || body.body || body.caption || "";
+        if (imageUrl) {
+            if (esPDF(imageUrl)) {
+                // Verificar sesión activa si está esperando comprobante
+                if (cliente?.estado === "aguardando_comprovante") {
+                    const ref = cliente.fecha_pix || cliente.fecha_estado;
+                    if (ref && Date.now() - new Date(ref).getTime() > DOS_HORAS) {
+                        await limpiarSesion(phone);
+                        await enviarSeguro(phone, "La sesión expiró ⚠️\n\nTu comprobante será revisado manualmente.");
+                        return "";
+                    }
+                }
+                const datos = await detectarComprobantePDF(imageUrl);
+                if (datos.valido || datos.tipo === "comprovante_pdf") {
+                    await procesarComprobante(phone, pushName, cliente, datos, esEs);
+                } else {
+                    await enviarSeguro(phone, esEs
+                        ? "No pude leer el PDF 📄\n\nAsegúrate de que sea un comprobante de pago válido."
+                        : "Não consegui ler o PDF 📄\n\nVerifique se é um comprovante válido."
+                    );
+                }
+                return "";
+            }
 
-        if (esMultimedia) {
-            const mediaUrl = body.image?.imageUrl || body.document?.documentUrl || null;
+            const det = await detectarImagenUnificada(imageUrl);
+
+            if (det.tipo === "tarjeta") {
+                const num = String(det.tarjeta || "").replace(/\D/g, "");
+
+                // BPA ilegible
+                if (det.banco?.toLowerCase().includes("bpa") && num.startsWith("1239")) {
+                    await enviarSeguro(phone, "No pude leer bien la imagen 📸\n\nEnvía una más clara o escribe los 16 dígitos.");
+                    return "";
+                }
+
+                if (det.valida && /^\d{15,16}$/.test(num)) {
+                    await guardarTarjeta(phone, num, det.titular, det.banco, cliente);
+
+                    // Recargar cliente actualizado
+                    const cli2 = await obtenerCliente(phone);
+
+                    // Si ya hay comprobante pendiente → intentar completar directamente
+                    if (cli2.comprobante_pendiente) {
+                        const completado = await intentarCompletarOperacion(phone, pushName, cli2, esEs);
+                        if (completado) return "";
+                    }
+
+                    const msg = cli2.ultimo_monto
+                        ? `¡Tarjeta guardada! 💳\n\n¿Te envío el PIX para pagar R$${cli2.ultimo_monto}?`
+                        : pick(CONFIRMA_TARJETA_SIN_MONTO);
+                    await enviarSeguro(phone, msg);
+                    return msg;
+                }
+
+                await enviarSeguro(phone, "No pude leer bien la imagen 📸\n\nEnvía una más clara o escribe los 16 dígitos.");
+                return "";
+            }
+
+            if (det.tipo === "comprovante_pix") {
+                await procesarComprobante(phone, pushName, cliente, det, esEs);
+                return "";
+            }
+
+            // Imagen no reconocida — silencio
+            return "";
+        }
+
+        // ══════════════════════════════════════
+        // LÓGICA DE TEXTO
+        // ══════════════════════════════════════
+
+        const soloNums = txt.replace(/\D/g, "");
+        const valor    = soloNums.length > 0 ? Number(soloNums) : null;
+        const montoValido = valor && valor >= 10 && valor <= 50000;
+
+        // — Selección de tipo cuando el bot lo preguntó
+        if (cliente?.comprobante_pendiente && !cliente?.tipo_favorito && /^[123]$/.test(txt.trim())) {
+            const mapasTipo = { "1": "brl_cup", "2": "usd_clasica", "3": "usd_prepago" };
+            const tipoElegido = mapasTipo[txt.trim()];
+            await guardarCliente({ phone, tipo: tipoElegido });
+            const cli2 = await obtenerCliente(phone);
+            await intentarCompletarOperacion(phone, pushName, cli2, esEs);
+            return "";
+        }
+
+        // — Tarjeta por texto (16 dígitos exactos)
+        if (soloNums.length === 16 && txt.replace(/\D/g,"") === soloNums) {
+            await guardarTarjeta(phone, soloNums, null, null, cliente);
+            const cli2 = await obtenerCliente(phone);
+
+            if (cli2.comprobante_pendiente) {
+                const completado = await intentarCompletarOperacion(phone, pushName, cli2, esEs);
+                if (completado) return "";
+            }
+
+            const msg = cli2.ultimo_monto
+                ? `¡Tarjeta guardada! 💳\n\n¿Te envío el PIX para pagar R$${cli2.ultimo_monto}?`
+                : pick(CONFIRMA_TARJETA_SIN_MONTO);
+            await enviarSeguro(phone, msg);
+            return msg;
+        }
+
+        // — QR ilegible
+        if (/no consigo escanear|no puedo escanear|no funciona el qr|qr no funciona|nao consigo|leer el qr/.test(txt)) {
+            const key = getPIXKey(); const holder = getPIXHolder(); const bank = getPIXBank();
+            const msg = key
+                ? `No hay problema 😊\n\nCopia la clave PIX:\n\n${key}\n\nTitular: ${holder}\n🏦 ${bank}`
+                : "Pídele la clave directamente a Yordanys 😊";
+            await enviarSeguro(phone, msg);
+            return msg;
+        }
+
+        // — Confirmación post-cotización
+        if (esConfirma && cliente?.estado === "cotizacion_realizada") {
+            if (!cliente.tarjeta && !cliente.tarjeta_frecuente) {
+                await enviarSeguro(phone, "¡Genial! Solo me falta la tarjeta 💳\n\nEnvíame foto o los 16 dígitos.");
+                return "";
+            }
+            await guardarCliente({ phone, estado: "aguardando_comprovante", fechaEstado: new Date().toISOString(), fechaPix: new Date().toISOString() });
+            return await enviarPIX(phone, cliente, esEs);
+        }
+
+        // — Quiere pagar / PIX directo
+        const quierePagar =
+            /^(pix|pasame (el )?pix|enviame (el )?pix|quiero (pagar|hacerlo)|voy a pagar|fazer pix|hacer pix)$/.test(txt.trim()) ||
+            /\b(quiero|voy a) (hacer|enviar|mandar)( el)? pix\b/.test(txt) ||
+            /\bvoy a pagar\b/.test(txt);
+
+        if (quierePagar) {
+            const ref = cliente?.fecha_cotizacion || cliente?.updated_at;
+            if (ref && Date.now() - new Date(ref).getTime() > DOS_HORAS) {
+                await enviarSeguro(phone, esEs
+                    ? "La cotización venció ⏰\n\nDime el monto de nuevo y te actualizo la tasa."
+                    : "A cotação expirou ⏰\n\nMe diz o valor de novo."
+                );
+                return "";
+            }
+            return await enviarPIX(phone, cliente, esEs);
+        }
+
+        // — Comprobante verbal
+        if (/paguei|pague|comprovante|comprobante|feito|realizado|ya envie|ya mande|ya pague|hice el pago/.test(txt)) {
+            await enviarSeguro(phone, esEs
+                ? "¡Perfecto! Mándame el comprobante (foto o PDF) 📎"
+                : "Ótimo! Me manda o comprovante (foto ou PDF) 📎"
+            );
+            return "";
+        }
+
+        // — Consulta de tasas sin monto
+        if (/a cuanto|a como|tasa.*hoy|cambio.*hoy|hoy.*cambio|hoy.*tasa|cual es la tasa|como esta el cambio|como esta la tasa|cuanto vale|cuanto esta|precio.*hoy|hoy.*precio|tasa de hoy|cambio de hoy/.test(txt)) {
             try {
-                if (mediaUrl) {
-                    await openaiService.procesarMensaje(phoneRaw, textMessage || "imagen_recibida", pushName, mediaUrl);
+                const pool = require("../../db");
+                const r = await pool.query("SELECT * FROM rates LIMIT 1");
+                const t = r.rows[0];
+                if (t) {
+                    const msg = `Tasas de hoy 💱\n\n🇧🇷 Reales → CUP\nHasta R$99: ${t.brl_0} CUP\nR$100–499: ${t.brl_100} CUP\nR$500–999: ${t.brl_500} CUP\nR$1000+: ${t.brl_1000} CUP\n\n💵 USD Clásica/Prepago: ${t.usd1} CUP\n\n¿Cuánto quieres enviar? 😊`;
+                    await enviarSeguro(phone, msg);
+                    return msg;
                 }
             } catch (e) {
-                console.error("❌ Error en multimedia:", e.message);
+                console.error("❌ Error leyendo tasas:", e.message);
             }
-            return;
         }
 
-        if (!textMessage) return;
-
-        const mensajeAnterior = pendingMessages.get(phoneRaw) || "";
-        pendingMessages.set(phoneRaw, mensajeAnterior ? mensajeAnterior + "\n" + textMessage : textMessage);
-
-        if (buffers.has(phoneRaw)) clearTimeout(buffers.get(phoneRaw));
-
-        const timer = setTimeout(async () => {
-            const msgFinal = pendingMessages.get(phoneRaw);
-            if (!msgFinal) return;
-            try {
-                await openaiService.procesarMensaje(phoneRaw, msgFinal, pushName);
-                pendingMessages.delete(phoneRaw);
-            } catch (e) {
-                console.error(`❌ Error OpenAI: ${e.message}`);
-            } finally {
-                buffers.delete(phoneRaw);
+        // — Estado de operación
+        if (/estado|mi operacion|mi envio|cuando llega|cuando llego|cuanto falta|ya llego|esta listo/.test(txt)) {
+            const ops    = await obtenerTodas();
+            const ultima = ops.filter(o => o.phone === phone).sort((a, b) => b.id - a.id)[0];
+            if (!ultima) {
+                await enviarSeguro(phone, "No encuentro operaciones registradas 🤔\n\n¿Quieres hacer un envío?");
+                return "";
             }
-        }, 3500);
+            const est = ultima.status === "confirmada" ? "✅ Confirmada" : "⏳ Pendiente de validación";
+            await enviarSeguro(phone, `Tu última operación: R$${ultima.monto} — ${est}`);
+            return "";
+        }
 
-        buffers.set(phoneRaw, timer);
+        // — Cotización USD
+        if (montoValido &&
+            (txt.includes("usd") || txt.includes("dolar") || txt.includes("dolares")) &&
+            !txt.includes("real") && !txt.includes("brl")
+        ) {
+            const esEfectivo = /efectivo|cash|vender|cambiar/.test(txt);
+            const tipo = esEfectivo ? "usd_efectivo"
+                       : txt.includes("prepago") ? "usd_prepago" : "usd_clasica";
 
-    } catch (e) {
-        console.error("❌ Error en Webhook:", e);
-    }
-});
+            const r = await calcularOperacion({ tipo, valor });
+            if (r) {
+                await guardarCliente({
+                    phone, nombre: pushName, monto: valor, tipo,
+                    estado: "cotizacion_realizada",
+                    fechaEstado: new Date().toISOString(),
+                    fechaCotizacion: new Date().toISOString()
+                });
+                const res = tipo === "usd_efectivo"
+                    ? `💵 ${valor} USD en efectivo = R$${fmt(r.brl ?? 0)} BRL\n\n${pick(CIERRES_COT)}`
+                    : `💵 ${valor} USD = ${fmt(r.cup)} CUP 🇨🇺\n\n${pick(CIERRES_COT)}`;
+                await enviarSeguro(phone, res);
+                return res;
+            }
+        }
 
-// ==========================================
-// ADMIN
-// ==========================================
+        // — Cotización BRL → CUP
+        if (montoValido &&
+            !txt.includes("usd") && !txt.includes("dolar") && !txt.includes("cup") && !txt.includes("mlc")
+        ) {
+            const r = await calcularOperacion({ tipo: "brl_cup", valor });
+            if (r) {
+                await guardarCliente({
+                    phone, nombre: pushName, monto: valor, tipo: "brl_cup",
+                    estado: "cotizacion_realizada",
+                    fechaEstado: new Date().toISOString(),
+                    fechaCotizacion: new Date().toISOString()
+                });
+                let tip = "";
+                if (valor < 100)       tip = "\n\n💡 Con R$100+ la tasa mejora.";
+                else if (valor < 500)  tip = "\n\n🔥 Con R$500+ la tasa sube otro escalón.";
+                else if (valor < 1000) tip = "\n\n🚀 Con R$1000+ obtienes la mejor tasa.";
 
-app.get("/admin/tasas", verificarToken, async (req, res) => {
-    try {
-        const result = await pool.query("SELECT * FROM rates LIMIT 1");
-        res.json(result.rows[0] || {});
-    } catch (e) { res.status(500).json({ error: e.message }); }
-});
+                const res = `💵 R$${valor} = ${fmt(r.cup)} CUP 🇨🇺${tip}\n\n${pick(CIERRES_COT)}`;
+                await enviarSeguro(phone, res);
+                return res;
+            }
+        }
 
-app.post("/admin/tasas", verificarToken, async (req, res) => {
-    try {
-        const { brl_0, brl_100, brl_500, brl_1000, usd1, usd2 } = req.body;
-        await pool.query(`
-            UPDATE rates SET
-                brl_0    = COALESCE($1, brl_0),
-                brl_100  = COALESCE($2, brl_100),
-                brl_500  = COALESCE($3, brl_500),
-                brl_1000 = COALESCE($4, brl_1000),
-                usd1     = COALESCE($5, usd1),
-                usd2     = COALESCE($6, usd2),
-                updated_at = NOW()
-            WHERE id = 1
-        `, [brl_0, brl_100, brl_500, brl_1000, usd1, usd2]);
-        res.json({ success: true });
-    } catch (e) {
-        console.error("❌ ERROR TASAS:", e);
-        res.status(500).json({ success: false, error: e.message });
-    }
-});
+        // — Monto fuera de rango → silencio
+        if (valor && !montoValido) return "";
 
-app.get("/admin/clientes",    verificarToken, async (req, res) => {
-    try { res.json(await obtenerTodos()); } catch (e) { res.status(500).json({ error: e.message }); }
-});
+        // — Intención Cuba sin monto
+        if (txt.includes("cuba") && /dinero|enviar|mandar|pasar|plata|remesa/.test(txt)) {
+            const nombre = pushName ? `, ${pushName.split(" ")[0]}` : "";
+            await enviarSeguro(phone, `¡Hola${nombre}! 😊\n\n¿Cuánto quieres enviar a Cuba?`);
+            return "";
+        }
 
-app.get("/admin/operaciones", verificarToken, async (req, res) => {
-    try { res.json(await obtenerTodas()); } catch (e) { res.status(500).json({ error: e.message }); }
-});
+        // — Intención clara sin monto
+        if (/quiero enviar|necesito enviar|quiero mandar|quiero hacer (una )?(remesa|transferencia)|necesito (una )?(remesa|transferencia)/.test(txt)) {
+            await enviarSeguro(phone, "Perfecto 😊\n\n¿Cuánto deseas enviar?");
+            return "";
+        }
 
-app.get("/admin/stats",       verificarToken, async (req, res) => {
-    try { res.json(await obtenerEstadisticas()); } catch (e) { res.status(500).json({ error: e.message }); }
-});
+        // ══════════════════════════════════════
+        // ASISTENTE — solo para mensajes
+        // conversacionales de 4+ palabras
+        // El system prompt vive en OpenAI Platform
+        // ══════════════════════════════════════
 
-app.post("/admin/confirmar-operacion/:id", verificarToken, async (req, res) => {
-    try {
-        const operacion = await confirmarOperacion(req.params.id);
-        if (!operacion) return res.status(404).json({ success: false, error: "Operación no encontrada" });
+        const palabras = txt.trim().split(/\s+/);
+        if (palabras.length < 4 || /^\d+$/.test(txt.trim())) return "";
+
         try {
-            await axios.post(
-                `https://api.z-api.io/instances/${process.env.ZAPI_INSTANCE}/token/${process.env.ZAPI_TOKEN}/send-text`,
-                { phone: operacion.phone, message: `✅ Pago confirmado.\n\nSu envío de R$${operacion.monto} ha sido aprobado.\n\nGracias.` },
-                { headers: { "Client-Token": process.env.ZAPI_CLIENT_TOKEN } }
-            );
-        } catch (err) {
-            console.error("❌ Error enviando WhatsApp:", err.message);
+            const { texto, responseId } = await llamarAsistente(text, cliente?.last_response_id);
+            if (texto) {
+                await guardarCliente({ phone, lastResponseId: responseId });
+                await enviarSeguro(phone, texto);
+                return texto;
+            }
+        } catch (e) {
+            console.error("❌ Asistente:", e.message);
         }
-        res.json({ success: true });
+
     } catch (e) {
-        res.status(500).json({ success: false, error: e.message });
+        console.error("❌ procesarMensaje:", e.message);
     }
-});
+    return "";
+}
 
-app.get("/dashboard", verificarToken, (req, res) =>
-    res.sendFile(path.join(__dirname, "public", "dashboard.html"))
-);
-
-app.get("/", (req, res) => res.send("YordaBot Online ✅"));
-
-app.listen(PORT, () => console.log(`🚀 Servidor en puerto ${PORT}`));
+module.exports = { detectarImagenUnificada, detectarComprobantePDF, procesarMensaje };
