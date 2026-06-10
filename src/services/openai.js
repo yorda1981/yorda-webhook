@@ -348,22 +348,38 @@ async function intentarCompletarOperacion(phone, pushName, cliente, esEs) {
         tipo:    cliente.tipo_favorito
     });
 
-    // Confirmar al cliente
-    await enviarSeguro(phone, esEs
-        ? "¡Todo listo! ✅ Tu operación está siendo procesada 🚀"
-        : "Tudo certo! ✅ Sua operação está sendo processada 🚀"
-    );
+    // Mensaje de operación — igual para admin y cliente
+    const msgOperacion = `📥 *NUEVA OPERACIÓN PENDIENTE*
 
-    // Notificar al admin (no al cliente)
-    await notificarAdmin(
-        pushName || cliente.nombre || "Cliente",
-        phone,
-        cliente.ultimo_monto,
-        resultado?.cup || 0,
-        cliente.banco_detectado || "",
-        cliente.tarjeta || cliente.tarjeta_frecuente || "",
-        cliente.titular || cliente.titular_frecuente || ""
-    );
+👤 Cliente: ${pushName || cliente.nombre}
+
+📱 Teléfono: ${phone}
+
+💵 Enviado: R$${cliente.ultimo_monto}
+
+🇨🇺 Recibe: ${fmt(resultado?.cup || 0)} CUP
+
+🏦 Banco: ${cliente.banco_detectado || "-"}
+
+💳 Tarjeta:
+${cliente.tarjeta || cliente.tarjeta_frecuente || "-"}
+
+👤 Titular:
+${cliente.titular || cliente.titular_frecuente || "-"}
+
+⏳ Estado:
+Pendiente de validación`;
+
+    // Enviar al cliente
+    await enviarSeguro(phone, msgOperacion);
+
+    // Enviar al admin
+    const adminPhone = getAdminPhone();
+    if (adminPhone) {
+        await enviarSeguro(adminPhone, msgOperacion);
+    } else {
+        console.warn("⚠️ ADMIN_PHONE no configurado");
+    }
 
     await limpiarSesion(phone);
     return true;
