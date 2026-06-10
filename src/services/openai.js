@@ -145,14 +145,11 @@ ${key ? `- destino_correcto=true si el texto contiene: ${key}` : ""}`;
 // ─────────────────────────────────────────
 
 async function llamarAsistente(mensajeUsuario, lastResponseId = null) {
-    const params = {
+    const response = await openai.responses.create({
         model: "gpt-4o-mini",
         input: mensajeUsuario,
-        ...(lastResponseId && { previous_response_id: lastResponseId }),
-        ...(env.OPENAI_ASSISTANT_ID && { assistant_id: env.OPENAI_ASSISTANT_ID })
-    };
-
-    const response = await openai.responses.create(params);
+        ...(lastResponseId && { previous_response_id: lastResponseId })
+    });
 
     const texto = response.output
         ?.filter(b => b.type === "message")
