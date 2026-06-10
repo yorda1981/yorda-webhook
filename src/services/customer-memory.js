@@ -29,7 +29,7 @@ async function guardarCliente({
 
     try {
         const existe = await pool.query(
-            "SELECT id FROM customers WHERE phone = $1",
+            "SELECT phone FROM customers WHERE phone = $1",
             [phone]
         );
 
