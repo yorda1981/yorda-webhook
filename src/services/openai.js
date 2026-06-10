@@ -696,7 +696,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
 
         // — Quiere pagar / PIX directo
         const quierePagar =
-            /^(pix|pasame (el )?pix|enviame (el )?pix|quiero (pagar|hacerlo)|voy a pagar|fazer pix|hacer pix)$/.test(txt.trim()) ||
+            /^(pix|pasame (el )?pix|enviame (el )?pix|manda(me)? (el )?pix|envia(me)? (el )?pix|quiero (pagar|hacerlo)|voy a pagar|fazer pix|hacer pix|manda pix|envia pix|send pix)$/.test(txt.trim()) ||
             /\b(quiero|voy a) (hacer|enviar|mandar)( el)? pix\b/.test(txt) ||
             /\bvoy a pagar\b/.test(txt);
 
@@ -835,8 +835,10 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         const tieneMontoDB   = Number(cliente?.ultimo_monto) > 0;
         const tieneTarjetaDB = !!(cliente?.tarjeta || cliente?.tarjeta_frecuente);
 
+        // Cierre inteligente — SOLO si tiene monto Y tarjeta
+        // Si falta el monto, no enviar PIX aunque diga "manda pix"
         if (tieneMontoDB && tieneTarjetaDB) {
-            const intencionPago = /pix|pagar|mismo|misma|llave|chave|enviar|mandar|transferir|depositar|proceder|continuar|si|sí|ok|dale|listo|claro|vamos|adelante|reales|real|brl|r\$/.test(txt);
+            const intencionPago = /mismo|misma|llave|chave|transferir|depositar|proceder|continuar|reales|real|brl|r\$|envio el dinero|voy a pagar|quiero pagar/.test(txt);
             if (intencionPago) {
                 await guardarCliente({
                     phone,
