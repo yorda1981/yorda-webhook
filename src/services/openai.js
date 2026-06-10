@@ -608,8 +608,15 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         // ══════════════════════════════════════
 
         const soloNums = txt.replace(/\D/g, "");
-        const valor    = soloNums.length > 0 ? Number(soloNums) : null;
-        const montoValido = valor && valor >= 10 && valor <= 50000;
+
+        // Extraer monto: buscar número de 2-5 dígitos en el texto (ej: "400 reais", "Nome X 400 reais")
+        const matchMonto = txt.match(/\b(\d{2,5})\b/);
+        const valorTexto = matchMonto ? Number(matchMonto[1]) : null;
+        const valor      = soloNums.length > 0 ? Number(soloNums) : null;
+
+        // Usar valorTexto si es un monto válido y el texto tiene palabras (no solo números)
+        const valorFinal  = (valorTexto && valorTexto >= 10 && valorTexto <= 50000 && /[a-z]/.test(txt)) ? valorTexto : valor;
+        const montoValido = valorFinal && valorFinal >= 10 && valorFinal <= 50000;
 
         // — Selección de tarjeta cuando el bot preguntó cuál usar
         if (cliente?.estado === "seleccionando_tarjeta" && /^[1-9]$/.test(txt.trim())) {
@@ -744,7 +751,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             const r = await calcularOperacion({ tipo, valor });
             if (r) {
                 await guardarCliente({
-                    phone, nombre: pushName, monto: valor, tipo,
+                    phone, nombre: pushName, monto: valorFinal, tipo,
                     estado: "cotizacion_realizada",
                     fechaEstado: new Date().toISOString(),
                     fechaCotizacion: new Date().toISOString()
@@ -761,27 +768,28 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         if (montoValido &&
             !txt.includes("usd") && !txt.includes("dolar") && !txt.includes("cup") && !txt.includes("mlc")
         ) {
-            const r = await calcularOperacion({ tipo: "brl_cup", valor });
+            const r = await calcularOperacion({ tipo: "brl_cup", valor: valorFinal });
             if (r) {
                 await guardarCliente({
-                    phone, nombre: pushName, monto: valor, tipo: "brl_cup",
+                    phone, nombre: pushName, monto: valorFinal, tipo: "brl_cup",
                     estado: "cotizacion_realizada",
                     fechaEstado: new Date().toISOString(),
                     fechaCotizacion: new Date().toISOString()
                 });
                 let tip = "";
-                if (valor < 100)       tip = "\n\n💡 Con R$100+ la tasa mejora.";
-                else if (valor < 500)  tip = "\n\n🔥 Con R$500+ la tasa sube otro escalón.";
-                else if (valor < 1000) tip = "\n\n🚀 Con R$1000+ obtienes la mejor tasa.";
+                if (valorFinal < 100)       tip = "\n\n💡 Con R$100+ la tasa mejora.";
+                else if (valorFinal < 500)  tip = "\n\n🔥 Con R$500+ la tasa sube otro escalón.";
+                else if (valorFinal < 1000) tip = "\n\n🚀 Con R$1000+ obtienes la mejor tasa.";
 
-                const res = `💵 R$${valor} = ${fmt(r.cup)} CUP 🇨🇺${tip}\n\n${pick(CIERRES_COT)}`;
+
+                const res = `💵 R$${valorFinal} = ${fmt(r.cup)} CUP 🇨🇺${tip}\n\n${pick(CIERRES_COT)}`;
                 await enviarSeguro(phone, res);
                 return res;
             }
         }
 
         // — Monto fuera de rango → silencio
-        if (valor && !montoValido) return "";
+        if (valorFinal && !montoValido) return "";
 
         // — Intención Cuba sin monto
         if (txt.includes("cuba") && /dinero|enviar|mandar|pasar|plata|remesa/.test(txt)) {
@@ -805,6 +813,29 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             const msg = `¡Fue un placer${nombre}! 😊 Gracias por la confianza. Aquí estaremos cuando nos necesites. 👋`;
             await enviarSeguro(phone, msg);
             return msg;
+        }
+
+        // ══════════════════════════════════════
+        // CIERRE INTELIGENTE
+        // Si tiene monto + tarjeta y el mensaje
+        // suena a intención de pago → PIX directo
+        // sin pasar por GPT
+        // ══════════════════════════════════════
+
+        const tieneMontoDB   = Number(cliente?.ultimo_monto) > 0;
+        const tieneTarjetaDB = !!(cliente?.tarjeta || cliente?.tarjeta_frecuente);
+
+        if (tieneMontoDB && tieneTarjetaDB) {
+            const intencionPago = /pix|pagar|mismo|misma|llave|chave|enviar|mandar|transferir|depositar|proceder|continuar|si|sí|ok|dale|listo|claro|vamos|adelante|reales|real|brl|r\$/.test(txt);
+            if (intencionPago) {
+                await guardarCliente({
+                    phone,
+                    estado: "aguardando_comprovante",
+                    fechaEstado: new Date().toISOString(),
+                    fechaPix: new Date().toISOString()
+                });
+                return await enviarPIX(phone, cliente, esEs);
+            }
         }
 
         // ══════════════════════════════════════
