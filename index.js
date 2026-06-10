@@ -224,7 +224,7 @@ app.post("/admin/confirmar-operacion/:id", adminLimiter, verificarToken, async (
     }
 });
 
-app.get("/dashboard", adminLimiter, verificarToken, (req, res) =>
+app.get("/dashboard", (req, res) =>
     res.sendFile(path.join(__dirname, "public", "dashboard.html"))
 );
 
