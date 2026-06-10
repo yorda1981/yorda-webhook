@@ -34,6 +34,11 @@
         input[type="number"]:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(124, 77, 255, 0.2); }
         .btn-save { background: var(--accent); color: white; border: none; padding: 18px; border-radius: 15px; width: 100%; cursor: pointer; font-weight: 800; font-size: 16px; margin-top: 30px; transition: 0.3s; }
         .btn-save:hover { opacity: 0.9; transform: translateY(-2px); }
+        .pagination { display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin-top: 16px; flex-wrap: wrap; }
+        .page-btn { background: #0b0e1a; border: 1px solid #2d355a; color: #8b949e; padding: 6px 12px; border-radius: 8px; cursor: pointer; font-size: 13px; }
+        .page-btn:hover { border-color: var(--accent); color: white; }
+        .page-btn.active { background: var(--accent); border-color: var(--accent); color: white; }
+        .page-info { font-size: 12px; color: #8b949e; }
     </style>
 </head>
 <body>
@@ -95,6 +100,7 @@
                         <tr><td colspan="5" style="text-align:center; padding:20px; color:#8b949e;">—</td></tr>
                     </tbody>
                 </table>
+                <div class="pagination" id="paginacionClientes"></div>
             </div>
         </div>
 
@@ -196,14 +202,10 @@
                     totalReal: confirmadas.filter(o => o.phone === c.phone).reduce((acc, o) => acc + Number(o.monto), 0)
                 })).sort((a, b) => b.totalReal - a.totalReal);
 
-                tbodyCli.innerHTML = ranking.map(c => `
-                    <tr>
-                        <td>${c.nombre || "Desconocido"} ${c.totalReal >= 10000 ? "⭐" : ""}</td>
-                        <td style="color:#8b949e;">${c.phone ? c.phone.split("@")[0] : "-"}</td>
-                        <td style="color:var(--green);font-weight:bold;">R$ ${c.totalReal.toLocaleString("pt-BR")}</td>
-                        <td>${c.tipo_favorito || "-"}</td>
-                        <td>${c.totalReal >= 10000 ? '<b style="color:gold">⭐ VIP</b>' : "Estándar"}</td>
-                    </tr>`).join("");
+                // Guardar ranking completo y paginar
+                window._rankingCompleto = ranking;
+                window._paginaActual = window._paginaActual || 1;
+                renderPagina(window._paginaActual);
 
             } catch (e) {
                 console.error("❌ Error dashboard:", e);
