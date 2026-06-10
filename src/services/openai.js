@@ -287,26 +287,36 @@ async function notificarAdmin(pushName, phone, monto, cup, banco, tarjeta, titul
 // ─────────────────────────────────────────
 
 async function intentarCompletarOperacion(phone, pushName, cliente, esEs) {
-    // Necesitamos: monto + tarjeta (o recarga) + comprobante recibido
-    const tieneMonto     = Number(cliente.ultimo_monto) > 0;
+    const esRecarga      = cliente.tipo_favorito === "recarga_etecsa";
     const tieneTarjeta   = !!(cliente.tarjeta || cliente.tarjeta_frecuente);
     const tieneComprobante = !!cliente.comprobante_pendiente;
-    const esRecarga      = cliente.tipo_favorito === "recarga_etecsa";
+
+    // Si tiene tarjeta + comprobante → el monto viene del comprobante,
+    // el tipo por defecto es brl_cup. Cerrar sin pedir nada más.
+    if (tieneTarjeta && tieneComprobante && !cliente.ultimo_monto) {
+        const montoComp = Number(cliente.valor_comprobante);
+        if (montoComp > 0) {
+            await guardarCliente({ phone, monto: montoComp, tipo: cliente.tipo_favorito || "brl_cup" });
+            // Recargar con los datos actualizados
+            const cli2 = await obtenerCliente(phone);
+            return await intentarCompletarOperacion(phone, pushName, cli2, esEs);
+        }
+    }
+
+    const tieneMonto = Number(cliente.ultimo_monto) > 0;
+
+    // Si tiene tarjeta + comprobante pero no tiene tipo → asumir brl_cup y cerrar
+    if (tieneTarjeta && tieneComprobante && !cliente.tipo_favorito) {
+        await guardarCliente({ phone, tipo: "brl_cup" });
+        const cli2 = await obtenerCliente(phone);
+        return await intentarCompletarOperacion(phone, pushName, cli2, esEs);
+    }
 
     const tieneTipo = !!cliente.tipo_favorito;
 
-    if (!tieneMonto || !tieneComprobante || (!tieneTarjeta && !esRecarga) || !tieneTipo) {
-        // Faltan datos — pedir solo el que falta, en orden de prioridad
+    if (!tieneMonto || !tieneComprobante || (!tieneTarjeta && !esRecarga)) {
         if (!tieneMonto) {
             const msg = esEs ? "¿Cuánto vas a enviar? 😊" : "Quanto vai enviar? 😊";
-            await enviarSeguro(phone, msg);
-            return false;
-        }
-        if (!tieneTipo) {
-            // Tenemos monto del comprobante pero no sabemos qué tipo de operación es
-            const msg = esEs
-                ? "¿Qué tipo de envío es? 😊\n\n1️⃣ Reales → CUP\n2️⃣ USD Clásica\n3️⃣ USD Prepago"
-                : "Que tipo de envio é? 😊\n\n1️⃣ Reais → CUP\n2️⃣ USD Clássica\n3️⃣ USD Pré-pago";
             await enviarSeguro(phone, msg);
             return false;
         }
@@ -317,7 +327,7 @@ async function intentarCompletarOperacion(phone, pushName, cliente, esEs) {
             await enviarSeguro(phone, msg);
             return false;
         }
-        return false; // Falta comprobante — esperar
+        return false;
     }
 
     // ¡Tenemos todo! Verificar que no exista ya
