@@ -6,7 +6,7 @@ const pdfParse = require("pdf-parse");
 const { enviarMensaje, enviarImagen }                     = require("./zapi");
 const { calcularOperacion }                               = require("./calculator");
 const { guardarCliente, obtenerCliente, limpiarSesionDB } = require("./customer-memory");
-const { agregarOperacion, obtenerTodas }                  = require("./operations");
+const { agregarOperacion, obtenerTodas, obtenerUltimaOperacion, obtenerPendienteCliente, existeOperacionPendiente } = require("./operations");
 const env = require("../config/env");
 
 const openai = new OpenAI({ apiKey: env.OPENAI_API_KEY });
@@ -292,11 +292,7 @@ async function intentarCompletarOperacion(phone, pushName, cliente, esEs) {
     }
 
     // ¡Tenemos todo! Verificar que no exista ya
-    const ops = await obtenerTodas();
-    const yaExiste = ops.find(o =>
-        o.phone === phone && o.status === "pendiente" &&
-        Number(o.monto) === Number(cliente.ultimo_monto)
-    );
+    const yaExiste = await existeOperacionPendiente(phone, cliente.ultimo_monto);
     if (yaExiste) return true;
 
     const resultado = await calcularOperacion({ tipo: cliente.tipo_favorito, valor: cliente.ultimo_monto });
@@ -358,9 +354,7 @@ async function procesarComprobante(phone, pushName, cliente, datos, esEs) {
     });
 
     // Verificar monto contra operación pendiente existente
-    const ops = await obtenerTodas();
-    const opPend = ops.filter(o => o.phone === phone && o.status === "pendiente")
-                      .sort((a, b) => b.id - a.id)[0];
+    const opPend = await obtenerPendienteCliente(phone);
 
     if (opPend && datos.valor &&
         Math.round(Number(datos.valor)) !== Math.round(Number(opPend.monto))
@@ -656,10 +650,25 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             return "";
         }
 
+        // — Consulta de tasas sin monto
+        if (/a cuanto|a como|tasa.*hoy|cambio.*hoy|hoy.*cambio|hoy.*tasa|cual es la tasa|como esta el cambio|como esta la tasa|cuanto vale|cuanto esta|precio.*hoy|hoy.*precio|tasa de hoy|cambio de hoy/.test(txt)) {
+            try {
+                const pool = require("../../db");
+                const r = await pool.query("SELECT * FROM rates LIMIT 1");
+                const t = r.rows[0];
+                if (t) {
+                    const msg = `Tasas de hoy 💱\n\n🇧🇷 Reales → CUP\nHasta R$99: ${t.brl_0} CUP\nR$100–499: ${t.brl_100} CUP\nR$500–999: ${t.brl_500} CUP\nR$1000+: ${t.brl_1000} CUP\n\n💵 USD Clásica/Prepago: ${t.usd1} CUP\n\n¿Cuánto quieres enviar? 😊`;
+                    await enviarSeguro(phone, msg);
+                    return msg;
+                }
+            } catch (e) {
+                console.error("❌ Error leyendo tasas:", e.message);
+            }
+        }
+
         // — Estado de operación
         if (/estado|mi operacion|mi envio|cuando llega|cuando llego|cuanto falta|ya llego|esta listo/.test(txt)) {
-            const ops    = await obtenerTodas();
-            const ultima = ops.filter(o => o.phone === phone).sort((a, b) => b.id - a.id)[0];
+            const ultima = await obtenerUltimaOperacion(phone);
             if (!ultima) {
                 await enviarSeguro(phone, "No encuentro operaciones registradas 🤔\n\n¿Quieres hacer un envío?");
                 return "";
