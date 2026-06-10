@@ -1,63 +1,32 @@
 const express = require("express");
-
 const fs = require("fs");
-
 const path = require("path");
-
 const axios = require("axios");
-
 require("dotenv").config();
 
 const pool = require("./db");
 
-// ==========================================
-// SERVICIOS
-// ==========================================
-
 const openaiService = require("./src/services/openai");
-
 const { obtenerTodos, obtenerCliente } = require("./src/services/customer-memory");
-
 const { obtenerTodas, confirmarOperacion, obtenerEstadisticas } = require("./src/services/operations");
 
 const app = express();
-
 const PORT = process.env.PORT || 8080;
-
 app.set("trust proxy", 1);
 
-// ==========================================
-// CONFIGURACIÓN Y MEMORIA
-// ==========================================
-
-const buffers = new Map();
-
-const pendingMessages = new Map();
-
-const pausasHumanas = new Map();
-
+const buffers          = new Map();
+const pendingMessages  = new Map();
+const pausasHumanas    = new Map();
 const mapaLidATelefono = new Map();
-
 const mensajesProcesados = new Set();
 
-// ✅ CAMBIO 1: Reducida de 30 a 10 minutos para no silenciar el bot demasiado tiempo
 const MINUTOS_PAUSA = 10;
-
-// ==========================================
-// FUNCIONES DE CONTROL
-// ==========================================
 
 function activarPausaHumana(phone) {
     if (!phone) return;
-
-    if (!String(phone).startsWith("55")) {
-        console.log(`⚠️ Pausa ignorada para ${phone} (No es un número válido de Brasil)`);
-        return;
-    }
-
+    if (!String(phone).startsWith("55")) return;
     const finActual = pausasHumanas.get(phone);
     if (finActual && finActual > Date.now()) return;
-
     pausasHumanas.set(phone, Date.now() + (MINUTOS_PAUSA * 60 * 1000));
     console.log(`⏸️ Pausa humana: ${MINUTOS_PAUSA} min para ${phone}`);
 }
@@ -65,66 +34,48 @@ function activarPausaHumana(phone) {
 function enPausaHumana(phone) {
     const fin = pausasHumanas.get(phone);
     if (!fin) return false;
-    if (Date.now() > fin) {
-        pausasHumanas.delete(phone);
-        return false;
-    }
+    if (Date.now() > fin) { pausasHumanas.delete(phone); return false; }
     return true;
 }
 
-// ==========================================
-// MIDDLEWARES
-// ==========================================
-
 app.use(express.json({ limit: "10mb" }));
-
 app.use(express.static(path.join(__dirname, "public")));
 
 const verificarToken = (req, res, next) => {
-    const token = req.headers["x-admin-token"] || req.query.token;
+    const token  = req.headers["x-admin-token"] || req.query.token;
     const secret = process.env.ADMIN_TOKEN?.trim();
     if (!token || token.trim() !== secret) return res.status(401).json({ error: "No autorizado" });
     next();
 };
 
 // ==========================================
-// WEBHOOK PRINCIPAL
+// WEBHOOK
 // ==========================================
 
 app.post("/webhook", async (req, res) => {
     res.status(200).send("OK");
-
     try {
         const body = req.body;
         if (!body) return;
 
         const phoneRaw = body.phone || body.from;
 
-        if (
-            body.chatLid &&
-            body.phone &&
-            body.phone.startsWith("55") &&
-            !body.fromMe
-        ) {
+        if (body.chatLid && body.phone && body.phone.startsWith("55") && !body.fromMe) {
             mapaLidATelefono.set(body.chatLid, body.phone);
         }
 
         if (body.isGroup || String(phoneRaw).includes("-group")) return;
-
         if (body.isNewsletter) return;
 
         if (body.fromMe) {
             if (body.fromApi !== true) {
                 const telefonoCliente = mapaLidATelefono.get(body.chatLid);
-                if (telefonoCliente) {
-                    activarPausaHumana(telefonoCliente);
-                }
+                if (telefonoCliente) activarPausaHumana(telefonoCliente);
             }
             return;
         }
 
         if (!phoneRaw || phoneRaw.includes("@lid")) return;
-
         if (!phoneRaw.startsWith("55")) return;
 
         const tiposValidos = ["ReceivedCallback", "image", "document", "audio", "video"];
@@ -140,37 +91,28 @@ app.post("/webhook", async (req, res) => {
         const pushName = body.senderName || "Cliente";
 
         if (enPausaHumana(phoneRaw)) {
-            console.log(`🤫 BOT SILENCIADO PARA ${phoneRaw} (Pausa humana activa)`);
+            console.log(`🤫 BOT SILENCIADO PARA ${phoneRaw}`);
             return;
         }
 
         const esMultimedia =
-            body.messageType === "image" ||
+            body.messageType === "image"    ||
             body.messageType === "document" ||
-            body.type === "image" ||
-            body.type === "document" ||
-            body.image ||
-            body.document;
+            body.type === "image"           ||
+            body.type === "document"        ||
+            body.image || body.document;
 
         const textMessage = body.text?.message || body.body || body.caption || "";
 
         if (esMultimedia) {
             const mediaUrl = body.image?.imageUrl || body.document?.documentUrl || null;
-
             try {
-                // ✅ CAMBIO 2: Procesa imágenes en cualquier estado, no solo cuando está esperando comprobante
                 if (mediaUrl) {
-                    await openaiService.procesarMensaje(
-                        phoneRaw,
-                        textMessage || "imagen_recibida",
-                        pushName,
-                        mediaUrl
-                    );
+                    await openaiService.procesarMensaje(phoneRaw, textMessage || "imagen_recibida", pushName, mediaUrl);
                 }
             } catch (e) {
                 console.error("❌ Error en multimedia:", e.message);
             }
-
             return;
         }
 
@@ -184,7 +126,6 @@ app.post("/webhook", async (req, res) => {
         const timer = setTimeout(async () => {
             const msgFinal = pendingMessages.get(phoneRaw);
             if (!msgFinal) return;
-
             try {
                 await openaiService.procesarMensaje(phoneRaw, msgFinal, pushName);
                 pendingMessages.delete(phoneRaw);
@@ -203,47 +144,30 @@ app.post("/webhook", async (req, res) => {
 });
 
 // ==========================================
-// RUTAS DE ADMINISTRACIÓN
+// ADMIN
 // ==========================================
 
 app.get("/admin/tasas", verificarToken, async (req, res) => {
     try {
         const result = await pool.query("SELECT * FROM rates LIMIT 1");
-        console.log("📊 ENVIANDO TASAS AL DASHBOARD:", result.rows[0]);
         res.json(result.rows[0] || {});
-    } catch (e) {
-        res.status(500).json({ error: e.message });
-    }
+    } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post("/admin/tasas", verificarToken, async (req, res) => {
     try {
-        console.log("🔥 GUARDAR TASAS EJECUTADO");
-        console.log("Body recibido:", req.body);
-
         const { brl_0, brl_100, brl_500, brl_1000, usd1, usd2 } = req.body;
-
         await pool.query(`
-            UPDATE rates
-            SET
-                brl_0 = COALESCE($1, brl_0),
-                brl_100 = COALESCE($2, brl_100),
-                brl_500 = COALESCE($3, brl_500),
+            UPDATE rates SET
+                brl_0    = COALESCE($1, brl_0),
+                brl_100  = COALESCE($2, brl_100),
+                brl_500  = COALESCE($3, brl_500),
                 brl_1000 = COALESCE($4, brl_1000),
-                usd1 = COALESCE($5, usd1),
-                usd2 = COALESCE($6, usd2),
+                usd1     = COALESCE($5, usd1),
+                usd2     = COALESCE($6, usd2),
                 updated_at = NOW()
             WHERE id = 1
-        `, [
-            brl_0,
-            brl_100,
-            brl_500,
-            brl_1000,
-            usd1,
-            usd2
-        ]);
-
-        console.log("✅ UPDATE EJECUTADO");
+        `, [brl_0, brl_100, brl_500, brl_1000, usd1, usd2]);
         res.json({ success: true });
     } catch (e) {
         console.error("❌ ERROR TASAS:", e);
@@ -251,7 +175,7 @@ app.post("/admin/tasas", verificarToken, async (req, res) => {
     }
 });
 
-app.get("/admin/clientes", verificarToken, async (req, res) => {
+app.get("/admin/clientes",    verificarToken, async (req, res) => {
     try { res.json(await obtenerTodos()); } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -259,7 +183,7 @@ app.get("/admin/operaciones", verificarToken, async (req, res) => {
     try { res.json(await obtenerTodas()); } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get("/admin/stats", verificarToken, async (req, res) => {
+app.get("/admin/stats",       verificarToken, async (req, res) => {
     try { res.json(await obtenerEstadisticas()); } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -267,7 +191,6 @@ app.post("/admin/confirmar-operacion/:id", verificarToken, async (req, res) => {
     try {
         const operacion = await confirmarOperacion(req.params.id);
         if (!operacion) return res.status(404).json({ success: false, error: "Operación no encontrada" });
-
         try {
             await axios.post(
                 `https://api.z-api.io/instances/${process.env.ZAPI_INSTANCE}/token/${process.env.ZAPI_TOKEN}/send-text`,
@@ -277,14 +200,15 @@ app.post("/admin/confirmar-operacion/:id", verificarToken, async (req, res) => {
         } catch (err) {
             console.error("❌ Error enviando WhatsApp:", err.message);
         }
-
         res.json({ success: true });
     } catch (e) {
         res.status(500).json({ success: false, error: e.message });
     }
 });
 
-app.get("/dashboard", verificarToken, (req, res) => res.sendFile(path.join(__dirname, "public", "dashboard.html")));
+app.get("/dashboard", verificarToken, (req, res) =>
+    res.sendFile(path.join(__dirname, "public", "dashboard.html"))
+);
 
 app.get("/", (req, res) => res.send("YordaBot Online ✅"));
 
