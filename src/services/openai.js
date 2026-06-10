@@ -467,14 +467,20 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
 
         if (esSaludo) {
             if (!yaSaludado) {
-                const nombre     = pushName ? `, ${pushName.split(" ")[0]}` : "";
-                const esFrecuente = !!cliente?.tipo_favorito;
-                const msg = esFrecuente
-                    ? `¡Hola${nombre}! 👋 Bienvenido de vuelta.\n\n¿Vamos con otro envío a Cuba? 💸`
-                    : `¡Hola${nombre}! 👋\n\n¿Cuánto quieres enviar a Cuba hoy?`;
+                const nombre = pushName ? `, ${pushName.split(" ")[0]}` : "";
+                // Hora de Brasil (UTC-3)
+                const horaBrasil = new Date(Date.now() - 3 * 60 * 60 * 1000).getUTCHours();
+                let saludo;
+                if (horaBrasil >= 6 && horaBrasil < 12) {
+                    saludo = `Buenos días${nombre}! ☀️ ¿Cómo estás? ¿En qué te puedo ayudar hoy?`;
+                } else if (horaBrasil >= 12 && horaBrasil < 18) {
+                    saludo = `Buenas tardes${nombre}! 🌤️ ¿Cómo estás? ¿En qué te puedo ayudar?`;
+                } else {
+                    saludo = `Buenas noches${nombre}! 🌙 ¿Todo bien? Aquí estamos para lo que necesites.`;
+                }
                 await guardarCliente({ phone, saludoEnviado: true });
-                await enviarSeguro(phone, msg);
-                return msg;
+                await enviarSeguro(phone, saludo);
+                return saludo;
             }
             // Ya saludado — retomar desde contexto actual
             if (cliente?.estado === "cotizacion_realizada" && cliente?.ultimo_monto) {
@@ -791,9 +797,19 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         }
 
         // ══════════════════════════════════════
+        // DESPEDIDA
+        // ══════════════════════════════════════
+
+        if (/^(gracias|ok gracias|hasta luego|chau|tchau|obrigado|obrigada|flw|valeu|até mais)[\s!.]*$/.test(txt.trim())) {
+            const nombre = pushName ? `, ${pushName.split(" ")[0]}` : "";
+            const msg = `¡Fue un placer${nombre}! 😊 Gracias por la confianza. Aquí estaremos cuando nos necesites. 👋`;
+            await enviarSeguro(phone, msg);
+            return msg;
+        }
+
+        // ══════════════════════════════════════
         // ASISTENTE — solo para mensajes
         // conversacionales de 4+ palabras
-        // El system prompt vive en OpenAI Platform
         // ══════════════════════════════════════
 
         const palabras = txt.trim().split(/\s+/);
