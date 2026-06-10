@@ -59,7 +59,8 @@ app.use(express.json({ limit: "10mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
 const verificarToken = (req, res, next) => {
-    const token  = req.headers["x-admin-token"] || req.query.token;
+    const authHeader = req.headers.authorization || "";
+    const token = authHeader.replace(/^Bearer\s+/i, "");
     const secret = process.env.ADMIN_TOKEN?.trim();
     if (!token || token.trim() !== secret) return res.status(401).json({ error: "No autorizado" });
     next();
