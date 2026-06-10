@@ -264,10 +264,20 @@ async function intentarCompletarOperacion(phone, pushName, cliente, esEs) {
     const tieneComprobante = !!cliente.comprobante_pendiente;
     const esRecarga      = cliente.tipo_favorito === "recarga_etecsa";
 
-    if (!tieneMonto || !tieneComprobante || (!tieneTarjeta && !esRecarga)) {
-        // Faltan datos — pedir solo el que falta
+    const tieneTipo = !!cliente.tipo_favorito;
+
+    if (!tieneMonto || !tieneComprobante || (!tieneTarjeta && !esRecarga) || !tieneTipo) {
+        // Faltan datos — pedir solo el que falta, en orden de prioridad
         if (!tieneMonto) {
             const msg = esEs ? "¿Cuánto vas a enviar? 😊" : "Quanto vai enviar? 😊";
+            await enviarSeguro(phone, msg);
+            return false;
+        }
+        if (!tieneTipo) {
+            // Tenemos monto del comprobante pero no sabemos qué tipo de operación es
+            const msg = esEs
+                ? "¿Qué tipo de envío es? 😊\n\n1️⃣ Reales → CUP\n2️⃣ USD Clásica\n3️⃣ USD Prepago"
+                : "Que tipo de envio é? 😊\n\n1️⃣ Reais → CUP\n2️⃣ USD Clássica\n3️⃣ USD Pré-pago";
             await enviarSeguro(phone, msg);
             return false;
         }
@@ -334,15 +344,16 @@ async function procesarComprobante(phone, pushName, cliente, datos, esEs) {
         return "";
     }
 
-    // Guardar que llegó el comprobante
+    // Guardar que llegó el comprobante.
+    // Si el cliente no tenía monto, tomarlo del comprobante.
+    // NO asumir tipo — se pedirá al cliente si no hay cotización previa.
     await guardarCliente({
         phone,
         comprobantePendiente: true,
         valorComprobante: datos.valor ?? null,
-        // Si el comprobante tiene monto y el cliente no tiene, guardarlo
         ...(datos.valor && !cliente.ultimo_monto && {
-            monto: datos.valor,
-            tipo: "brl_cup"
+            monto: datos.valor
+            // tipo intencionalmente omitido — se confirma con el cliente
         })
     });
 
@@ -499,9 +510,23 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
 
         if (imageUrl) {
             if (esPDF(imageUrl)) {
+                // Verificar sesión activa si está esperando comprobante
+                if (cliente?.estado === "aguardando_comprovante") {
+                    const ref = cliente.fecha_pix || cliente.fecha_estado;
+                    if (ref && Date.now() - new Date(ref).getTime() > DOS_HORAS) {
+                        await limpiarSesion(phone);
+                        await enviarSeguro(phone, "La sesión expiró ⚠️\n\nTu comprobante será revisado manualmente.");
+                        return "";
+                    }
+                }
                 const datos = await detectarComprobantePDF(imageUrl);
-                if (datos.valido) {
+                if (datos.valido || datos.tipo === "comprovante_pdf") {
                     await procesarComprobante(phone, pushName, cliente, datos, esEs);
+                } else {
+                    await enviarSeguro(phone, esEs
+                        ? "No pude leer el PDF 📄\n\nAsegúrate de que sea un comprobante de pago válido."
+                        : "Não consegui ler o PDF 📄\n\nVerifique se é um comprovante válido."
+                    );
                 }
                 return "";
             }
@@ -556,6 +581,16 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         const soloNums = txt.replace(/\D/g, "");
         const valor    = soloNums.length > 0 ? Number(soloNums) : null;
         const montoValido = valor && valor >= 10 && valor <= 50000;
+
+        // — Selección de tipo cuando el bot lo preguntó
+        if (cliente?.comprobante_pendiente && !cliente?.tipo_favorito && /^[123]$/.test(txt.trim())) {
+            const mapasTipo = { "1": "brl_cup", "2": "usd_clasica", "3": "usd_prepago" };
+            const tipoElegido = mapasTipo[txt.trim()];
+            await guardarCliente({ phone, tipo: tipoElegido });
+            const cli2 = await obtenerCliente(phone);
+            await intentarCompletarOperacion(phone, pushName, cli2, esEs);
+            return "";
+        }
 
         // — Tarjeta por texto (16 dígitos exactos)
         if (soloNums.length === 16 && txt.replace(/\D/g,"") === soloNums) {
