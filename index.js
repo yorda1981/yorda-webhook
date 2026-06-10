@@ -2,6 +2,7 @@ const express = require("express");
 const fs = require("fs");
 const path = require("path");
 const axios = require("axios");
+const rateLimit = require("express-rate-limit");
 require("dotenv").config();
 
 const pool = require("./db");
@@ -13,6 +14,22 @@ const { obtenerTodas, confirmarOperacion, obtenerEstadisticas } = require("./src
 const app = express();
 const PORT = process.env.PORT || 8080;
 app.set("trust proxy", 1);
+
+const webhookLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 120,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: "Too many requests"
+});
+
+const adminLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 60,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: "Too many requests"
+});
 
 const buffers          = new Map();
 const pendingMessages  = new Map();
@@ -52,7 +69,7 @@ const verificarToken = (req, res, next) => {
 // WEBHOOK
 // ==========================================
 
-app.post("/webhook", async (req, res) => {
+app.post("/webhook", webhookLimiter, async (req, res) => {
     res.status(200).send("OK");
     try {
         const body = req.body;
@@ -147,14 +164,14 @@ app.post("/webhook", async (req, res) => {
 // ADMIN
 // ==========================================
 
-app.get("/admin/tasas", verificarToken, async (req, res) => {
+app.get("/admin/tasas", adminLimiter, verificarToken, async (req, res) => {
     try {
         const result = await pool.query("SELECT * FROM rates LIMIT 1");
         res.json(result.rows[0] || {});
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post("/admin/tasas", verificarToken, async (req, res) => {
+app.post("/admin/tasas", adminLimiter, verificarToken, async (req, res) => {
     try {
         const { brl_0, brl_100, brl_500, brl_1000, usd1, usd2 } = req.body;
         await pool.query(`
@@ -175,19 +192,19 @@ app.post("/admin/tasas", verificarToken, async (req, res) => {
     }
 });
 
-app.get("/admin/clientes",    verificarToken, async (req, res) => {
+app.get("/admin/clientes", adminLimiter, verificarToken, async (req, res) => {
     try { res.json(await obtenerTodos()); } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get("/admin/operaciones", verificarToken, async (req, res) => {
+app.get("/admin/operaciones", adminLimiter, verificarToken, async (req, res) => {
     try { res.json(await obtenerTodas()); } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get("/admin/stats",       verificarToken, async (req, res) => {
+app.get("/admin/stats", adminLimiter, verificarToken, async (req, res) => {
     try { res.json(await obtenerEstadisticas()); } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post("/admin/confirmar-operacion/:id", verificarToken, async (req, res) => {
+app.post("/admin/confirmar-operacion/:id", adminLimiter, verificarToken, async (req, res) => {
     try {
         const operacion = await confirmarOperacion(req.params.id);
         if (!operacion) return res.status(404).json({ success: false, error: "Operación no encontrada" });
@@ -206,7 +223,7 @@ app.post("/admin/confirmar-operacion/:id", verificarToken, async (req, res) => {
     }
 });
 
-app.get("/dashboard", verificarToken, (req, res) =>
+app.get("/dashboard", adminLimiter, verificarToken, (req, res) =>
     res.sendFile(path.join(__dirname, "public", "dashboard.html"))
 );
 
