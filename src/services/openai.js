@@ -348,6 +348,12 @@ async function intentarCompletarOperacion(phone, pushName, cliente, esEs) {
         tipo:    cliente.tipo_favorito
     });
 
+    // Tarjeta en grupos de 4 — copiable en WhatsApp
+    const tarjetaRaw = cliente.tarjeta || cliente.tarjeta_frecuente || "-";
+    const tarjetaFmt = tarjetaRaw !== "-"
+        ? tarjetaRaw.replace(/(.{4})/g, "$1 ").trim()
+        : "-";
+
     // Mensaje de operación — igual para admin y cliente
     const msgOperacion = `📥 *NUEVA OPERACIÓN PENDIENTE*
 
@@ -362,7 +368,7 @@ async function intentarCompletarOperacion(phone, pushName, cliente, esEs) {
 🏦 Banco: ${cliente.banco_detectado || "-"}
 
 💳 Tarjeta:
-${cliente.tarjeta || cliente.tarjeta_frecuente || "-"}
+${tarjetaFmt}
 
 👤 Titular:
 ${cliente.titular || cliente.titular_frecuente || "-"}
