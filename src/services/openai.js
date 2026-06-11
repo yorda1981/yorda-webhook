@@ -759,6 +759,27 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                 );
                 return "";
             }
+
+            // Si no tiene monto guardado, buscar en el mismo mensaje
+            if (!cliente?.ultimo_monto || Number(cliente.ultimo_monto) <= 0) {
+                const matchPix = txt.match(/\b(\d{2,5})\b/);
+                const montoPix = matchPix ? Number(matchPix[1]) : null;
+                if (montoPix && montoPix >= 10 && montoPix <= 50000) {
+                    const r = await calcularOperacion({ tipo: "brl_cup", valor: montoPix });
+                    if (r) {
+                        await guardarCliente({
+                            phone, nombre: pushName, monto: montoPix, tipo: "brl_cup",
+                            estado: "aguardando_comprovante",
+                            fechaEstado: new Date().toISOString(),
+                            fechaPix: new Date().toISOString(),
+                            fechaCotizacion: new Date().toISOString()
+                        });
+                        const cli2 = await obtenerCliente(phone);
+                        return await enviarPIX(phone, cli2, esEs);
+                    }
+                }
+            }
+
             return await enviarPIX(phone, cliente, esEs);
         }
 
