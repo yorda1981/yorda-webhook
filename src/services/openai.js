@@ -280,6 +280,31 @@ async function notificarAdmin(pushName, phone, monto, cup, banco, tarjeta, titul
 }
 
 // ─────────────────────────────────────────
+// ETIQUETAR EN WASCRIPT CRM
+// ─────────────────────────────────────────
+
+async function etiquetarNuevoPedido(phone) {
+    const token = process.env.WASCRIPT_TOKEN;
+    if (!token) {
+        console.warn("⚠️ WASCRIPT_TOKEN no configurado");
+        return;
+    }
+    try {
+        await fetch(`https://api-whatsapp.wascript.com.br/api/modificar-etiquetas/${token}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                phone: [phone],
+                actions: [{ labelId: "2", type: "add" }]
+            })
+        });
+        console.log(`🏷️ Etiqueta "Nuevo pedido" agregada: ${phone}`);
+    } catch (e) {
+        console.error("❌ Error etiquetando en Wascript:", e.message);
+    }
+}
+
+// ─────────────────────────────────────────
 // INTENTAR COMPLETAR OPERACIÓN
 // Flujo flexible: verifica si ya tenemos
 // todos los datos para crear la operación,
@@ -386,6 +411,9 @@ Pendiente de validación`;
     } else {
         console.warn("⚠️ ADMIN_PHONE no configurado");
     }
+
+    // Etiquetar en Wascript CRM
+    await etiquetarNuevoPedido(phone);
 
     await limpiarSesion(phone);
     return true;
