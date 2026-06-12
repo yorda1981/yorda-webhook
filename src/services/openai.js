@@ -362,7 +362,7 @@ async function intentarCompletarOperacion(phone, pushName, cliente, esEs) {
     const resultado = await calcularOperacion({ tipo: cliente.tipo_favorito, valor: cliente.ultimo_monto });
 
     await guardarCliente({ phone, comprobantePendiente: false });
-    await agregarOperacion({
+    const operacion = await agregarOperacion({
         phone,
         nombre:  pushName || cliente.nombre || "Cliente",
         monto:   cliente.ultimo_monto,
@@ -373,6 +373,8 @@ async function intentarCompletarOperacion(phone, pushName, cliente, esEs) {
         tipo:    cliente.tipo_favorito
     });
 
+    const opId = operacion?.id ? `#${operacion.id} ` : "";
+
     // Tarjeta en grupos de 4 — copiable en WhatsApp
     const tarjetaRaw = cliente.tarjeta || cliente.tarjeta_frecuente || "-";
     const tarjetaFmt = tarjetaRaw !== "-"
@@ -380,7 +382,7 @@ async function intentarCompletarOperacion(phone, pushName, cliente, esEs) {
         : "-";
 
     // Mensaje de operación — igual para admin y cliente
-    const msgOperacion = `📥 *NUEVA OPERACIÓN PENDIENTE*
+    const msgOperacion = `📥 *OPERACIÓN ${opId}PENDIENTE*
 
 👤 Cliente: ${pushName || cliente.nombre}
 
