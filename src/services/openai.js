@@ -957,9 +957,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                 await enviarSeguro(phone, "Por el momento no tenemos recargas disponibles. Pregunta a Yordanys 😊");
                 return "";
             }
-            let msg = "📱 *Tenemos dos tipos de recarga:*
-
-";
+            let msg = "📱 *Tenemos dos tipos de recarga:*\n\n";
             recargas.forEach((r, i) => {
                 const emoji = r.tipo === "nacional" ? "🇨🇺" : "🌍";
                 msg += `${i + 1}️⃣ *Recarga ${r.tipo.charAt(0).toUpperCase() + r.tipo.slice(1)}*
