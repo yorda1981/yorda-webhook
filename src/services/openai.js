@@ -449,6 +449,36 @@ async function procesarComprobante(phone, pushName, cliente, datos, esEs) {
         return "";
     }
 
+    // Validar comprobante duplicado — mismo valor + misma fecha/hora
+    if (datos.valor && datos.fecha && datos.hora) {
+        try {
+            const dupCheck = await pool.query(`
+                SELECT id FROM operations
+                WHERE monto = $1
+                AND created_at > NOW() - INTERVAL '24 hours'
+                AND status != 'rechazada'
+                LIMIT 1
+            `, [Number(datos.valor)]);
+
+            if (dupCheck.rows.length > 0) {
+                // Verificar si el cliente actual ya tiene una operación con ese monto
+                const dupCliente = await pool.query(`
+                    SELECT id FROM operations
+                    WHERE phone = $1 AND monto = $2
+                    AND created_at > NOW() - INTERVAL '2 hours'
+                    LIMIT 1
+                `, [phone, Number(datos.valor)]);
+
+                if (dupCliente.rows.length > 0) {
+                    await enviarSeguro(phone, "⚠️ Este comprobante ya fue procesado anteriormente.\n\nSi tienes alguna duda contacta a Yordanys. 😊");
+                    return "";
+                }
+            }
+        } catch (e) {
+            console.error("❌ Error validando duplicado:", e.message);
+        }
+    }
+
     // Guardar que llegó el comprobante.
     // Si el cliente no tenía monto, tomarlo del comprobante.
     // NO asumir tipo — se pedirá al cliente si no hay cotización previa.
@@ -521,6 +551,27 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         const yaSaludado = !!cliente?.saludo_enviado;
 
         await guardarCliente({ phone, ultimaInteraccion: new Date().toISOString() });
+
+        // ══════════════════════════════════════
+        // HORARIO DE ATENCIÓN (8am - 11pm hora Brasil UTC-3)
+        // ══════════════════════════════════════
+
+        const horaBrasil = new Date(Date.now() - 3 * 60 * 60 * 1000).getUTCHours();
+        const fueraDeHorario = horaBrasil < 8 || horaBrasil >= 23;
+
+        if (fueraDeHorario && !imageUrl) {
+            // Solo avisar una vez por sesión nocturna
+            const ultimaInteraccion = cliente?.ultima_interaccion;
+            const yaAvisado = ultimaInteraccion &&
+                (Date.now() - new Date(ultimaInteraccion).getTime()) < 60 * 60 * 1000;
+            if (!yaAvisado) {
+                const msg = esEs
+                    ? "Estamos fuera de horario 😊\n\nNuestro horario de atención es de 8am a 11pm (hora de Brasil).\n\nTe responderemos en cuanto estemos disponibles. 👌"
+                    : "Estamos fora do horário 😊\n\nNosso horário de atendimento é das 8h às 23h (horário de Brasília).\n\nResponderemos assim que estivermos disponíveis. 👌";
+                await enviarSeguro(phone, msg);
+            }
+            return "";
+        }
 
         // ══════════════════════════════════════
         // GATILLO NEGATIVO: Cuba→Brasil
