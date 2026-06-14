@@ -228,6 +228,29 @@ app.get("/dashboard", (req, res) =>
     res.sendFile(path.join(__dirname, "public", "dashboard.html"))
 );
 
+// Recargas
+app.get("/admin/recargas", adminLimiter, verificarToken, async (req, res) => {
+    try {
+        const r = await pool.query("SELECT * FROM recargas ORDER BY tipo");
+        res.json(r.rows);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post("/admin/recargas/:tipo", adminLimiter, verificarToken, async (req, res) => {
+    try {
+        const { precio, descripcion, activa } = req.body;
+        await pool.query(`
+            UPDATE recargas SET
+                precio = $1,
+                descripcion = $2,
+                activa = $3,
+                updated_at = NOW()
+            WHERE tipo = $4
+        `, [precio, descripcion, activa, req.params.tipo]);
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
 // Oferta del día
 app.get("/admin/oferta", adminLimiter, verificarToken, async (req, res) => {
     try {
