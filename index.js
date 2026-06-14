@@ -228,6 +228,29 @@ app.get("/dashboard", (req, res) =>
     res.sendFile(path.join(__dirname, "public", "dashboard.html"))
 );
 
+// Oferta del día
+app.get("/admin/oferta", adminLimiter, verificarToken, async (req, res) => {
+    try {
+        const r = await pool.query("SELECT * FROM ofertas LIMIT 1");
+        res.json(r.rows[0] || {});
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post("/admin/oferta", adminLimiter, verificarToken, async (req, res) => {
+    try {
+        const { texto, activa, vence_at } = req.body;
+        await pool.query(`
+            UPDATE ofertas SET
+                texto = $1,
+                activa = $2,
+                vence_at = $3,
+                updated_at = NOW()
+            WHERE id = 1
+        `, [texto, activa, vence_at || null]);
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
 app.get("/", (req, res) => res.send("YordaBot Online ✅"));
 
 app.listen(PORT, () => console.log(`🚀 Servidor en puerto ${PORT}`));
