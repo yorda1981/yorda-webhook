@@ -312,6 +312,7 @@ async function etiquetarNuevoPedido(phone) {
 // ─────────────────────────────────────────
 
 async function intentarCompletarOperacion(phone, pushName, cliente, esEs) {
+    if (!cliente) return false;
     const esRecarga      = cliente.tipo_favorito === "recarga_etecsa";
     const tieneTarjeta   = !!(cliente.tarjeta || cliente.tarjeta_frecuente);
     const tieneComprobante = !!cliente.comprobante_pendiente;
