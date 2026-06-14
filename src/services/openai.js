@@ -12,6 +12,13 @@ const env = require("../config/env");
 const openai = new OpenAI({ apiKey: env.OPENAI_API_KEY });
 const pool  = require("../../db");
 
+async function leerRecargas() {
+    try {
+        const r = await pool.query("SELECT * FROM recargas WHERE activa = true ORDER BY tipo");
+        return r.rows;
+    } catch { return []; }
+}
+
 async function leerOferta() {
     try {
         const r = await pool.query("SELECT * FROM ofertas WHERE activa = true AND (vence_at IS NULL OR vence_at > NOW()) LIMIT 1");
@@ -48,7 +55,9 @@ const gatilhos = [
     "como envio","como mando","quiero cotizar","pasame el pix","mandame el pix",
     "me interesa","quiero pagar","voy a pagar","pasar dinero","mandar plata","enviar plata",
     "mi familia en cuba","ayuda a mi familia","enviar para cuba","mandar para cuba",
-    "hacer una remesa","necesito una remesa","quiero hacer un envio","quiero mandar dinero"
+    "hacer una remesa","necesito una remesa","quiero hacer un envio","quiero mandar dinero",
+    "recarga","recargar","recarga etecsa","recarga cuba","quiero recargar","necesito recargar",
+    "recarga para cuba","recarga de telefono","recargar telefono","recarga movil"
 ];
 
 const palabrasNegocio = [
@@ -934,6 +943,73 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                 });
                 return await enviarPIX(phone, cliente, esEs);
             }
+        }
+
+        // ══════════════════════════════════════
+        // FLUJO DE RECARGA
+        // ══════════════════════════════════════
+
+        const esRecargaTexto = /recarga|recargar|recargas|recarga etecsa|recarga cuba|recargar telefono|recarga movil/.test(txt);
+
+        if (esRecargaTexto && cliente?.estado !== "aguardando_numero_recarga" && cliente?.estado !== "aguardando_comprovante") {
+            const recargas = await leerRecargas();
+            if (recargas.length === 0) {
+                await enviarSeguro(phone, "Por el momento no tenemos recargas disponibles. Pregunta a Yordanys 😊");
+                return "";
+            }
+            let msg = "📱 *Tenemos dos tipos de recarga:*
+
+";
+            recargas.forEach((r, i) => {
+                const emoji = r.tipo === "nacional" ? "🇨🇺" : "🌍";
+                msg += `${i + 1}️⃣ *Recarga ${r.tipo.charAt(0).toUpperCase() + r.tipo.slice(1)}*
+`;
+                msg += `${emoji} R$${r.precio}
+`;
+                msg += `${r.descripcion}
+
+`;
+            });
+            msg += "¿Cuál prefieres? Responde *1* o *2* 😊";
+            await guardarCliente({ phone, estado: "seleccionando_recarga", fechaEstado: new Date().toISOString() });
+            await enviarSeguro(phone, msg);
+            return msg;
+        }
+
+        // Selección de tipo de recarga
+        if (cliente?.estado === "seleccionando_recarga" && /^[12]$/.test(txt.trim())) {
+            const recargas = await leerRecargas();
+            const idx = parseInt(txt.trim()) - 1;
+            const recargaElegida = recargas[idx];
+            if (!recargaElegida) {
+                await enviarSeguro(phone, "Responde 1 o 2 😊");
+                return "";
+            }
+            await guardarCliente({
+                phone,
+                monto: recargaElegida.precio,
+                tipo: `recarga_${recargaElegida.tipo}`,
+                estado: "aguardando_numero_recarga",
+                fechaEstado: new Date().toISOString()
+            });
+            await enviarSeguro(phone, `Perfecto 😊
+
+¿Cuál es el número cubano a recargar?
+
+Ejemplo: 5XXXXXXX`);
+            return "";
+        }
+
+        // Número cubano para recarga (8 dígitos que empiezan con 5)
+        if (cliente?.estado === "aguardando_numero_recarga" && /^5\d{7}$/.test(soloNums)) {
+            await guardarCliente({
+                phone,
+                tarjeta: soloNums, // reutilizamos tarjeta para guardar el número
+                estado: "aguardando_comprovante",
+                fechaEstado: new Date().toISOString(),
+                fechaPix: new Date().toISOString()
+            });
+            return await enviarPIX(phone, await obtenerCliente(phone), esEs);
         }
 
         // ══════════════════════════════════════
