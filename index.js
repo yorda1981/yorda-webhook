@@ -113,6 +113,19 @@ app.post("/webhook", webhookLimiter, async (req, res) => {
             return;
         }
 
+        // Audio — responder que solo atendemos por texto
+        const esAudio =
+            body.messageType === "audio" ||
+            body.messageType === "ptt"   ||
+            body.type === "audio"        ||
+            body.audio;
+
+        if (esAudio) {
+            const { enviarMensaje } = require("./src/services/zapi");
+            await enviarMensaje(phoneRaw, "Hola 😊 Solo atendemos por mensaje de texto. ¿En qué te puedo ayudar?");
+            return;
+        }
+
         const esMultimedia =
             body.messageType === "image"    ||
             body.messageType === "document" ||
@@ -277,3 +290,49 @@ app.post("/admin/oferta", adminLimiter, verificarToken, async (req, res) => {
 app.get("/", (req, res) => res.send("YordaBot Online ✅"));
 
 app.listen(PORT, () => console.log(`🚀 Servidor en puerto ${PORT}`));
+
+// ══════════════════════════════════════
+// RECORDATORIO AUTOMÁTICO
+// Cada 30 minutos busca clientes que
+// cotizaron hace más de 1 hora y no pagaron
+// ══════════════════════════════════════
+
+const { enviarMensaje } = require("./src/services/zapi");
+
+async function enviarRecordatorios() {
+    try {
+        // Clientes con cotización realizada hace entre 1 y 3 horas sin pagar
+        const result = await pool.query(`
+            SELECT phone, nombre, ultimo_monto, tipo_favorito
+            FROM customers
+            WHERE estado = 'cotizacion_realizada'
+            AND fecha_cotizacion < NOW() - INTERVAL '1 hour'
+            AND fecha_cotizacion > NOW() - INTERVAL '3 hours'
+            AND ultima_interaccion < NOW() - INTERVAL '1 hour'
+        `);
+
+        for (const cliente of result.rows) {
+            try {
+                const msg = `Hola ${cliente.nombre ? cliente.nombre.split(" ")[0] : ""} 😊
+
+¿Pudiste hacer el pago de R$${cliente.ultimo_monto}?
+
+Si tienes alguna duda estoy aquí para ayudarte. 👌`;
+                await enviarMensaje(cliente.phone, msg);
+                console.log(`🔔 Recordatorio enviado: ${cliente.phone}`);
+                // Marcar que ya se envió recordatorio limpiando el estado
+                await pool.query(
+                    "UPDATE customers SET estado = 'recordatorio_enviado' WHERE phone = $1",
+                    [cliente.phone]
+                );
+            } catch (e) {
+                console.error(`❌ Error enviando recordatorio a ${cliente.phone}:`, e.message);
+            }
+        }
+    } catch (e) {
+        console.error("❌ Error en recordatorios:", e.message);
+    }
+}
+
+// Ejecutar cada 30 minutos
+setInterval(enviarRecordatorios, 30 * 60 * 1000);
