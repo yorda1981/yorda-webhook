@@ -10,6 +10,14 @@ const { agregarOperacion, obtenerTodas, obtenerUltimaOperacion, obtenerPendiente
 const env = require("../config/env");
 
 const openai = new OpenAI({ apiKey: env.OPENAI_API_KEY });
+const pool  = require("../../db");
+
+async function leerOferta() {
+    try {
+        const r = await pool.query("SELECT * FROM ofertas WHERE activa = true AND (vence_at IS NULL OR vence_at > NOW()) LIMIT 1");
+        return r.rows[0]?.texto || null;
+    } catch { return null; }
+}
 
 // ─────────────────────────────────────────
 // CONSTANTES
@@ -840,9 +848,11 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                     fechaEstado: new Date().toISOString(),
                     fechaCotizacion: new Date().toISOString()
                 });
+                const ofertaUsd = await leerOferta();
+                const ofertaMsgUsd = ofertaUsd ? `\n\n🔥 *OFERTA:* ${ofertaUsd}` : "";
                 const res = tipo === "usd_efectivo"
-                    ? `💵 ${valor} USD en efectivo = R$${fmt(r.brl ?? 0)} BRL\n\n${pick(CIERRES_COT)}`
-                    : `💵 ${valor} USD = ${fmt(r.cup)} CUP 🇨🇺\n\n${pick(CIERRES_COT)}`;
+                    ? `💵 ${valor} USD en efectivo = R$${fmt(r.brl ?? 0)} BRL${ofertaMsgUsd}\n\n${pick(CIERRES_COT)}`
+                    : `💵 ${valor} USD = ${fmt(r.cup)} CUP 🇨🇺${ofertaMsgUsd}\n\n${pick(CIERRES_COT)}`;
                 await enviarSeguro(phone, res);
                 return res;
             }
@@ -866,7 +876,9 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                 else if (valorFinal < 1000) tip = "\n\n🚀 Con R$1000+ obtienes la mejor tasa.";
 
 
-                const res = `💵 R$${valorFinal} = ${fmt(r.cup)} CUP 🇨🇺${tip}\n\n${pick(CIERRES_COT)}`;
+                const oferta = await leerOferta();
+                const ofertaMsg = oferta ? `\n\n🔥 *OFERTA:* ${oferta}` : "";
+                const res = `💵 R$${valorFinal} = ${fmt(r.cup)} CUP 🇨🇺${tip}${ofertaMsg}\n\n${pick(CIERRES_COT)}`;
                 await enviarSeguro(phone, res);
                 return res;
             }
