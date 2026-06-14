@@ -104,6 +104,26 @@
             </div>
         </div>
 
+        <div class="config-section" style="border-left: 5px solid #3b82f6;">
+            <h3 style="color:#3b82f6;">📱 Configuración de Recargas</h3>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px;" id="recargasForm">
+                <div>
+                    <h4 style="margin-bottom:12px;color:#8b949e;">🇨🇺 Nacional</h4>
+                    <div class="input-group"><label>Precio (R$)</label><input type="number" id="rec_nac_precio" placeholder="100"></div>
+                    <div class="input-group" style="margin-top:10px;"><label>Descripción</label><input type="text" id="rec_nac_desc" placeholder="2.000 CUP · 365 días"></div>
+                    <div style="display:flex;align-items:center;gap:8px;margin-top:10px;"><input type="checkbox" id="rec_nac_activa"><label for="rec_nac_activa">Activa</label></div>
+                    <button class="btn-save" onclick="guardarRecarga('nacional')" style="margin-top:12px;">Guardar Nacional</button>
+                </div>
+                <div>
+                    <h4 style="margin-bottom:12px;color:#8b949e;">🌍 Internacional</h4>
+                    <div class="input-group"><label>Precio del día (R$)</label><input type="number" id="rec_int_precio" placeholder="145"></div>
+                    <div class="input-group" style="margin-top:10px;"><label>Descripción de la promo</label><input type="text" id="rec_int_desc" placeholder="600 CUP × 6 + datos ilimitados"></div>
+                    <div style="display:flex;align-items:center;gap:8px;margin-top:10px;"><input type="checkbox" id="rec_int_activa"><label for="rec_int_activa">Activa</label></div>
+                    <button class="btn-save" onclick="guardarRecarga('internacional')" style="margin-top:12px;">Guardar Internacional</button>
+                </div>
+            </div>
+        </div>
+
         <div class="config-section" style="border-left: 5px solid #f59e0b;">
             <h3 style="color:#f59e0b;">🔥 Oferta del Día</h3>
             <div style="display:flex; flex-direction:column; gap:12px;">
@@ -144,6 +164,42 @@
 
         function authH() {
             return { "Authorization": "Bearer " + token, "Content-Type": "application/json" };
+        }
+
+        async function cargarRecargas() {
+            if (!token) return;
+            try {
+                const r = await fetch("/admin/recargas", { headers: authH() });
+                const recargas = await r.json();
+                recargas.forEach(rec => {
+                    const t = rec.tipo;
+                    const pre = t === "nacional" ? "rec_nac" : "rec_int";
+                    const precioEl = document.getElementById(pre + "_precio");
+                    const descEl   = document.getElementById(pre + "_desc");
+                    const activaEl = document.getElementById(pre + "_activa");
+                    if (precioEl) precioEl.value = rec.precio || "";
+                    if (descEl)   descEl.value   = rec.descripcion || "";
+                    if (activaEl) activaEl.checked = !!rec.activa;
+                });
+            } catch(e) { console.error("Error cargando recargas:", e); }
+        }
+
+        async function guardarRecarga(tipo) {
+            const pre = tipo === "nacional" ? "rec_nac" : "rec_int";
+            try {
+                const res = await fetch("/admin/recargas/" + tipo, {
+                    method: "POST",
+                    headers: authH(),
+                    body: JSON.stringify({
+                        precio:      document.getElementById(pre + "_precio").value,
+                        descripcion: document.getElementById(pre + "_desc").value,
+                        activa:      document.getElementById(pre + "_activa").checked
+                    })
+                });
+                const d = await res.json();
+                if (d.success) alert("✅ Recarga " + tipo + " guardada");
+                else alert("❌ Error guardando");
+            } catch(e) { alert("❌ Error de conexión"); }
         }
 
         async function cargarOferta() {
@@ -209,6 +265,7 @@
                 document.getElementById("statusBadge").innerText = "● Online";
                 document.getElementById("statusBadge").style.color = "#4ade80";
                 cargarOferta();
+                cargarRecargas();
 
                 const tasas      = await resTasas.json();
                 const clientes   = await resClientes.json();
