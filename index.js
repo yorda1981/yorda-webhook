@@ -225,7 +225,7 @@ app.post("/admin/confirmar-operacion/:id", adminLimiter, verificarToken, async (
         try {
             await axios.post(
                 `https://api.z-api.io/instances/${process.env.ZAPI_INSTANCE}/token/${process.env.ZAPI_TOKEN}/send-text`,
-                { phone: operacion.phone, message: `✅ Pago confirmado.\n\nSu envío de R$${operacion.monto} ha sido aprobado.\n\nGracias.` },
+                { phone: operacion.phone, message: `✅ Recibimos su pago de R$${operacion.monto}.\n\nProcederemos a realizar la transferencia a Cuba.\n\nCuando se complete le enviaremos el comprobante. 😊` },
                 { headers: { "Client-Token": process.env.ZAPI_CLIENT_TOKEN } }
             );
         } catch (err) {
