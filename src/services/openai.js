@@ -3,7 +3,7 @@ require("dotenv").config();
 const OpenAI   = require("openai");
 const pdfParse = require("pdf-parse");
 
-const { enviarMensaje, enviarImagen }                     = require("./zapi");
+const { enviarMensaje, enviarImagen, enviarConDelay }     = require("./zapi");
 const { calcularOperacion }                               = require("./calculator");
 const { guardarCliente, obtenerCliente, limpiarSesionDB } = require("./customer-memory");
 const { agregarOperacion, obtenerTodas, obtenerUltimaOperacion, obtenerPendienteCliente, existeOperacionPendiente } = require("./operations");
@@ -80,19 +80,85 @@ const confirmaOperacion = [
 
 const CIERRES_COT = [
     "¿Hacemos la operación ahora? 💸",
-    "¿Quieres que te envíe el PIX para pagar?",
-    "¿Continuamos? 👌",
-    "¿Procedemos? Si tienes la tarjeta ya podemos cerrar.",
-    "¿Lo hacemos ahora? Es rápido 🚀"
+    "¿Te envío el PIX para que puedas pagar? 😊",
+    "¿Continuamos? Solo necesito el comprobante después 👌",
+    "¿Procedemos? Si ya tienes la tarjeta lista, es un momento 🚀",
+    "¿Lo cerramos ahora? El proceso es rápido 😊",
+    "¿Quieres que te mande la clave PIX ya? 💸",
+    "¿Seguimos? Te mando los datos para pagar 👇"
+];
+
+const CIERRES_COT_PT = [
+    "Fazemos agora? 💸",
+    "Posso te mandar o PIX para pagar? 😊",
+    "Continuamos? Só preciso do comprovante depois 👌",
+    "Seguimos? Se já tem o cartão, é rapidinho 🚀",
+    "Fechamos agora? O processo é bem rápido 😊",
+    "Quer que eu mande a chave PIX já? 💸",
+    "Vamos? Te mando os dados para pagar 👇"
 ];
 
 const CONFIRMA_TARJETA_SIN_MONTO = [
     "¡Listo! 💳 ¿Cuánto vas a enviar?",
-    "¡Perfecto, tarjeta guardada! 💳 ¿Qué monto quieres enviar?",
-    "¡Anotado! 💳 ¿Cuánto vas a mandar hoy?"
+    "¡Tarjeta guardada! 💳 ¿Qué monto quieres mandar?",
+    "¡Anotado! 💳 ¿Cuánto vas hoy?",
+    "Perfecto, ya tengo la tarjeta 💳 ¿Cuánto quieres enviar?",
+    "¡Ya la tengo! 💳 Dime el monto y arrancamos 😊"
 ];
 
+const CONFIRMA_TARJETA_SIN_MONTO_PT = [
+    "Pronto! 💳 Quanto vai enviar?",
+    "Cartão salvo! 💳 Qual o valor?",
+    "Anotado! 💳 Quanto vai mandar hoje?",
+    "Perfeito, já tenho o cartão 💳 Me diz o valor 😊",
+    "Já tenho! 💳 Me fala o valor e a gente resolve 😊"
+];
+
+// Mensajes de espera de comprobante — variedad humana
+const ESPERA_COMPROBANTE_ES = [
+    "Perfecto, mándame el comprobante cuando puedas 📎",
+    "¡Genial! En cuanto me llegue el comprobante lo proceso 📎",
+    "Listo, cuando hagas el pago mándame la foto o PDF 📎",
+    "Cuando transfieras mándame el comprobante y lo reviso enseguida 📎"
+];
+const ESPERA_COMPROBANTE_PT = [
+    "Perfeito, me manda o comprovante quando puder 📎",
+    "Ótimo! Assim que chegar o comprovante eu processo 📎",
+    "Certo, quando fizer o pagamento me manda a foto ou PDF 📎",
+    "Quando transferir me manda o comprovante e eu revejo já 📎"
+];
+
+// Mensajes de tarjeta no legible — variedad
+const TARJETA_ILEGIBLE = [
+    "No pude leer bien la imagen 📸\n\nMándame otra más clara o escríbeme los 16 dígitos.",
+    "La imagen no salió bien 📸\n\nPrueba con otra foto o escríbeme los números directamente.",
+    "No logré capturar los datos de la tarjeta 📸\n\n¿Puedes mandarme otra foto o escribir los 16 dígitos?"
+];
+
+// Mensajes de operación completada
+const OPERACION_COMPLETADA_ES = (nombre, monto) => {
+    const n = nombre ? ` ${nombre.split(" ")[0]}` : "";
+    return [
+        `¡Listo${n}! ✅ Tu envío de R$${monto} está en camino a Cuba 🇨🇺`,
+        `¡Todo confirmado${n}! ✅ R$${monto} procesado. Tu familia lo recibirá pronto 🇨🇺`,
+        `¡Hecho${n}! ✅ Envío de R$${monto} confirmado. Avisamos cuando llegue 🇨🇺`
+    ];
+};
+const OPERACION_COMPLETADA_PT = (nombre, monto) => {
+    const n = nombre ? ` ${nombre.split(" ")[0]}` : "";
+    return [
+        `Pronto${n}! ✅ Seu envio de R$${monto} está a caminho para Cuba 🇨🇺`,
+        `Tudo confirmado${n}! ✅ R$${monto} processado. Sua família vai receber em breve 🇨🇺`,
+        `Feito${n}! ✅ Envio de R$${monto} confirmado. Avisamos quando chegar 🇨🇺`
+    ];
+};
+
 function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+// pick con idioma — elige entre array ES o PT según lang
+function pickL(arrEs, arrPt, lang) {
+    return pick(lang === "pt" ? arrPt : arrEs);
+}
 
 // ─────────────────────────────────────────
 // UTILITIES
@@ -119,9 +185,11 @@ function esPDF(url) {
     return u.includes(".pdf") || u.includes("mimetype=pdf") || u.includes("type=pdf");
 }
 
-async function enviarSeguro(phone, msg) {
+async function enviarSeguro(phone, msg, delay = null, jitter = true) {
     if (!msg || !phone) return;
-    await enviarMensaje(phone, msg);
+    // Pequeño jitter aleatorio (0-400ms) entre mensajes consecutivos
+    if (jitter) await new Promise(r => setTimeout(r, Math.random() * 400));
+    await enviarConDelay(phone, msg, delay);
 }
 
 async function limpiarSesion(phone) { await limpiarSesionDB(phone); }
@@ -603,33 +671,99 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         const esSaludo = /^(hola|oi|bom dia|buenas|buenos dias|boa tarde|boa noite|buen dia|hey|hi|hello|e ai|eai|buenas tardes|buenas noches|good morning)[\s!?.]*$/.test(txt);
 
         if (esSaludo) {
+            const primerNombre = pushName ? pushName.split(" ")[0] : null;
+            const esFrecuente  = !!cliente?.cliente_frecuente;
+            const horaLocal    = new Date(Date.now() - 3 * 60 * 60 * 1000).getUTCHours();
+
             if (!yaSaludado) {
-                const nombre = pushName ? `, ${pushName.split(" ")[0]}` : "";
-                // Hora de Brasil (UTC-3)
-                const horaBrasil = new Date(Date.now() - 3 * 60 * 60 * 1000).getUTCHours();
+                // Saludos variados por hora + idioma + si es cliente frecuente
                 let saludo;
-                if (horaBrasil >= 6 && horaBrasil < 12) {
-                    saludo = `Buenos días${nombre}! ☀️ ¿Cómo estás? ¿En qué te puedo ayudar hoy?`;
-                } else if (horaBrasil >= 12 && horaBrasil < 18) {
-                    saludo = `Buenas tardes${nombre}! 🌤️ ¿Cómo estás? ¿En qué te puedo ayudar?`;
+                if (lang === "pt") {
+                    const n = primerNombre ? ` ${primerNombre}` : "";
+                    if (esFrecuente) {
+                        saludo = pick([
+                            `Oi${n}! Que bom te ver de novo 😊 Em que posso te ajudar hoje?`,
+                            `Olá${n}! Sempre bom contar com você 😊 O que precisa hoje?`,
+                            `Ei${n}! Bem-vindo de volta 😊 Como posso te ajudar?`
+                        ]);
+                    } else if (horaLocal >= 6 && horaLocal < 12) {
+                        saludo = pick([
+                            `Bom dia${n}! ☀️ Como posso te ajudar?`,
+                            `Bom dia${n}! ☀️ Tudo bem? O que precisa hoje?`,
+                            `Olá${n}, bom dia! ☀️ Em que posso ajudar?`
+                        ]);
+                    } else if (horaLocal >= 12 && horaLocal < 18) {
+                        saludo = pick([
+                            `Boa tarde${n}! 🌤️ Como posso te ajudar?`,
+                            `Olá${n}! Boa tarde 😊 O que precisa?`,
+                            `Oi${n}! Boa tarde ☀️ Em que posso ajudar hoje?`
+                        ]);
+                    } else {
+                        saludo = pick([
+                            `Boa noite${n}! 🌙 Como posso te ajudar?`,
+                            `Olá${n}! Boa noite 😊 O que precisa?`,
+                            `Oi${n}! Boa noite 🌙 Estou aqui para o que precisar.`
+                        ]);
+                    }
                 } else {
-                    saludo = `Buenas noches${nombre}! 🌙 ¿Todo bien? Aquí estamos para lo que necesites.`;
+                    const n = primerNombre ? `, ${primerNombre}` : "";
+                    if (esFrecuente) {
+                        saludo = pick([
+                            `¡Hola${n}! Qué bueno verte de nuevo 😊 ¿En qué te ayudo hoy?`,
+                            `¡Hola${n}! Siempre un placer 😊 ¿Qué necesitas?`,
+                            `¡Ei${n}! Bienvenido de nuevo 😊 ¿Cómo te puedo ayudar?`
+                        ]);
+                    } else if (horaLocal >= 6 && horaLocal < 12) {
+                        saludo = pick([
+                            `¡Buenos días${n}! ☀️ ¿En qué te puedo ayudar?`,
+                            `¡Hola${n}, buenos días! ☀️ ¿Todo bien? ¿Qué necesitas?`,
+                            `¡Buenos días${n}! ☀️ ¿Cómo te puedo ayudar hoy?`
+                        ]);
+                    } else if (horaLocal >= 12 && horaLocal < 18) {
+                        saludo = pick([
+                            `¡Buenas tardes${n}! 🌤️ ¿En qué te ayudo?`,
+                            `¡Hola${n}! Buenas tardes 😊 ¿Qué necesitas?`,
+                            `¡Buenas tardes${n}! 🌤️ ¿Cómo puedo ayudarte?`
+                        ]);
+                    } else {
+                        saludo = pick([
+                            `¡Buenas noches${n}! 🌙 ¿En qué te ayudo?`,
+                            `¡Hola${n}! Buenas noches 😊 ¿Qué necesitas?`,
+                            `¡Buenas noches${n}! 🌙 Aquí estamos para lo que necesites.`
+                        ]);
+                    }
                 }
                 await guardarCliente({ phone, saludoEnviado: true });
                 await enviarSeguro(phone, saludo);
                 return saludo;
             }
-            // Ya saludado — retomar desde contexto actual
+
+            // Ya saludado — retomar con contexto y nombre
+            const n = primerNombre || "";
             if (cliente?.estado === "cotizacion_realizada" && cliente?.ultimo_monto) {
-                const msg = `¿Continuamos con el envío de R$${cliente.ultimo_monto}? 💸`;
+                const msgs = lang === "pt"
+                    ? [
+                        `Oi${n ? " " + n : ""}! Ainda quer fazer o envio de R$${cliente.ultimo_monto}? 💸`,
+                        `Olá${n ? " " + n : ""}! Continuamos com o envio de R$${cliente.ultimo_monto}? 😊`,
+                        `Ei${n ? " " + n : ""}! Seguimos com R$${cliente.ultimo_monto}? 💸`
+                    ]
+                    : [
+                        `¡Hola${n ? " " + n : ""}! ¿Seguimos con el envío de R$${cliente.ultimo_monto}? 💸`,
+                        `¡Qué tal${n ? " " + n : ""}! ¿Continuamos con R$${cliente.ultimo_monto}? 😊`,
+                        `¡Hola${n ? " " + n : ""}! Todavía tienes la cotización de R$${cliente.ultimo_monto} activa ¿la cerramos? 💸`
+                    ];
+                const msg = pick(msgs);
                 await enviarSeguro(phone, msg);
                 return msg;
             }
             if (cliente?.estado === "aguardando_comprovante") {
-                await enviarSeguro(phone, esEs ? "Esperando tu comprobante 📎" : "Aguardando seu comprovante 📎");
+                const msg = pickL(ESPERA_COMPROBANTE_ES, ESPERA_COMPROBANTE_PT, lang);
+                await enviarSeguro(phone, msg);
                 return "";
             }
-            const msg = esEs ? "¿Cuánto quieres enviar? 😊" : "Quanto quer enviar? 😊";
+            const msg = lang === "pt"
+                ? pick(["Quanto quer enviar? 😊", "O que precisa hoje? 😊", "Em que posso te ajudar? 😊"])
+                : pick(["¿Cuánto quieres enviar? 😊", "¿En qué te ayudo? 😊", "¿Qué necesitas hoy? 😊"]);
             await enviarSeguro(phone, msg);
             return msg;
         }
@@ -704,7 +838,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
 
                 // BPA ilegible
                 if (det.banco?.toLowerCase().includes("bpa") && num.startsWith("1239")) {
-                    await enviarSeguro(phone, "No pude leer bien la imagen 📸\n\nEnvía una más clara o escribe los 16 dígitos.");
+                    await enviarSeguro(phone, pick(TARJETA_ILEGIBLE));
                     return "";
                 }
 
@@ -722,12 +856,12 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
 
                     const msg = cli2.ultimo_monto
                         ? `¡Tarjeta guardada! 💳\n\n¿Te envío el PIX para pagar R$${cli2.ultimo_monto}?`
-                        : pick(CONFIRMA_TARJETA_SIN_MONTO);
+                        : pickL(CONFIRMA_TARJETA_SIN_MONTO, CONFIRMA_TARJETA_SIN_MONTO_PT, lang);
                     await enviarSeguro(phone, msg);
                     return msg;
                 }
 
-                await enviarSeguro(phone, "No pude leer bien la imagen 📸\n\nEnvía una más clara o escribe los 16 dígitos.");
+                await enviarSeguro(phone, pick(TARJETA_ILEGIBLE));
                 return "";
             }
 
@@ -827,7 +961,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                     });
                     const ofertaUsd = await leerOferta();
                     const ofertaMsgUsd = ofertaUsd ? `\n\n🔥 *OFERTA:* ${ofertaUsd}` : "";
-                    const res = `💵 ${montoGuardado} USD = ${fmt(r.cup)} CUP 🇨🇺${ofertaMsgUsd}\n\n${pick(CIERRES_COT)}`;
+                    const res = `💵 ${montoGuardado} USD = ${fmt(r.cup)} CUP 🇨🇺${ofertaMsgUsd}\n\n${pickL(CIERRES_COT, CIERRES_COT_PT, lang)}`;
                     await enviarSeguro(phone, res);
                     return res;
                 }
@@ -859,7 +993,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
 
             const msg = cli2.ultimo_monto
                 ? `¡Tarjeta guardada! 💳\n\n¿Te envío el PIX para pagar R$${cli2.ultimo_monto}?`
-                : pick(CONFIRMA_TARJETA_SIN_MONTO);
+                : pickL(CONFIRMA_TARJETA_SIN_MONTO, CONFIRMA_TARJETA_SIN_MONTO_PT, lang);
             await enviarSeguro(phone, msg);
             return msg;
         }
@@ -880,7 +1014,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         // — Confirmación post-cotización
         if (esConfirma && cliente?.estado === "cotizacion_realizada") {
             if (!cliente.tarjeta && !cliente.tarjeta_frecuente) {
-                await enviarSeguro(phone, "¡Genial! Solo me falta la tarjeta 💳\n\nEnvíame foto o los 16 dígitos.");
+                await enviarSeguro(phone, pickL(["¡Genial! Solo me falta la tarjeta 💳\n\nEnvíame foto o los 16 dígitos.", "¡Casi listo! Solo necesito la tarjeta 💳\n\nMándame foto o escríbeme los 16 números.", "¡Un paso más! ¿Me mandas la tarjeta? Foto o los 16 dígitos 💳"], ["Quase lá! Só preciso do cartão 💳\n\nManda uma foto ou os 16 dígitos.", "Falta só o cartão 💳\n\nManda foto ou me escreve os números.", "Quase! Me manda o cartão? Foto ou os 16 dígitos 💳"], lang));
                 return "";
             }
             await guardarCliente({ phone, estado: "aguardando_comprovante", fechaEstado: new Date().toISOString(), fechaPix: new Date().toISOString() });
@@ -1009,8 +1143,8 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                 const ofertaUsd = await leerOferta();
                 const ofertaMsgUsd = ofertaUsd ? `\n\n🔥 *OFERTA:* ${ofertaUsd}` : "";
                 const res = tipo === "usd_efectivo"
-                    ? `💵 ${valor} USD en efectivo = R$${fmt(r.brl ?? 0)} BRL${ofertaMsgUsd}\n\n${pick(CIERRES_COT)}`
-                    : `💵 ${valor} USD = ${fmt(r.cup)} CUP 🇨🇺${ofertaMsgUsd}\n\n${pick(CIERRES_COT)}`;
+                    ? `💵 ${valor} USD en efectivo = R$${fmt(r.brl ?? 0)} BRL${ofertaMsgUsd}\n\n${pickL(CIERRES_COT, CIERRES_COT_PT, lang)}`
+                    : `💵 ${valor} USD = ${fmt(r.cup)} CUP 🇨🇺${ofertaMsgUsd}\n\n${pickL(CIERRES_COT, CIERRES_COT_PT, lang)}`;
                 await enviarSeguro(phone, res);
                 return res;
             }
@@ -1046,7 +1180,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
 
                 const oferta = await leerOferta();
                 const ofertaMsg = oferta ? `\n\n🔥 *OFERTA:* ${oferta}` : "";
-                const res = `💵 R$${valorFinal} = ${fmt(r.cup)} CUP 🇨🇺${tip}${ofertaMsg}\n\n${pick(CIERRES_COT)}`;
+                const res = `💵 R$${valorFinal} = ${fmt(r.cup)} CUP 🇨🇺${tip}${ofertaMsg}\n\n${pickL(CIERRES_COT, CIERRES_COT_PT, lang)}`;
                 await enviarSeguro(phone, res);
                 return res;
             }
