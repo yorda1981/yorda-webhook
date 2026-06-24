@@ -32,28 +32,58 @@ const adminLimiter = rateLimit({
     message: "Too many requests"
 });
 
-const buffers          = new Map();
-const pendingMessages  = new Map();
-const pausasHumanas    = new Map();
-const mapaLidATelefono = new Map();
+const buffers            = new Map();
+const pendingMessages    = new Map();
+const mapaLidATelefono   = new Map();
 const mensajesProcesados = new Set();
 
 const MINUTOS_PAUSA = 10;
 
-function activarPausaHumana(phone) {
+// ─────────────────────────────────────────
+// PAUSA HUMANA — persistida en PostgreSQL
+// Sobrevive reinicios de Railway.
+// Se activa cuando el operador escribe desde
+// el WhatsApp directamente (fromMe + !fromApi).
+// ─────────────────────────────────────────
+
+async function activarPausaHumana(phone) {
     if (!phone) return;
     if (!String(phone).startsWith("55")) return;
-    const finActual = pausasHumanas.get(phone);
-    if (finActual && finActual > Date.now()) return;
-    pausasHumanas.set(phone, Date.now() + (MINUTOS_PAUSA * 60 * 1000));
-    console.log(`⏸️ Pausa humana: ${MINUTOS_PAUSA} min para ${phone}`);
+    try {
+        await pool.query(`
+            UPDATE customers
+            SET pausa_hasta = NOW() + ($1 * INTERVAL '1 minute'),
+                updated_at  = NOW()
+            WHERE phone = $2
+        `, [MINUTOS_PAUSA, phone]);
+        // Si el cliente aún no existe en DB, insertar fila mínima
+        const r = await pool.query("SELECT phone FROM customers WHERE phone = $1", [phone]);
+        if (r.rows.length === 0) {
+            await pool.query(`
+                INSERT INTO customers (phone, pausa_hasta, created_at, updated_at)
+                VALUES ($1, NOW() + ($2 * INTERVAL '1 minute'), NOW(), NOW())
+                ON CONFLICT (phone) DO NOTHING
+            `, [phone, MINUTOS_PAUSA]);
+        }
+        console.log(`⏸️ Pausa humana (PG): ${MINUTOS_PAUSA} min → ${phone}`);
+    } catch (e) {
+        console.error("❌ activarPausaHumana:", e.message);
+    }
 }
 
-function enPausaHumana(phone) {
-    const fin = pausasHumanas.get(phone);
-    if (!fin) return false;
-    if (Date.now() > fin) { pausasHumanas.delete(phone); return false; }
-    return true;
+async function enPausaHumana(phone) {
+    if (!phone) return false;
+    try {
+        const r = await pool.query(
+            "SELECT pausa_hasta FROM customers WHERE phone = $1",
+            [phone]
+        );
+        if (!r.rows.length || !r.rows[0].pausa_hasta) return false;
+        return new Date(r.rows[0].pausa_hasta) > new Date();
+    } catch (e) {
+        console.error("❌ enPausaHumana:", e.message);
+        return false;   // ante la duda, dejar pasar al bot
+    }
 }
 
 app.use(express.json({ limit: "10mb" }));
@@ -89,7 +119,7 @@ app.post("/webhook", webhookLimiter, async (req, res) => {
         if (body.fromMe) {
             if (body.fromApi !== true) {
                 const telefonoCliente = mapaLidATelefono.get(body.chatLid);
-                if (telefonoCliente) activarPausaHumana(telefonoCliente);
+                if (telefonoCliente) await activarPausaHumana(telefonoCliente);
             }
             return;
         }
@@ -109,7 +139,7 @@ app.post("/webhook", webhookLimiter, async (req, res) => {
 
         const pushName = body.senderName || "Cliente";
 
-        if (enPausaHumana(phoneRaw)) {
+        if (await enPausaHumana(phoneRaw)) {
             console.log(`🤫 BOT SILENCIADO PARA ${phoneRaw}`);
             return;
         }
@@ -319,4 +349,3 @@ setInterval(() => {
 // ══════════════════════════════════════
 
 // (ya registrado arriba junto a /admin/stats)
-
