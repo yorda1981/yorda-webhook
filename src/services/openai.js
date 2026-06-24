@@ -8,6 +8,7 @@ const { calcularOperacion }                               = require("./calculato
 const { guardarCliente, obtenerCliente, limpiarSesionDB } = require("./customer-memory");
 const { agregarOperacion, obtenerTodas, obtenerUltimaOperacion, obtenerPendienteCliente, existeOperacionPendiente } = require("./operations");
 const env = require("../config/env");
+const crm = require("./crm");
 
 const openai = new OpenAI({ apiKey: env.OPENAI_API_KEY });
 const pool  = require("../../db");
@@ -277,6 +278,7 @@ async function _enviarPIXFinal(phone, cliente, esEs) {
         ? "Después del pago envíame el comprobante 📎 y proceso tu envío enseguida 🚀"
         : "Após o pagamento envie o comprovante 📎 e processo imediatamente 🚀"
     );
+    await crm.onPIXEnviado(phone, esEs ? "es" : "pt");
     return key;
 }
 
@@ -550,6 +552,10 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         const cliente    = await obtenerCliente(phone);
         const yaSaludado = !!cliente?.saludo_enviado;
 
+        // ── Idioma y primer contacto CRM ──
+        const lang = crm.detectarIdioma(text);
+        crm.registrarPrimerContacto(phone, pushName, lang).catch(() => {});
+
         await guardarCliente({ phone, ultimaInteraccion: new Date().toISOString() });
 
         // ══════════════════════════════════════
@@ -726,6 +732,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             }
 
             if (det.tipo === "comprovante_pix") {
+                await crm.onComprobanteRecibido(phone, esEs ? "es" : "pt");
                 await procesarComprobante(phone, pushName, cliente, det, esEs);
                 return "";
             }
@@ -908,6 +915,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                     fechaEstado: new Date().toISOString(),
                     fechaCotizacion: new Date().toISOString()
                 });
+                await crm.onCotizacion(phone, lang);
                 const ofertaUsd = await leerOferta();
                 const ofertaMsgUsd = ofertaUsd ? `\n\n🔥 *OFERTA:* ${ofertaUsd}` : "";
                 const res = tipo === "usd_efectivo"
@@ -930,6 +938,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                     fechaEstado: new Date().toISOString(),
                     fechaCotizacion: new Date().toISOString()
                 });
+                await crm.onCotizacion(phone, lang);
                 let tip = "";
                 if (valorFinal < 100)       tip = "\n\n💡 Con R$100+ la tasa mejora.";
                 else if (valorFinal < 500)  tip = "\n\n🔥 Con R$500+ la tasa sube otro escalón.";
