@@ -747,14 +747,42 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
 
         const soloNums = txt.replace(/\D/g, "");
 
-        // Extraer monto: buscar número de 2-5 dígitos en el texto (ej: "400 reais", "Nome X 400 reais")
-        const matchMonto = txt.match(/\b(\d{2,5})\b/);
-        const valorTexto = matchMonto ? Number(matchMonto[1]) : null;
-        const valor      = soloNums.length > 0 ? Number(soloNums) : null;
+        // ─────────────────────────────────────────
+        // EXTRACCIÓN DE MONTO — mejorada
+        //
+        // Prioridad:
+        //   1. Número precedido/seguido de señal monetaria
+        //      "500 reais", "R$200", "200 reales", "100 usd", "50 dolares"
+        //   2. Primer número standalone de 2-5 dígitos en contexto de negocio
+        //   3. Nada — no asumir monto si el texto es ambiguo
+        //
+        // NO dispara monto si el texto solo tiene números de teléfono,
+        // años, o códigos que no van acompañados de contexto de negocio.
+        // ─────────────────────────────────────────
 
-        // Usar valorTexto si es un monto válido y el texto tiene palabras (no solo números)
-        const valorFinal  = (valorTexto && valorTexto >= 10 && valorTexto <= 50000 && /[a-z]/.test(txt)) ? valorTexto : valor;
+        // Señales monetarias explícitas junto al número
+        const MONTO_MONETARIO = /(?:r\$|reais|reales|real|brl|usd|d[oó]lar(?:es)?|cup|mlc|pesos?|plata|dinero)\s*(\d{2,5})|\b(\d{2,5})\s*(?:r\$|reais|reales|real|brl|usd|d[oó]lar(?:es)?|cup|mlc|pesos?)/i;
+        const matchMonetario = text.match(MONTO_MONETARIO);
+        const valorMonetario = matchMonetario
+            ? Number(matchMonetario[1] || matchMonetario[2])
+            : null;
+
+        // Número puro de 2-5 dígitos con contexto de envío (sin señal monetaria)
+        const MONTO_CONTEXTUAL = /\b(\d{2,5})\b/g;
+        let valorContextual = null;
+        const CONTEXTO_ENVIO = /enviar|mandar|envio|cotiz|transfer|pagar|monto|quant|cuant|quanto|quiero/;
+        if (!valorMonetario && CONTEXTO_ENVIO.test(txt)) {
+            let m;
+            while ((m = MONTO_CONTEXTUAL.exec(txt)) !== null) {
+                const n = Number(m[1]);
+                if (n >= 10 && n <= 50000) { valorContextual = n; break; }
+            }
+        }
+
+        const valorFinal  = valorMonetario || valorContextual || null;
         const montoValido = valorFinal && valorFinal >= 10 && valorFinal <= 50000;
+        // valor legacy — usado en algunos branches de USD abajo
+        const valor = valorFinal;
 
         // — Selección de tarjeta cuando el bot preguntó cuál usar
         if (cliente?.estado === "seleccionando_tarjeta" && /^[1-9]$/.test(txt.trim())) {
@@ -785,9 +813,43 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             return "";
         }
 
-        // — Tarjeta por texto (16 dígitos exactos)
-        if (soloNums.length === 16 && txt.replace(/\D/g,"") === soloNums) {
-            await guardarTarjeta(phone, soloNums, null, null, cliente);
+        // — Selección Clásica/Prepago cuando el bot preguntó por tipo USD
+        if (cliente?.tipo_favorito === "usd_pendiente_tipo" && /^[12]$/.test(txt.trim())) {
+            const tipoUSD = txt.trim() === "1" ? "usd_clasica" : "usd_prepago";
+            const montoGuardado = Number(cliente?.ultimo_monto);
+            if (montoGuardado > 0) {
+                const r = await calcularOperacion({ tipo: tipoUSD, valor: montoGuardado });
+                if (r) {
+                    await guardarCliente({
+                        phone, tipo: tipoUSD,
+                        estado: "cotizacion_realizada",
+                        fechaEstado: new Date().toISOString()
+                    });
+                    const ofertaUsd = await leerOferta();
+                    const ofertaMsgUsd = ofertaUsd ? `\n\n🔥 *OFERTA:* ${ofertaUsd}` : "";
+                    const res = `💵 ${montoGuardado} USD = ${fmt(r.cup)} CUP 🇨🇺${ofertaMsgUsd}\n\n${pick(CIERRES_COT)}`;
+                    await enviarSeguro(phone, res);
+                    return res;
+                }
+            }
+        }
+
+        // — Tarjeta por texto (15-16 dígitos, formato manual o con espacios/guiones)
+        // Requiere que el mensaje sea SOLO la tarjeta: dígitos con separadores opcionales.
+        // Rechaza si hay letras, palabras, o si el número podría ser un teléfono/monto.
+        const esTarjetaTexto = (() => {
+            // El texto original (sin normalizar) debe ser solo dígitos, espacios y guiones
+            const rawTrim = text.trim();
+            if (!/^[\d\s\-]+$/.test(rawTrim)) return false;
+            // La parte numérica debe ser exactamente 15 o 16 dígitos
+            const digits = rawTrim.replace(/[\s\-]/g, "");
+            if (!/^\d{15,16}$/.test(digits)) return false;
+            // No debe ser un número de teléfono (empieza con 55 + 11 dígitos)
+            if (/^55\d{10,11}$/.test(digits)) return false;
+            return digits;
+        })();
+        if (esTarjetaTexto) {
+            await guardarTarjeta(phone, esTarjetaTexto, null, null, cliente);
             const cli2 = await obtenerCliente(phone);
 
             if (cli2.comprobante_pendiente) {
@@ -801,6 +863,9 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             await enviarSeguro(phone, msg);
             return msg;
         }
+
+        // — Protección: bloque texto que parece número de tarjeta pero no aplica aquí
+        // (ya se procesó arriba, si llegó aquí no es tarjeta)
 
         // — QR ilegible
         if (/no consigo escanear|no puedo escanear|no funciona el qr|qr no funciona|nao consigo|leer el qr/.test(txt)) {
@@ -899,14 +964,39 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         }
 
         // — Cotización USD
-        if (montoValido &&
-            (txt.includes("usd") || txt.includes("dolar") || txt.includes("dolares")) &&
-            !txt.includes("real") && !txt.includes("brl")
-        ) {
-            const esEfectivo = /efectivo|cash|vender|cambiar/.test(txt);
-            const tipo = esEfectivo ? "usd_efectivo"
-                       : txt.includes("prepago") ? "usd_prepago" : "usd_clasica";
+        // Requiere señal USD explícita + monto válido.
+        // Si dice "reales" o "brl" junto a "usd" → deriva a Yordanys (USD→BRL, ya manejado arriba).
+        // Detecta prepago/clásica por contexto; si no hay contexto, pregunta.
+        const esUSD = (txt.includes("usd") || txt.includes("dolar") || txt.includes("dolares") || txt.includes("dólares"));
+        if (montoValido && esUSD && !txt.includes("real") && !txt.includes("brl")) {
+            const esEfectivo = /efectivo|cash|vender|cambiar|comprar/.test(txt);
+            // Detectar tipo de tarjeta cubana mencionada
+            const esPrepago  = /prepago|nauta|internacional/.test(txt);
+            const esClasica  = /clasica|clásica|bpa|bandec|metropolitano/.test(txt);
 
+            // Si no hay señal de tipo y no es efectivo → preguntar en lugar de asumir clásica
+            if (!esEfectivo && !esPrepago && !esClasica) {
+                const msgTipo = esEs
+                    ? `💵 ${valorFinal} USD — ¿es para tarjeta Clásica o Prepago? 😊
+
+1️⃣ Clásica (BPA/Bandec)
+2️⃣ Prepago (Nauta/Internacional)`
+                    : `💵 ${valorFinal} USD — é para cartão Clássico ou Pré-pago? 😊
+
+1️⃣ Clássico (BPA/Bandec)
+2️⃣ Pré-pago (Nauta/Internacional)`;
+                await guardarCliente({
+                    phone, nombre: pushName, monto: valorFinal, tipo: "usd_pendiente_tipo",
+                    estado: "cotizacion_realizada",
+                    fechaEstado: new Date().toISOString(),
+                    fechaCotizacion: new Date().toISOString()
+                });
+                await crm.onCotizacion(phone, lang);
+                await enviarSeguro(phone, msgTipo);
+                return msgTipo;
+            }
+
+            const tipo = esEfectivo ? "usd_efectivo" : esPrepago ? "usd_prepago" : "usd_clasica";
             const r = await calcularOperacion({ tipo, valor });
             if (r) {
                 await guardarCliente({
@@ -927,8 +1017,17 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         }
 
         // — Cotización BRL → CUP
-        if (montoValido &&
-            !txt.includes("usd") && !txt.includes("dolar") && !txt.includes("cup") && !txt.includes("mlc")
+        // Solo dispara si hay señal de negocio junto al monto:
+        //   - monto precedido/seguido de "reais/reales/R$" (señal monetaria explícita), o
+        //   - contexto de envío en el mensaje (quiero enviar, mandar, cotizar, etc.)
+        //   - cliente ya en estado activo (cotizó antes, está esperando algo)
+        const hayContextoBRL = (
+            valorMonetario !== null ||          // número con señal monetaria explícita
+            !!cliente?.estado ||                // cliente con flujo activo
+            CONTEXTO_ENVIO.test(txt)            // mensaje con intención de envío
+        );
+        if (montoValido && hayContextoBRL &&
+            !esUSD && !txt.includes("cup") && !txt.includes("mlc")
         ) {
             const r = await calcularOperacion({ tipo: "brl_cup", valor: valorFinal });
             if (r) {
