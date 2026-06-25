@@ -236,7 +236,9 @@ async function llamarAsistente(mensajeUsuario, lastResponseId = null) {
         input: mensajeUsuario,
         instructions: `Eres Yorda, asistente de remesas Brasil→Cuba. Cálida, cercana y directa. Sin formalismos.
 
-REGLA PRINCIPAL: Si el mensaje no tiene relación con envíos, remesas, tasas, PIX, tarjetas, Cuba, dinero → no respondas nada. Silencio total.
+REGLA PRINCIPAL: Si el mensaje no tiene relación con envíos, remesas, tasas, PIX, tarjetas, Cuba, dinero → responde ÚNICAMENTE con la palabra: IGNORAR
+
+No escribas "Silencio total" ni nada más. Solo: IGNORAR
 
 CÓMO RESPONDES:
 - Máximo 2 líneas. Sin parrafadas.
@@ -654,8 +656,15 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
 
         const esCubaBrasil =
             triggersCubaBrasil.some(t => txt.includes(norm(t))) ||
-            (txt.includes("cup") && !txt.includes("usd") && !txt.includes("dolar") &&
-             !txt.includes("real") && !txt.includes("brl") && !txt.includes("recibe")) ||
+            // "cup" solo es Cuba→Brasil si viene SIN monto ni contexto de envío
+            // "enviar X reais en cup" es Brasil→Cuba normal → NO derivar
+            (txt.includes("cup") &&
+             !txt.includes("usd") && !txt.includes("dolar") &&
+             !txt.includes("real") && !txt.includes("brl") && !txt.includes("recibe") &&
+             !txt.includes("enviar") && !txt.includes("mandar") && !txt.includes("quiero") &&
+             !txt.includes("quero") && !txt.includes("monto") && !txt.includes("cuanto") &&
+             !txt.includes("quanto") && !montoValido
+            ) ||
             txt.includes("mlc");
 
         if (esCubaBrasil) {
@@ -1313,7 +1322,11 @@ Ejemplo: 5XXXXXXX`);
 
         try {
             const { texto, responseId } = await llamarAsistente(text, cliente?.last_response_id);
-            if (texto) {
+            // Si GPT dice IGNORAR o variantes → silencio real, sin enviar nada
+            const esIgnorar = /^ignorar[.!]?$/i.test(texto.trim()) ||
+                              /silencio total/i.test(texto) ||
+                              texto.trim() === "";
+            if (texto && !esIgnorar) {
                 await guardarCliente({ phone, lastResponseId: responseId });
                 await enviarSeguro(phone, texto);
                 return texto;
