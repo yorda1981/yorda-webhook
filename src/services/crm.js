@@ -266,9 +266,9 @@ async function onda30min() {
         WHERE estado_crm = 'cotizado'
           AND ultimo_monto > 0
           AND fecha_cotizacion < NOW() - INTERVAL '30 minutes'
-          AND fecha_cotizacion > NOW() - INTERVAL '2 hours'
-          AND (ultima_interaccion IS NULL OR ultima_interaccion < NOW() - INTERVAL '25 minutes')
-          AND (ultimo_recordatorio IS NULL OR ultimo_recordatorio < NOW() - INTERVAL '25 minutes')
+          AND fecha_cotizacion > NOW() - INTERVAL '3 hours'
+          AND (ultima_interaccion IS NULL OR ultima_interaccion < NOW() - INTERVAL '29 minutes')
+          AND tipo_ultimo_recordatorio IS DISTINCT FROM 'recuperar_30m'
     `);
 
     for (const c of r.rows) {
