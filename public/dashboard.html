@@ -60,6 +60,34 @@
             <div class="stat-card"><span>Ops. Confirmadas</span><h2 id="stat-ops">—</h2></div>
             <div class="stat-card"><span>Volumen Total</span><h2 id="stat-vol">—</h2></div>
             <div class="stat-card"><span>Pendientes</span><h2 id="stat-pend" style="color: var(--yellow);">—</h2></div>
+            <div class="stat-card"><span>Cotizados Hoy</span><h2 id="stat-cotizados" style="color:#38bdf8;">—</h2></div>
+            <div class="stat-card"><span>Cierres Hoy</span><h2 id="stat-cierres" style="color:var(--green);">—</h2></div>
+            <div class="stat-card"><span>Conversión</span><h2 id="stat-conversion" style="color:#a78bfa;">—%</h2></div>
+            <div class="stat-card"><span>Abandonos</span><h2 id="stat-abandonos" style="color:var(--red);">—</h2></div>
+        </div>
+
+        <!-- EMBUDO CRM -->
+        <div class="config-section" style="border-left: 5px solid #a78bfa; margin-bottom: 30px;">
+            <h3 style="color:#a78bfa;">📊 Embudo de Conversión</h3>
+            <div id="embudo" style="display:flex; flex-direction:column; gap:10px;"></div>
+            <div style="margin-top:20px; display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px;" id="crm-mini-stats">
+                <div style="background:#0b0e1a;border-radius:12px;padding:16px;border:1px solid #2d355a;">
+                    <div style="font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:1px;">Frecuentes</div>
+                    <div style="font-size:24px;font-weight:700;color:#fbbf24;margin-top:6px;" id="stat-frecuentes">—</div>
+                </div>
+                <div style="background:#0b0e1a;border-radius:12px;padding:16px;border:1px solid #2d355a;">
+                    <div style="font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:1px;">Esp. PIX</div>
+                    <div style="font-size:24px;font-weight:700;color:#38bdf8;margin-top:6px;" id="stat-esp-pix">—</div>
+                </div>
+                <div style="background:#0b0e1a;border-radius:12px;padding:16px;border:1px solid #2d355a;">
+                    <div style="font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:1px;">Esp. Comprobante</div>
+                    <div style="font-size:24px;font-weight:700;color:#f59e0b;margin-top:6px;" id="stat-esp-comp">—</div>
+                </div>
+                <div style="background:#0b0e1a;border-radius:12px;padding:16px;border:1px solid #2d355a;">
+                    <div style="font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:1px;">Nuevos Hoy</div>
+                    <div style="font-size:24px;font-weight:700;color:#4ade80;margin-top:6px;" id="stat-nuevos-hoy">—</div>
+                </div>
+            </div>
         </div>
 
         <div class="config-section" style="border-left: 5px solid var(--yellow);">
@@ -249,11 +277,12 @@
         async function refreshData() {
             if (!token) return;
             try {
-                const [resTasas, resClientes, resStats, resOps] = await Promise.all([
+                const [resTasas, resClientes, resStats, resOps, resCrm] = await Promise.all([
                     fetch("/admin/tasas",       { headers: authH() }),
                     fetch("/admin/clientes",    { headers: authH() }),
                     fetch("/admin/stats",       { headers: authH() }),
-                    fetch("/admin/operaciones", { headers: authH() })
+                    fetch("/admin/operaciones", { headers: authH() }),
+                    fetch("/admin/crm/stats",   { headers: authH() })
                 ]);
 
                 if (resTasas.status === 401) {
@@ -272,6 +301,10 @@
                 const clientes   = await resClientes.json();
                 const stats      = await resStats.json();
                 const operaciones = await resOps.json();
+
+                // CRM Métricas
+                const crmData = resCrm.ok ? await resCrm.json() : {};
+                renderCRMStats(crmData);
 
                 // Tasas
                 Object.keys(tasas).forEach(key => {
@@ -345,6 +378,66 @@
             } finally {
                 btn.innerText = "Guardar Cambios de Tasas";
             }
+        }
+
+        // ── CRM MÉTRICAS ──────────────────────────
+        function renderCRMStats(d) {
+            if (!d || !Object.keys(d).length) return;
+
+            // Cards nuevas
+            const cotizados = Number(d.cotizados || 0);
+            const cierresHoy = Number(d.cierres_hoy || 0);
+            const conv = d.conversion_pct != null ? d.conversion_pct + "%" : "—%";
+            const abandonos = Number(d.abandonos || 0);
+
+            const sc = document.getElementById("stat-cotizados");
+            const sh = document.getElementById("stat-cierres");
+            const scv = document.getElementById("stat-conversion");
+            const sa = document.getElementById("stat-abandonos");
+            if (sc) sc.innerText = cotizados;
+            if (sh) sh.innerText = cierresHoy;
+            if (scv) scv.innerText = conv;
+            if (sa) sa.innerText = abandonos;
+
+            // Mini stats
+            const sf = document.getElementById("stat-frecuentes");
+            const sp = document.getElementById("stat-esp-pix");
+            const sec = document.getElementById("stat-esp-comp");
+            const snh = document.getElementById("stat-nuevos-hoy");
+            if (sf) sf.innerText = d.frecuentes || 0;
+            if (sp) sp.innerText = d.esperando_pix || 0;
+            if (sec) sec.innerText = d.esperando_comprobante || 0;
+            // nuevos_hoy no viene del endpoint aún — mostrar nuevos totales
+            if (snh) snh.innerText = d.nuevos || 0;
+
+            // Embudo visual
+            const embudo = document.getElementById("embudo");
+            if (!embudo) return;
+
+            const etapas = [
+                { label: "🆕 Nuevos",               val: Number(d.nuevos || 0),                color: "#8b949e" },
+                { label: "💬 Cotizados",             val: Number(d.cotizados || 0),             color: "#38bdf8" },
+                { label: "💸 Esperando PIX",         val: Number(d.esperando_pix || 0),         color: "#a78bfa" },
+                { label: "📎 Esperando Comprobante", val: Number(d.esperando_comprobante || 0), color: "#f59e0b" },
+                { label: "✅ Completados",           val: Number(d.completados || 0),           color: "#4ade80" },
+                { label: "❌ Abandonos",             val: Number(d.abandonos || 0),             color: "#ef4444" },
+            ];
+
+            const maxVal = Math.max(...etapas.map(e => e.val), 1);
+
+            embudo.innerHTML = etapas.map(e => {
+                const pct = Math.round((e.val / maxVal) * 100);
+                return `
+                <div style="display:flex;align-items:center;gap:12px;">
+                    <div style="width:200px;font-size:13px;color:#94a3b8;flex-shrink:0;">${e.label}</div>
+                    <div style="flex:1;background:#0b0e1a;border-radius:8px;overflow:hidden;height:28px;border:1px solid #2d355a;">
+                        <div style="width:${pct}%;background:${e.color};height:100%;border-radius:8px;transition:width 0.6s ease;display:flex;align-items:center;padding-left:10px;">
+                            <span style="font-size:12px;font-weight:700;color:#0b0e1a;white-space:nowrap;">${e.val > 0 ? e.val : ""}</span>
+                        </div>
+                    </div>
+                    <div style="width:36px;text-align:right;font-size:13px;font-weight:700;color:${e.color};">${e.val}</div>
+                </div>`;
+            }).join("");
         }
 
         const POR_PAGINA = 10;
