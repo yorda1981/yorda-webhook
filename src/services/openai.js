@@ -118,12 +118,32 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             return await procesarNumeroRecarga(phone, soloNums, esEs);
 
         // ── Selección de tarjeta ──
-        if (cliente?.estado === "seleccionando_tarjeta" && /^[1-9]$/.test(txt.trim())) {
+        if (cliente?.estado === "seleccionando_tarjeta") {
             const tarjetas = Array.isArray(cliente?.tarjetas) ? cliente.tarjetas.filter(t => /^\d{15,16}$/.test(t)) : [];
-            const idx = parseInt(txt.trim()) - 1;
-            if (idx >= 0 && idx < tarjetas.length) {
-                await guardarCliente({ phone, tarjeta: tarjetas[idx], tarjeta_frecuente: tarjetas[idx], estado: "aguardando_comprovante", fechaEstado: new Date().toISOString(), fechaPix: new Date().toISOString() });
+
+            // Respuesta a "¿usamos la guardada?" → sí/no
+            const esSi = /^(si|sí|yes|sim|claro|ok|dale|esa|essa|la misma|la de siempre|usala|use essa)$/i.test(txt.trim());
+            const esNo = /^(no|nao|não|otra|outra|cambiar|mudar|nueva|nova)$/i.test(txt.trim());
+
+            if (esSi && cliente?.tarjeta_frecuente && !tarjetas.length) {
+                // Confirma usar la tarjeta frecuente
+                await guardarCliente({ phone, tarjeta: cliente.tarjeta_frecuente, estado: "aguardando_comprovante", fechaEstado: new Date().toISOString(), fechaPix: new Date().toISOString() });
                 return await _enviarPIXFinal(phone, await obtenerCliente(phone), esEs);
+            }
+            if (esNo && !tarjetas.length) {
+                // Quiere usar otra tarjeta
+                const msg = lang === "pt" ? "Tudo bem! Manda uma foto ou os 16 dígitos do novo cartão 💳" : "¡Sin problema! Mándame foto o los 16 dígitos de la nueva tarjeta 💳";
+                await guardarCliente({ phone, estado: null });
+                await enviarSeguro(phone, msg); return msg;
+            }
+
+            // Selección numérica (múltiples tarjetas)
+            if (/^[1-9]$/.test(txt.trim()) && tarjetas.length) {
+                const idx = parseInt(txt.trim()) - 1;
+                if (idx >= 0 && idx < tarjetas.length) {
+                    await guardarCliente({ phone, tarjeta: tarjetas[idx], tarjeta_frecuente: tarjetas[idx], estado: "aguardando_comprovante", fechaEstado: new Date().toISOString(), fechaPix: new Date().toISOString() });
+                    return await _enviarPIXFinal(phone, await obtenerCliente(phone), esEs);
+                }
             }
         }
 
