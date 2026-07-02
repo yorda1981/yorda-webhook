@@ -254,6 +254,28 @@
         <div id="plantillasContainer" style="display:flex;flex-direction:column;gap:20px;"><p style="color:#8b949e;text-align:center;">Conecta para ver las plantillas</p></div>
     </div>
 
+    <!-- #8 HISTORIAL DE COMPROBANTES -->
+    <div class="config-section" style="border-left:5px solid #8b5cf6; margin-bottom:24px;">
+        <h3 style="color:#8b5cf6;">📎 Historial de Comprobantes</h3>
+        <div class="table-wrapper">
+            <table>
+                <thead><tr><th>Fecha</th><th>Cliente</th><th>Valor</th><th>Banco Origen</th><th>Destino OK</th><th>Válido</th></tr></thead>
+                <tbody id="tablaComprobantes"><tr><td colspan="6" style="text-align:center;color:#8b949e;padding:20px;">Conecta para ver comprobantes</td></tr></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- #17 AUDITORÍA -->
+    <div class="config-section" style="border-left:5px solid #64748b; margin-bottom:24px;">
+        <h3 style="color:#94a3b8;">🔒 Auditoría de Acciones</h3>
+        <div class="table-wrapper">
+            <table>
+                <thead><tr><th>Fecha</th><th>Acción</th><th>IP Operador</th><th>Cliente</th><th>Detalle</th></tr></thead>
+                <tbody id="tablaAuditoria"><tr><td colspan="5" style="text-align:center;color:#8b949e;padding:20px;">Conecta para ver auditoría</td></tr></tbody>
+            </table>
+        </div>
+    </div>
+
     <!-- TASAS -->
     <div class="config-section" id="seccionTasas">
         <h3>💱 Configuración de Tasas</h3>
@@ -321,6 +343,7 @@
 
             cargarOferta(); cargarRecargas(); cargarPlantillas();
             cargarConversaciones(); cargarPromociones();
+            cargarComprobantes(); cargarAuditoria();
             verificarSalud();
 
             const tasas       = await resTasas.json();
@@ -705,33 +728,68 @@
         return `hace ${Math.floor(mins/1440)}d`;
     }
 
+    const CONV_POR_PAG = 5;
+    let _convPagina = 1;
+    let _convFiltrada = [];
+
     function renderConversaciones(lista) {
+        _convFiltrada = lista;
+        _convPagina   = 1;
+        renderPaginaConv();
+    }
+
+    function renderPaginaConv() {
+        const lista   = _convFiltrada;
+        const total   = lista.length;
+        const totPags = Math.ceil(total / CONV_POR_PAG) || 1;
+        _convPagina   = Math.max(1, Math.min(_convPagina, totPags));
+
+        const slice = lista.slice((_convPagina - 1) * CONV_POR_PAG, _convPagina * CONV_POR_PAG);
         const tbody = document.getElementById("tablaConversaciones");
-        if (!lista.length) {
+
+        if (!slice.length) {
             tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#8b949e;padding:20px;">Sin conversaciones recientes</td></tr>';
-            return;
+        } else {
+            tbody.innerHTML = slice.map(c => {
+                const pausado  = c.pausa_hasta && new Date(c.pausa_hasta) > new Date();
+                const botLabel = pausado
+                    ? '<span style="color:var(--red);font-weight:700;">🔴 Pausado</span>'
+                    : '<span style="color:var(--green);font-weight:700;">🟢 Activo</span>';
+                const phone = (c.phone||"").replace("@s.whatsapp.net","").replace("@c.us","");
+                return `<tr>
+                    <td><strong>${c.nombre||"Desconocido"}</strong><br><small style="color:#8b949e">${phone}</small></td>
+                    <td>${estadoBadge(c)}</td>
+                    <td style="color:var(--yellow);">${c.ultimo_monto ? "R$ " + c.ultimo_monto : "—"}</td>
+                    <td style="color:#8b949e;font-size:13px;">${tiempoRelativo(c.ultima_interaccion)}</td>
+                    <td>${botLabel}</td>
+                    <td>
+                        ${pausado
+                            ? `<button class="btn-sm" style="background:var(--green);color:#0b0e1a;" onclick="reanudarBot('${c.phone}')">▶ Reanudar</button>`
+                            : `<button class="btn-sm" style="background:var(--red);color:white;" onclick="pausarBot('${c.phone}')">⏸ Pausar</button>`
+                        }
+                        <button class="btn-sm" style="background:#334155;color:white;margin-left:6px;" onclick="editarNotas('${c.phone}', '${(c.nombre||"").replace(/'/g,"\'")}', \`${(c.notas_internas||"").replace(/`/g,"\`")}\`)">📝</button>
+                    </td>
+                </tr>`;
+            }).join("");
         }
-        tbody.innerHTML = lista.map(c => {
-            const pausado = c.pausa_hasta && new Date(c.pausa_hasta) > new Date();
-            const botLabel = pausado
-                ? '<span style="color:var(--red);font-weight:700;">🔴 Pausado</span>'
-                : '<span style="color:var(--green);font-weight:700;">🟢 Activo</span>';
-            const phone = (c.phone||"").replace("@s.whatsapp.net","").replace("@c.us","");
-            return `<tr>
-                <td><strong>${c.nombre||"Desconocido"}</strong><br><small style="color:#8b949e">${phone}</small></td>
-                <td>${estadoBadge(c)}</td>
-                <td style="color:var(--yellow);">${c.ultimo_monto ? "R$ " + c.ultimo_monto : "—"}</td>
-                <td style="color:#8b949e;font-size:13px;">${tiempoRelativo(c.ultima_interaccion)}</td>
-                <td>${botLabel}</td>
-                <td>
-                    ${pausado
-                        ? `<button class="btn-sm" style="background:var(--green);color:#0b0e1a;" onclick="reanudarBot('${c.phone}')">▶ Reanudar</button>`
-                        : `<button class="btn-sm" style="background:var(--red);color:white;" onclick="pausarBot('${c.phone}')">⏸ Pausar</button>`
-                    }
-                    <button class="btn-sm" style="background:#334155;color:white;margin-left:6px;" onclick="editarNotas('${c.phone}', '${(c.nombre||"").replace(/'/g,"\'")}', \`${(c.notas_internas||"").replace(/`/g,"\`")}\`)">📝</button>
-                </td>
-            </tr>`;
-        }).join("");
+
+        // Paginación
+        let pagHtml = `<div style="display:flex;align-items:center;justify-content:space-between;margin-top:12px;flex-wrap:wrap;gap:8px;">
+            <span style="font-size:12px;color:#8b949e;">${total} conversaciones</span>
+            <div style="display:flex;gap:6px;align-items:center;">
+                <button class="page-btn" onclick="_convPagina--;renderPaginaConv()" ${_convPagina===1?"disabled":""}>‹</button>
+                <span style="font-size:13px;color:#8b949e;">${_convPagina} / ${totPags}</span>
+                <button class="page-btn" onclick="_convPagina++;renderPaginaConv()" ${_convPagina===totPags?"disabled":""}>›</button>
+            </div>
+        </div>`;
+
+        // Insertar paginación debajo de la tabla
+        const existing = document.getElementById("convPaginacion");
+        if (existing) existing.remove();
+        const pag = document.createElement("div");
+        pag.id = "convPaginacion";
+        pag.innerHTML = pagHtml;
+        tbody.closest(".table-wrapper").appendChild(pag);
     }
 
     // ══════════════════════════════════════════
@@ -834,6 +892,67 @@
             await fetch("/admin/promociones/" + id, { method: "DELETE", headers: authH() });
             cargarPromociones();
         } catch(e) { alert("❌ Error"); }
+    }
+
+    // ── #8 COMPROBANTES ──────────────────────────
+    async function cargarComprobantes() {
+        if (!token) return;
+        try {
+            const r = await fetch("/admin/comprobantes", { headers: authH() });
+            const lista = await r.json();
+            const tbody = document.getElementById("tablaComprobantes");
+            if (!lista.length) {
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#8b949e;padding:20px;">Sin comprobantes registrados</td></tr>';
+                return;
+            }
+            tbody.innerHTML = lista.map(c => `
+                <tr>
+                    <td style="font-size:13px;">${new Date(c.created_at).toLocaleDateString("pt-BR")}<br><small style="color:#8b949e">${new Date(c.created_at).toLocaleTimeString("pt-BR")}</small></td>
+                    <td><strong>${c.nombre || "—"}</strong><br><small style="color:#8b949e">${(c.phone||"").replace("@s.whatsapp.net","")}</small></td>
+                    <td style="color:var(--yellow);font-weight:700;">${c.valor ? "R$ " + Number(c.valor).toLocaleString("pt-BR") : "—"}</td>
+                    <td style="color:#8b949e;font-size:13px;">${c.banco_origen || "—"}</td>
+                    <td>${c.destino_correcto === true ? '<span style="color:var(--green);">✅ Sí</span>' : c.destino_correcto === false ? '<span style="color:var(--red);">❌ No</span>' : '—'}</td>
+                    <td>${c.valido === true ? '<span style="color:var(--green);">✅</span>' : c.valido === false ? '<span style="color:var(--red);">❌</span>' : '—'}</td>
+                </tr>`).join("");
+        } catch(e) { console.error("Error comprobantes:", e); }
+    }
+
+    // ── #17 AUDITORÍA ─────────────────────────────
+    const AUDIT_LABELS = {
+        "confirmar_operacion": "✅ Confirmó operación",
+        "cambiar_tasas":       "💱 Cambió tasas",
+        "pausar_bot":          "⏸ Pausó bot",
+        "reanudar_bot":        "▶ Reanudó bot",
+        "crear_promo":         "📣 Creó promoción",
+        "toggle_promo":        "📣 Cambió promo",
+    };
+
+    async function cargarAuditoria() {
+        if (!token) return;
+        try {
+            const r = await fetch("/admin/auditoria?limit=30", { headers: authH() });
+            const lista = await r.json();
+            const tbody = document.getElementById("tablaAuditoria");
+            if (!lista.length) {
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#8b949e;padding:20px;">Sin registros de auditoría</td></tr>';
+                return;
+            }
+            tbody.innerHTML = lista.map(a => {
+                let detalle = "—";
+                try {
+                    const d = typeof a.detalle === "string" ? JSON.parse(a.detalle) : a.detalle;
+                    if (d) detalle = Object.entries(d).map(([k,v]) => `${k}: ${v}`).join(", ");
+                } catch(_) {}
+                return `
+                <tr>
+                    <td style="font-size:13px;">${new Date(a.created_at).toLocaleDateString("pt-BR")}<br><small style="color:#8b949e">${new Date(a.created_at).toLocaleTimeString("pt-BR")}</small></td>
+                    <td><strong>${AUDIT_LABELS[a.accion] || a.accion}</strong></td>
+                    <td style="color:#8b949e;font-size:12px;font-family:monospace;">${a.operador || "—"}</td>
+                    <td style="color:#8b949e;font-size:13px;">${a.phone ? a.phone.replace("@s.whatsapp.net","") : "—"}</td>
+                    <td style="color:#8b949e;font-size:12px;">${detalle}</td>
+                </tr>`;
+            }).join("");
+        } catch(e) { console.error("Error auditoría:", e); }
     }
 
     async function cargarRecargas() {
