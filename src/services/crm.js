@@ -50,35 +50,75 @@ function detectarIdioma(texto) {
 // MENSAJES POR IDIOMA
 // ─────────────────────────────────────────
 
-const MSGS = {
+// ─────────────────────────────────────────
+// PLANTILLAS — cargadas desde DB con fallback
+// ─────────────────────────────────────────
+
+// Fallback hardcodeado (si la tabla no existe o no tiene la plantilla)
+const MSGS_DEFAULT = {
     recuperar_30m: {
-        es: (nombre, monto) =>
-            `Hola${nombre ? ` ${nombre}` : ""} 😊 ¿Pudiste hacer el pago de R$${monto}?\n\nEstoy aquí si necesitas ayuda. 👌`,
-        pt: (nombre, monto) =>
-            `Oi${nombre ? ` ${nombre}` : ""} 😊 Conseguiu fazer o pagamento de R$${monto}?\n\nEstou aqui se precisar de ajuda. 👌`
+        es: (nombre, monto) => `Hola${nombre ? ` ${nombre}` : ""} 😊 ¿Pudiste hacer el pago de R$${monto}?\n\nEstoy aquí si necesitas ayuda. 👌`,
+        pt: (nombre, monto) => `Oi${nombre ? ` ${nombre}` : ""} 😊 Conseguiu fazer o pagamento de R$${monto}?\n\nEstou aqui se precisar de ajuda. 👌`
     },
     recuperar_24h: {
-        es: (nombre) =>
-            `Hola${nombre ? ` ${nombre}` : ""} 👋 Las tasas pueden haber cambiado.\n\n¿Quieres una nueva cotización? Solo dime el monto 😊`,
-        pt: (nombre) =>
-            `Oi${nombre ? ` ${nombre}` : ""} 👋 As taxas podem ter mudado.\n\nQuer uma nova cotação? É só me dizer o valor 😊`
+        es: (nombre) => `Hola${nombre ? ` ${nombre}` : ""} 👋 Las tasas pueden haber cambiado.\n\n¿Quieres una nueva cotización? Solo dime el monto 😊`,
+        pt: (nombre) => `Oi${nombre ? ` ${nombre}` : ""} 👋 As taxas podem ter mudado.\n\nQuer uma nova cotação? É só me dizer o valor 😊`
     },
     recuperar_7d: {
-        es: (nombre) =>
-            `Hola${nombre ? ` ${nombre}` : ""} 🇨🇺 Estamos disponibles cuando necesites enviar a Cuba.\n\n¿Alguna novedad? 😊`,
-        pt: (nombre) =>
-            `Oi${nombre ? ` ${nombre}` : ""} 🇨🇺 Estamos disponíveis quando precisar enviar para Cuba.\n\nAlguma novidade? 😊`
+        es: (nombre) => `Hola${nombre ? ` ${nombre}` : ""} 🇨🇺 Estamos disponibles cuando necesites enviar a Cuba.\n\n¿Alguna novedad? 😊`,
+        pt: (nombre) => `Oi${nombre ? ` ${nombre}` : ""} 🇨🇺 Estamos disponíveis quando precisar enviar para Cuba.\n\nAlguma novidade? 😊`
     },
     completado_frecuente: {
-        es: (nombre) =>
-            `¡Gracias${nombre ? ` ${nombre}` : ""}! 🎉 Eres un cliente frecuente — aquí siempre tienes prioridad 💪`,
-        pt: (nombre) =>
-            `Obrigada${nombre ? ` ${nombre}` : ""}! 🎉 Você é um cliente frequente — aqui sempre tem prioridade 💪`
+        es: (nombre) => `¡Gracias${nombre ? ` ${nombre}` : ""}! 🎉 Eres un cliente frecuente — aquí siempre tienes prioridad 💪`,
+        pt: (nombre) => `Obrigada${nombre ? ` ${nombre}` : ""}! 🎉 Você é um cliente frequente — aqui sempre tem prioridade 💪`
     }
 };
 
-function msg(clave, lang, ...args) {
-    return MSGS[clave]?.[lang]?.(...args) || MSGS[clave]?.["es"]?.(...args) || "";
+// Cache de plantillas en memoria (se recarga cada 5 min)
+let _cachePlantillas = {};
+let _cacheTs = 0;
+const CACHE_TTL = 5 * 60 * 1000;
+
+async function cargarPlantillas() {
+    if (Date.now() - _cacheTs < CACHE_TTL && Object.keys(_cachePlantillas).length > 0) {
+        return _cachePlantillas;
+    }
+    try {
+        const r = await pool.query("SELECT id, clave, idioma, texto FROM plantillas");
+        const cache = {};
+        for (const row of r.rows) {
+            if (!cache[row.clave]) cache[row.clave] = {};
+            cache[row.clave][row.idioma] = row.texto;
+        }
+        _cachePlantillas = cache;
+        _cacheTs = Date.now();
+        return cache;
+    } catch {
+        return {};
+    }
+}
+
+// Sustituye variables {nombre} y {monto} en el texto
+function sustituirVariables(texto, nombre, monto) {
+    return texto
+        .replace(/\{nombre\}/g, nombre ? ` ${nombre}` : "")
+        .replace(/\{monto\}/g,  monto  || "");
+}
+
+// msg() — busca en DB primero, fallback a hardcoded
+async function msg(clave, lang, ...args) {
+    const [nombre, monto] = args;
+    const plantillas = await cargarPlantillas();
+    const textoDB = plantillas[clave]?.[lang] || plantillas[clave]?.["es"];
+    if (textoDB) return sustituirVariables(textoDB, nombre, monto);
+    // Fallback
+    return MSGS_DEFAULT[clave]?.[lang]?.(...args) || MSGS_DEFAULT[clave]?.["es"]?.(...args) || "";
+}
+
+// Invalidar cache (llamar después de guardar una plantilla)
+function invalidarCachePlantillas() {
+    _cacheTs = 0;
+    _cachePlantillas = {};
 }
 
 // ─────────────────────────────────────────
@@ -231,7 +271,7 @@ async function onOperacionCompletada(phone, lang, nombre) {
     const esFrecuente = await verificarYMarcarFrecuente(phone);
     if (esFrecuente) {
         try {
-            await enviarMensaje(phone, msg("completado_frecuente", lang, nombre?.split(" ")[0]));
+            await enviarMensaje(phone, await msg("completado_frecuente", lang, nombre?.split(" ")[0]));
         } catch (_) {}
     }
 }
@@ -275,7 +315,7 @@ async function onda30min() {
         try {
             const lang   = c.idioma === "pt" ? "pt" : "es";
             const nombre = c.nombre ? c.nombre.split(" ")[0] : null;
-            await enviarMensaje(c.phone, msg("recuperar_30m", lang, nombre, c.ultimo_monto));
+            await enviarMensaje(c.phone, await msg("recuperar_30m", lang, nombre, c.ultimo_monto));
             await marcarRecordatorio(c.phone, "recuperar_30m");
             console.log(`🔔 [CRM 30m] → ${c.phone}`);
         } catch (e) {
@@ -300,7 +340,7 @@ async function onda24h() {
         try {
             const lang   = c.idioma === "pt" ? "pt" : "es";
             const nombre = c.nombre ? c.nombre.split(" ")[0] : null;
-            await enviarMensaje(c.phone, msg("recuperar_24h", lang, nombre));
+            await enviarMensaje(c.phone, await msg("recuperar_24h", lang, nombre));
             await marcarRecordatorio(c.phone, "recuperar_24h");
             // Si ya mandamos 24h y no responde → abandono
             await actualizarEstadoCRM(c.phone, "abandono");
@@ -326,7 +366,7 @@ async function onda7d() {
         try {
             const lang   = c.idioma === "pt" ? "pt" : "es";
             const nombre = c.nombre ? c.nombre.split(" ")[0] : null;
-            await enviarMensaje(c.phone, msg("recuperar_7d", lang, nombre));
+            await enviarMensaje(c.phone, await msg("recuperar_7d", lang, nombre));
             await marcarRecordatorio(c.phone, "recuperar_7d");
             console.log(`🔔 [CRM 7d] → ${c.phone}`);
         } catch (e) {
@@ -446,6 +486,10 @@ module.exports = {
     // Detección de idioma
     detectarIdioma,
     idioma,
+
+    // Plantillas
+    cargarPlantillas,
+    invalidarCachePlantillas,
 
     // Eventos
     registrarPrimerContacto,
