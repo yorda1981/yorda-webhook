@@ -354,6 +354,155 @@ app.post("/admin/plantillas/:id", adminLimiter, verificarToken, async (req, res)
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ══════════════════════════════════════
+// 1. CENTRO DE CONVERSACIONES
+// Estado en tiempo real de cada cliente
+// ══════════════════════════════════════
+
+app.get("/admin/conversaciones", adminLimiter, verificarToken, async (req, res) => {
+    try {
+        const r = await pool.query(`
+            SELECT
+                c.phone, c.nombre, c.estado, c.estado_crm,
+                c.ultimo_monto, c.tipo_favorito,
+                c.ultima_interaccion, c.pausa_hasta,
+                c.score_confianza, c.idioma,
+                c.notas_internas,
+                c.tarjeta_frecuente, c.banco_detectado,
+                -- Última operación
+                (SELECT status FROM operations WHERE phone = c.phone ORDER BY created_at DESC LIMIT 1) AS ultima_op_status,
+                (SELECT created_at FROM operations WHERE phone = c.phone ORDER BY created_at DESC LIMIT 1) AS ultima_op_fecha
+            FROM customers c
+            WHERE c.ultima_interaccion > NOW() - INTERVAL '7 days'
+            ORDER BY c.ultima_interaccion DESC
+            LIMIT 100
+        `);
+        res.json(r.rows);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ══════════════════════════════════════
+// 2. NOTAS INTERNAS POR CLIENTE
+// ══════════════════════════════════════
+
+app.get("/admin/notas/:phone", adminLimiter, verificarToken, async (req, res) => {
+    try {
+        const r = await pool.query("SELECT notas_internas FROM customers WHERE phone = $1", [req.params.phone]);
+        res.json({ notas: r.rows[0]?.notas_internas || "" });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post("/admin/notas/:phone", adminLimiter, verificarToken, async (req, res) => {
+    try {
+        const { notas } = req.body;
+        await pool.query(
+            "UPDATE customers SET notas_internas = $1, updated_at = NOW() WHERE phone = $2",
+            [notas || "", req.params.phone]
+        );
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ══════════════════════════════════════
+// 14. MODO OPERADOR — pausar/reanudar bot
+// Pausa inmediata sin tiempo fijo (manual)
+// ══════════════════════════════════════
+
+app.post("/admin/pausar/:phone", adminLimiter, verificarToken, async (req, res) => {
+    try {
+        const { minutos = 60 } = req.body;
+        await pool.query(`
+            UPDATE customers
+            SET pausa_hasta = NOW() + ($1 * INTERVAL '1 minute'), updated_at = NOW()
+            WHERE phone = $2
+        `, [minutos, req.params.phone]);
+        res.json({ success: true, hasta: new Date(Date.now() + minutos * 60000) });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post("/admin/reanudar/:phone", adminLimiter, verificarToken, async (req, res) => {
+    try {
+        await pool.query(
+            "UPDATE customers SET pausa_hasta = NULL, updated_at = NOW() WHERE phone = $1",
+            [req.params.phone]
+        );
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Estado de pausa de un cliente
+app.get("/admin/pausa/:phone", adminLimiter, verificarToken, async (req, res) => {
+    try {
+        const r = await pool.query("SELECT pausa_hasta FROM customers WHERE phone = $1", [req.params.phone]);
+        const hasta = r.rows[0]?.pausa_hasta;
+        const activa = hasta && new Date(hasta) > new Date();
+        res.json({ activa: !!activa, hasta: hasta || null });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ══════════════════════════════════════
+// 11. PROMOCIONES PROGRAMADAS
+// ══════════════════════════════════════
+
+app.get("/admin/promociones", adminLimiter, verificarToken, async (req, res) => {
+    try {
+        // Crear tabla si no existe
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS promociones (
+                id SERIAL PRIMARY KEY, titulo VARCHAR(100) NOT NULL,
+                mensaje TEXT NOT NULL, activa BOOLEAN DEFAULT false,
+                inicio_at TIMESTAMPTZ, fin_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        `);
+        const r = await pool.query("SELECT * FROM promociones ORDER BY created_at DESC");
+        res.json(r.rows);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post("/admin/promociones", adminLimiter, verificarToken, async (req, res) => {
+    try {
+        const { titulo, mensaje, activa, inicio_at, fin_at } = req.body;
+        await pool.query(`
+            INSERT INTO promociones (titulo, mensaje, activa, inicio_at, fin_at)
+            VALUES ($1, $2, $3, $4, $5)
+        `, [titulo, mensaje, !!activa, inicio_at || null, fin_at || null]);
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put("/admin/promociones/:id", adminLimiter, verificarToken, async (req, res) => {
+    try {
+        const { titulo, mensaje, activa, inicio_at, fin_at } = req.body;
+        await pool.query(`
+            UPDATE promociones SET titulo=$1, mensaje=$2, activa=$3,
+            inicio_at=$4, fin_at=$5, updated_at=NOW() WHERE id=$6
+        `, [titulo, mensaje, !!activa, inicio_at || null, fin_at || null, req.params.id]);
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete("/admin/promociones/:id", adminLimiter, verificarToken, async (req, res) => {
+    try {
+        await pool.query("DELETE FROM promociones WHERE id = $1", [req.params.id]);
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Promo activa ahora (para que el bot la consulte)
+app.get("/admin/promo-activa", adminLimiter, verificarToken, async (req, res) => {
+    try {
+        const r = await pool.query(`
+            SELECT * FROM promociones
+            WHERE activa = true
+              AND (inicio_at IS NULL OR inicio_at <= NOW())
+              AND (fin_at IS NULL OR fin_at >= NOW())
+            ORDER BY created_at DESC LIMIT 1
+        `);
+        res.json(r.rows[0] || null);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get("/", (req, res) => res.send("YordaBot Online ✅"));
 
 app.listen(PORT, () => console.log(`🚀 Servidor en puerto ${PORT}`));
