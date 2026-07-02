@@ -10,7 +10,8 @@ const pool = require("./db");
 const openaiService = require("./src/services/openai");
 const { obtenerTodos, obtenerCliente } = require("./src/services/customer-memory");
 const { obtenerTodas, confirmarOperacion, obtenerEstadisticas } = require("./src/services/operations");
-const crm = require("./src/services/crm");
+const crm         = require("./src/services/crm");
+const memoryMotor = require("./src/services/memory-motor");
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -252,6 +253,14 @@ app.get("/admin/stats", adminLimiter, verificarToken, async (req, res) => {
 
 app.get("/admin/crm/stats", adminLimiter, verificarToken, async (req, res) => {
     try { res.json(await crm.obtenerEstadisticasCRM()); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get("/admin/motor/stats", adminLimiter, verificarToken, async (req, res) => {
+    try { res.json(await memoryMotor.obtenerEstadisticasMotor()); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get("/admin/motor/perfil/:phone", adminLimiter, verificarToken, async (req, res) => {
+    try { res.json(await memoryMotor.obtenerPerfilCliente(req.params.phone)); } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post("/admin/confirmar-operacion/:id", adminLimiter, verificarToken, async (req, res) => {
