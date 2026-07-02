@@ -40,6 +40,15 @@
         .page-btn:hover { border-color: var(--accent); color: white; }
         .page-btn.active { background: var(--accent); border-color: var(--accent); color: white; }
         .page-info { font-size: 12px; color: #8b949e; }
+        /* Estados de conversación */
+        .estado-badge { display:inline-block; padding:3px 10px; border-radius:20px; font-size:11px; font-weight:700; }
+        .estado-cotizado      { background:rgba(56,189,248,0.15); color:#38bdf8; }
+        .estado-pix           { background:rgba(167,139,250,0.15); color:#a78bfa; }
+        .estado-comprobante   { background:rgba(245,158,11,0.15); color:#f59e0b; }
+        .estado-completado    { background:rgba(74,222,128,0.15); color:#4ade80; }
+        .estado-abandono      { background:rgba(239,68,68,0.15); color:#ef4444; }
+        .estado-nuevo         { background:rgba(139,148,158,0.15); color:#8b949e; }
+        .btn-sm { border:none; padding:5px 12px; border-radius:6px; font-size:12px; font-weight:700; cursor:pointer; }
         /* Búsqueda */
         .search-bar { display: flex; gap: 10px; margin-bottom: 16px; }
         .search-bar input { flex: 1; background: #0b0e1a; border: 1px solid #2d355a; color: white; padding: 10px 16px; border-radius: 10px; font-size: 14px; outline: none; }
@@ -168,6 +177,44 @@
         </div>
     </div>
 
+    <!-- 1. CENTRO DE CONVERSACIONES -->
+    <div class="config-section" style="border-left:5px solid #06b6d4; margin-bottom:24px;">
+        <h3 style="color:#06b6d4;">💬 Centro de Conversaciones <span style="font-size:13px;color:#8b949e;font-weight:400;">(últimos 7 días)</span></h3>
+        <div class="search-bar">
+            <input type="text" id="busquedaConv" placeholder="🔍 Filtrar conversaciones..." oninput="filtrarConversaciones(this.value)">
+        </div>
+        <div class="table-wrapper">
+            <table>
+                <thead><tr><th>Cliente</th><th>Estado</th><th>Monto</th><th>Última actividad</th><th>Bot</th><th>Acciones</th></tr></thead>
+                <tbody id="tablaConversaciones"><tr><td colspan="6" style="text-align:center;color:#8b949e;padding:20px;">Conecta para ver conversaciones</td></tr></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- 11. PROMOCIONES PROGRAMADAS -->
+    <div class="config-section" style="border-left:5px solid #f43f5e; margin-bottom:24px;">
+        <h3 style="color:#f43f5e;">📣 Promociones Programadas</h3>
+        <div id="listaPromociones" style="display:flex;flex-direction:column;gap:12px;margin-bottom:20px;"></div>
+        <div style="background:#0b0e1a;border:1px solid #2d355a;border-radius:12px;padding:20px;">
+            <h4 style="margin:0 0 16px;color:#f43f5e;">+ Nueva Promoción</h4>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+                <div class="input-group"><label>Título</label><input type="text" id="promo_titulo" placeholder="Ej: Promo de Viernes" style="background:#161b33;border:1px solid #2d355a;padding:12px;border-radius:8px;color:white;outline:none;font-size:14px;"></div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                    <div class="input-group"><label>Inicio</label><input type="datetime-local" id="promo_inicio" style="background:#161b33;border:1px solid #2d355a;padding:10px;border-radius:8px;color:white;outline:none;font-size:13px;"></div>
+                    <div class="input-group"><label>Fin</label><input type="datetime-local" id="promo_fin" style="background:#161b33;border:1px solid #2d355a;padding:10px;border-radius:8px;color:white;outline:none;font-size:13px;"></div>
+                </div>
+            </div>
+            <div class="input-group" style="margin-bottom:12px;">
+                <label>Mensaje que verá el cliente</label>
+                <textarea id="promo_mensaje" placeholder="Ej: 🔥 Hoy la tasa está excelente. ¿Aprovechamos?" style="background:#161b33;border:1px solid #2d355a;border-radius:8px;color:white;padding:12px;font-size:14px;font-family:Inter,sans-serif;resize:vertical;min-height:80px;outline:none;"></textarea>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+                <div style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="promo_activa" style="width:16px;height:16px;"><label for="promo_activa" style="cursor:pointer;">Activar ahora</label></div>
+                <button onclick="crearPromocion()" style="background:#f43f5e;color:white;border:none;padding:10px 24px;border-radius:8px;font-weight:700;cursor:pointer;font-size:14px;">Guardar Promoción</button>
+            </div>
+        </div>
+    </div>
+
     <!-- RECARGAS -->
     <div class="config-section" style="border-left:5px solid #3b82f6;">
         <h3 style="color:#3b82f6;">📱 Configuración de Recargas</h3>
@@ -273,6 +320,7 @@
             document.getElementById("statusBadge").style.color = "#4ade80";
 
             cargarOferta(); cargarRecargas(); cargarPlantillas();
+            cargarConversaciones(); cargarPromociones();
             verificarSalud();
 
             const tasas       = await resTasas.json();
@@ -608,6 +656,186 @@
     }
 
     // ── RECARGAS ──────────────────────────────────
+    // ══════════════════════════════════════════
+    // 1. CENTRO DE CONVERSACIONES
+    // ══════════════════════════════════════════
+    let _conversaciones = [];
+
+    async function cargarConversaciones() {
+        if (!token) return;
+        try {
+            const r = await fetch("/admin/conversaciones", { headers: authH() });
+            _conversaciones = await r.json();
+            renderConversaciones(_conversaciones);
+        } catch(e) { console.error("Error conversaciones:", e); }
+    }
+
+    function filtrarConversaciones(q) {
+        if (!q || q.length < 2) { renderConversaciones(_conversaciones); return; }
+        const lower = q.toLowerCase();
+        const filtrado = _conversaciones.filter(c =>
+            (c.nombre||"").toLowerCase().includes(lower) ||
+            (c.phone||"").includes(lower) ||
+            (c.estado_crm||"").includes(lower)
+        );
+        renderConversaciones(filtrado);
+    }
+
+    function estadoBadge(c) {
+        const e = c.estado_crm || c.estado || "nuevo_cliente";
+        const map = {
+            "cotizado":              ["estado-cotizado",    "💬 Cotizado"],
+            "cotizacion_realizada":  ["estado-cotizado",    "💬 Cotizado"],
+            "esperando_pix":         ["estado-pix",         "💸 Esp. PIX"],
+            "aguardando_comprovante":["estado-comprobante", "📎 Esp. Comprobante"],
+            "esperando_comprobante": ["estado-comprobante", "📎 Esp. Comprobante"],
+            "completado":            ["estado-completado",  "✅ Completado"],
+            "abandono":              ["estado-abandono",    "❌ Abandono"],
+        };
+        const [cls, label] = map[e] || ["estado-nuevo", "🆕 Nuevo"];
+        return `<span class="estado-badge ${cls}">${label}</span>`;
+    }
+
+    function tiempoRelativo(fecha) {
+        if (!fecha) return "—";
+        const mins = Math.floor((Date.now() - new Date(fecha)) / 60000);
+        if (mins < 1)   return "ahora";
+        if (mins < 60)  return `hace ${mins} min`;
+        if (mins < 1440) return `hace ${Math.floor(mins/60)}h`;
+        return `hace ${Math.floor(mins/1440)}d`;
+    }
+
+    function renderConversaciones(lista) {
+        const tbody = document.getElementById("tablaConversaciones");
+        if (!lista.length) {
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#8b949e;padding:20px;">Sin conversaciones recientes</td></tr>';
+            return;
+        }
+        tbody.innerHTML = lista.map(c => {
+            const pausado = c.pausa_hasta && new Date(c.pausa_hasta) > new Date();
+            const botLabel = pausado
+                ? '<span style="color:var(--red);font-weight:700;">🔴 Pausado</span>'
+                : '<span style="color:var(--green);font-weight:700;">🟢 Activo</span>';
+            const phone = (c.phone||"").replace("@s.whatsapp.net","").replace("@c.us","");
+            return `<tr>
+                <td><strong>${c.nombre||"Desconocido"}</strong><br><small style="color:#8b949e">${phone}</small></td>
+                <td>${estadoBadge(c)}</td>
+                <td style="color:var(--yellow);">${c.ultimo_monto ? "R$ " + c.ultimo_monto : "—"}</td>
+                <td style="color:#8b949e;font-size:13px;">${tiempoRelativo(c.ultima_interaccion)}</td>
+                <td>${botLabel}</td>
+                <td>
+                    ${pausado
+                        ? `<button class="btn-sm" style="background:var(--green);color:#0b0e1a;" onclick="reanudarBot('${c.phone}')">▶ Reanudar</button>`
+                        : `<button class="btn-sm" style="background:var(--red);color:white;" onclick="pausarBot('${c.phone}')">⏸ Pausar</button>`
+                    }
+                    <button class="btn-sm" style="background:#334155;color:white;margin-left:6px;" onclick="editarNotas('${c.phone}', '${(c.nombre||"").replace(/'/g,"\'")}', \`${(c.notas_internas||"").replace(/`/g,"\`")}\`)">📝</button>
+                </td>
+            </tr>`;
+        }).join("");
+    }
+
+    // ══════════════════════════════════════════
+    // 14. MODO OPERADOR — pausar / reanudar
+    // ══════════════════════════════════════════
+
+    async function pausarBot(phone, minutos = 60) {
+        const min = prompt("¿Cuántos minutos pausar el bot?", "60");
+        if (!min) return;
+        try {
+            await fetch("/admin/pausar/" + phone, { method: "POST", headers: authH(), body: JSON.stringify({ minutos: Number(min) }) });
+            cargarConversaciones();
+        } catch(e) { alert("❌ Error al pausar"); }
+    }
+
+    async function reanudarBot(phone) {
+        try {
+            await fetch("/admin/reanudar/" + phone, { method: "POST", headers: authH() });
+            cargarConversaciones();
+        } catch(e) { alert("❌ Error al reanudar"); }
+    }
+
+    // ══════════════════════════════════════════
+    // 2. NOTAS INTERNAS
+    // ══════════════════════════════════════════
+
+    function editarNotas(phone, nombre, notasActuales) {
+        const nuevaNota = prompt(`Notas internas para ${nombre}:`, notasActuales || "");
+        if (nuevaNota === null) return; // canceló
+        fetch("/admin/notas/" + phone, { method: "POST", headers: authH(), body: JSON.stringify({ notas: nuevaNota }) })
+            .then(r => r.json())
+            .then(d => { if (d.success) { cargarConversaciones(); } })
+            .catch(() => alert("❌ Error guardando nota"));
+    }
+
+    // ══════════════════════════════════════════
+    // 11. PROMOCIONES PROGRAMADAS
+    // ══════════════════════════════════════════
+
+    async function cargarPromociones() {
+        if (!token) return;
+        try {
+            const r = await fetch("/admin/promociones", { headers: authH() });
+            const lista = await r.json();
+            const cont = document.getElementById("listaPromociones");
+            if (!lista.length) { cont.innerHTML = '<p style="color:#8b949e;font-size:13px;">Sin promociones creadas aún.</p>'; return; }
+            cont.innerHTML = lista.map(p => {
+                const activa = p.activa;
+                const ahora  = new Date();
+                const vigente = activa && (!p.fin_at || new Date(p.fin_at) > ahora);
+                return `
+                <div style="background:#0b0e1a;border:1px solid ${vigente?"#f43f5e":"#2d355a"};border-radius:12px;padding:16px;display:flex;gap:16px;align-items:flex-start;">
+                    <div style="flex:1;">
+                        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+                            <strong style="font-size:14px;">${p.titulo}</strong>
+                            ${vigente ? '<span style="background:rgba(244,63,94,0.2);color:#f43f5e;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700;">🔴 ACTIVA</span>' : '<span style="background:#1e293b;color:#8b949e;padding:2px 8px;border-radius:10px;font-size:11px;">Inactiva</span>'}
+                        </div>
+                        <div style="color:#94a3b8;font-size:13px;margin-bottom:6px;">${p.mensaje}</div>
+                        ${p.inicio_at ? `<div style="font-size:11px;color:#8b949e;">⏰ ${new Date(p.inicio_at).toLocaleString("pt-BR")} → ${p.fin_at ? new Date(p.fin_at).toLocaleString("pt-BR") : "Sin fin"}</div>` : ""}
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:6px;">
+                        <button class="btn-sm" style="background:${activa?"#334155":"#f43f5e"};color:white;" onclick="togglePromo(${p.id}, ${!activa})">${activa ? "⏸ Desactivar" : "▶ Activar"}</button>
+                        <button class="btn-sm" style="background:#ef4444;color:white;" onclick="eliminarPromo(${p.id})">🗑</button>
+                    </div>
+                </div>`;
+            }).join("");
+        } catch(e) { console.error("Error promociones:", e); }
+    }
+
+    async function crearPromocion() {
+        const titulo   = document.getElementById("promo_titulo").value.trim();
+        const mensaje  = document.getElementById("promo_mensaje").value.trim();
+        const activa   = document.getElementById("promo_activa").checked;
+        const inicio   = document.getElementById("promo_inicio").value;
+        const fin      = document.getElementById("promo_fin").value;
+        if (!titulo || !mensaje) return alert("Completa título y mensaje");
+        try {
+            const r = await fetch("/admin/promociones", { method: "POST", headers: authH(), body: JSON.stringify({ titulo, mensaje, activa, inicio_at: inicio||null, fin_at: fin||null }) });
+            const d = await r.json();
+            if (d.success) {
+                document.getElementById("promo_titulo").value = "";
+                document.getElementById("promo_mensaje").value = "";
+                document.getElementById("promo_activa").checked = false;
+                cargarPromociones();
+                alert("✅ Promoción creada");
+            }
+        } catch(e) { alert("❌ Error al crear"); }
+    }
+
+    async function togglePromo(id, activa) {
+        try {
+            await fetch("/admin/promociones/" + id, { method: "PUT", headers: authH(), body: JSON.stringify({ activa }) });
+            cargarPromociones();
+        } catch(e) { alert("❌ Error"); }
+    }
+
+    async function eliminarPromo(id) {
+        if (!confirm("¿Eliminar esta promoción?")) return;
+        try {
+            await fetch("/admin/promociones/" + id, { method: "DELETE", headers: authH() });
+            cargarPromociones();
+        } catch(e) { alert("❌ Error"); }
+    }
+
     async function cargarRecargas() {
         if (!token) return;
         try {
