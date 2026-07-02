@@ -5,6 +5,7 @@ require("dotenv").config();
 const { guardarCliente, obtenerCliente }          = require("./customer-memory");
 const { obtenerUltimaOperacion }                   = require("./operations");
 const crm                                          = require("./crm");
+const memoryMotor                                  = require("./memory-motor");
 
 // Flows
 const { detectarImagenUnificada, detectarComprobantePDF, llamarAsistente } = require("../flows/imagen-flow");
@@ -231,7 +232,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
 
         // ── Consulta tasas ──
         if (/a cuanto|a como|tasa.*hoy|cambio.*hoy|hoy.*cambio|hoy.*tasa|cual es la tasa|como esta el cambio|como esta la tasa|cuanto vale|cuanto esta|precio.*hoy|hoy.*precio|tasa de hoy|cambio de hoy/.test(txt))
-            return await consultarTasas(phone) || "";
+            return await consultarTasas(phone, lang) || "";
 
         // ── Estado de operación ──
         if (/estado|mi operacion|mi envio|cuando llega|cuando llego|cuanto falta|ya llego|esta listo/.test(txt)) {
@@ -275,6 +276,65 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         }
 
         if (valorFinal && !montoValido) return "";
+
+        // GRUPO A-1: Detectar urgencia
+        // "es urgente / necesito hoy / ahora mismo / mi familia necesita"
+        if (/urgent|ahora mismo|lo necesito hoy|necesito hoy|para hoy|lo antes posible|inmediatamente|rapido.*envio|envio.*rapido|minha familia precisa|urgente|preciso agora|agora mesmo/.test(txt) &&
+            !imageUrl) {
+            const m = lang === "pt"
+                ? pick([
+                    "Entendido, vamos agilizar 😊\n\nMe diz o valor e a gente resolve agora mesmo.",
+                    "Sem problema, priorizamos sua operação 😊\n\nQual o valor que precisa enviar?",
+                    "Vamos resolver isso agora 😊\n\nMe fala o valor."
+                ])
+                : pick([
+                    "Entendido, vamos a agilizarlo 😊\n\nDime el monto y lo resolvemos ahora mismo.",
+                    "Sin problema, priorizamos tu operación 😊\n\n¿Cuánto necesitas enviar?",
+                    "Vamos a resolverlo ahora 😊\n\nDime el monto."
+                ]);
+            await enviarSeguro(phone, m); return m;
+        }
+
+        // GRUPO A-2: Detectar indecisión — darle espacio, no presionar
+        if (/estoy pensando|no se si|no sé si|talvez|tal vez|quizas|quizás|vou pensar|to pensando|deixa eu ver|déjame pensar|no estoy seguro|nao sei/.test(txt)) {
+            const m = lang === "pt"
+                ? pick([
+                    "Claro, sem pressa 😊 Estou aqui quando precisar.",
+                    "Tudo bem, pode pensar 😊 Se tiver alguma dúvida me fala.",
+                    "Sem problema 😊 Quando quiser, é só me chamar."
+                ])
+                : pick([
+                    "No hay problema 😊 Tómate tu tiempo. Aquí estoy cuando lo necesites.",
+                    "Claro, sin prisa 😊 Si tienes alguna duda me dices.",
+                    "Perfecto 😊 Cuando quieras seguir, aquí estoy."
+                ]);
+            await enviarSeguro(phone, m); return m;
+        }
+
+        // GRUPO B-1: Detectar emociones
+        const emocion = detectarEmocion(txt);
+        if (emocion) {
+            // Guardar última emoción en DB (async, no bloquear)
+            guardarCliente({ phone, ultimaEmocion: emocion }).catch(() => {});
+        }
+
+        // Responder a emociones específicas que no son errores ni urgencia
+        if (/preocupado|preocupada|nervioso|nerviosa|miedo|desconfio|preocupado|ansioso|ansied/.test(txt)) {
+            const m = lang === "pt"
+                ? "Entendo sua preocupação 😊 Trabalhamos todos os dias com famílias cubanas no Brasil. Estou aqui do seu lado durante todo o processo."
+                : "Entiendo tu preocupación 😊 Trabajamos todos los días con familias cubanas en Brasil. Estoy aquí contigo durante todo el proceso.";
+            await enviarSeguro(phone, m); return m;
+        }
+        if (/frustrad|molest|enojad|cansad|harto|chateado|irritad/.test(txt)) {
+            const m = lang === "pt"
+                ? pick(["Entendo 😊 Vamos resolver isso juntos.", "Desculpe o transtorno 😊 Me diz o que aconteceu e a gente resolve."])
+                : pick(["Entiendo 😊 Vamos a resolverlo juntos.", "Disculpa las molestias 😊 Cuéntame qué pasó y lo solucionamos."]);
+            await enviarSeguro(phone, m); return m;
+        }
+
+        // GRUPO B-2: Score de confianza — menos pasos para clientes de alto score
+        const scoreCliente = Number(cliente?.score_confianza || 0);
+        const esClienteVIP = scoreCliente >= 80 || !!cliente?.cliente_frecuente;
 
         // MEJORA 4: Empatía en errores — respuesta calmada y de acompañamiento
         if (/me equivoque|me equivoqué|error|equivocacion|me confundi|me confundí|hice mal|mande mal|envie mal|errei|me enganei/.test(txt)) {
@@ -343,6 +403,14 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
 // HELPERS
 // ─────────────────────────────────────────
 
+function detectarEmocion(txt) {
+    if (/preocupado|preocupada|nervioso|ansioso|miedo|desconfio/.test(txt)) return "preocupado";
+    if (/frustrad|molest|enojad|cansad|harto|chateado/.test(txt)) return "frustrado";
+    if (/gracias|obrigad|feliz|contento|alegre|genial|excelente/.test(txt)) return "agradecido";
+    if (/urgente|rapido|ahora mismo|agora mesmo|preciso agora/.test(txt)) return "urgente";
+    return null;
+}
+
 function extraerMonto(txt, text) {
     const MONTO_MONETARIO = /(?:r\$|reais|reales|real|brl|usd|d[oó]lar(?:es)?|cup|mlc|pesos?|plata|dinero)\s*(\d{2,5})|\b(\d{2,5})\s*(?:r\$|reais|reales|real|brl|usd|d[oó]lar(?:es)?|cup|mlc|pesos?)/i;
     const matchMonetario  = text.match(MONTO_MONETARIO);
@@ -405,6 +473,37 @@ async function manejarSaludo(phone, pushName, cliente, yaSaludado, lang, esEs) {
     const tarjetaGuardada = cliente?.tarjeta_frecuente || cliente?.tarjeta;
     const montoAnterior   = Number(cliente?.ultimo_monto) > 0 ? cliente.ultimo_monto : null;
     const esFrecuente     = !!cliente?.cliente_frecuente;
+    const scoreCliente    = Number(cliente?.score_confianza || 0);
+    const esVIP           = scoreCliente >= 80 || esFrecuente;
+
+    // GRUPO B-2 + C: Cliente que regresa — usar patrones de memoria
+    const ultimaInteraccion = cliente?.ultima_interaccion;
+    const diasInactivo = ultimaInteraccion
+        ? Math.floor((Date.now() - new Date(ultimaInteraccion).getTime()) / (1000 * 60 * 60 * 24))
+        : 0;
+
+    // Obtener anticipación del motor de memoria (background)
+    const anticipacion = await memoryMotor.generarAnticipacion(phone).catch(() => null);
+
+    if (esVIP && diasInactivo >= 30 && !yaSaludado) {
+        const dias = diasInactivo >= 90 ? (lang === "pt" ? "muito tempo" : "mucho tiempo") : (lang === "pt" ? "um tempo" : "un tiempo");
+        const m = lang === "pt"
+            ? `Que bom te ver de volta após ${dias} 😊 Já tenho seus dados. Como posso te ajudar hoje?`
+            : `¡Qué bueno verte de nuevo después de ${dias}! 😊 Ya tengo tus datos. ¿Cómo puedo ayudarte hoy?`;
+        await guardarCliente({ phone, saludoEnviado: true });
+        await enviarSeguro(phone, m); return m;
+    }
+
+    // GRUPO C: Sugerir repetir si el motor detecta patrón claro
+    if (!yaSaludado && anticipacion?.sugerirRepetir && anticipacion?.sugerirMonto && tarjetaGuardada) {
+        const ultimos = String(tarjetaGuardada).slice(-4);
+        const monto   = anticipacion.sugerirMonto;
+        const m = lang === "pt"
+            ? `Que bom te ver 😊 Normalmente você envia R$${monto} para o cartão *••••${ultimos}*. Fazemos o mesmo hoje?`
+            : `¡Qué bueno verte 😊 Normalmente envías R$${monto} a la tarjeta *••••${ultimos}*. ¿Lo repetimos hoy?`;
+        await guardarCliente({ phone, saludoEnviado: true });
+        await enviarSeguro(phone, m); return m;
+    }
 
     if (esFrecuente && tarjetaGuardada && montoAnterior) {
         const ultimos = String(tarjetaGuardada).slice(-4);
