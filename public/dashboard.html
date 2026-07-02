@@ -171,6 +171,17 @@
             </div>
         </div>
 
+        <!-- PLANTILLAS DE MENSAJES -->
+        <div class="config-section" style="border-left: 5px solid #10b981;">
+            <h3 style="color:#10b981;">✏️ Plantillas de Mensajes</h3>
+            <p style="color:#8b949e;font-size:13px;margin-top:-10px;margin-bottom:20px;">
+                Edita los mensajes automáticos del bot. Usa <code style="background:#0b0e1a;padding:2px 6px;border-radius:4px;color:#a78bfa;">{nombre}</code> y <code style="background:#0b0e1a;padding:2px 6px;border-radius:4px;color:#a78bfa;">{monto}</code> como variables.
+            </p>
+            <div id="plantillasContainer" style="display:flex;flex-direction:column;gap:20px;">
+                <p style="color:#8b949e;text-align:center;">Conecta para ver las plantillas</p>
+            </div>
+        </div>
+
         <div class="config-section" id="seccionTasas">
             <h3>💱 Configuración de Tasas</h3>
             <div class="grid-inputs" id="tasasForm">
@@ -296,6 +307,7 @@
                 document.getElementById("statusBadge").style.color = "#4ade80";
                 cargarOferta();
                 cargarRecargas();
+                cargarPlantillas();
 
                 const tasas      = await resTasas.json();
                 const clientes   = await resClientes.json();
@@ -377,6 +389,76 @@
                 alert("❌ Error al guardar");
             } finally {
                 btn.innerText = "Guardar Cambios de Tasas";
+            }
+        }
+
+        // ── PLANTILLAS ──────────────────────────────
+        const LABELS_PLANTILLAS = {
+            "recuperar_30m_es":        "⏰ Recordatorio 30 min · Español",
+            "recuperar_30m_pt":        "⏰ Recordatorio 30 min · Portugués",
+            "recuperar_24h_es":        "📅 Recordatorio 24h · Español",
+            "recuperar_24h_pt":        "📅 Recordatorio 24h · Portugués",
+            "recuperar_7d_es":         "🗓️ Reactivación 7 días · Español",
+            "recuperar_7d_pt":         "🗓️ Reactivación 7 días · Portugués",
+            "completado_frecuente_es": "⭐ Cliente frecuente · Español",
+            "completado_frecuente_pt": "⭐ Cliente frecuente · Portugués"
+        };
+
+        async function cargarPlantillas() {
+            if (!token) return;
+            try {
+                const r = await fetch("/admin/plantillas", { headers: authH() });
+                const lista = await r.json();
+                const container = document.getElementById("plantillasContainer");
+                if (!lista.length) return;
+
+                container.innerHTML = lista.map(p => `
+                    <div style="background:#0b0e1a;border:1px solid #2d355a;border-radius:12px;padding:20px;">
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px;">
+                            <label style="font-size:13px;font-weight:700;color:#10b981;">
+                                ${LABELS_PLANTILLAS[p.id] || p.id}
+                            </label>
+                            <span style="font-size:11px;color:#8b949e;">${p.updated_at ? "Editado: " + new Date(p.updated_at).toLocaleString("pt-BR") : ""}</span>
+                        </div>
+                        <textarea id="ptxt_${p.id}"
+                            style="width:100%;background:#161b33;border:1px solid #2d355a;border-radius:8px;color:white;padding:12px;font-size:13px;font-family:Inter,sans-serif;resize:vertical;min-height:80px;outline:none;box-sizing:border-box;"
+                            onfocus="this.style.borderColor='#10b981'" onblur="this.style.borderColor='#2d355a'"
+                        >${p.texto}</textarea>
+                        <div style="display:flex;justify-content:flex-end;margin-top:10px;">
+                            <button onclick="guardarPlantilla('${p.id}')"
+                                style="background:#10b981;color:#0b0e1a;border:none;padding:8px 20px;border-radius:8px;font-weight:700;cursor:pointer;font-size:13px;"
+                                id="btn_${p.id}">
+                                Guardar
+                            </button>
+                        </div>
+                    </div>`).join("");
+            } catch(e) { console.error("Error cargando plantillas:", e); }
+        }
+
+        async function guardarPlantilla(id) {
+            const texto = document.getElementById("ptxt_" + id)?.value?.trim();
+            if (!texto) return alert("El mensaje no puede estar vacío");
+            const btn = document.getElementById("btn_" + id);
+            if (btn) { btn.innerText = "Guardando..."; btn.disabled = true; }
+            try {
+                const res = await fetch("/admin/plantillas/" + id, {
+                    method: "POST",
+                    headers: authH(),
+                    body: JSON.stringify({ texto })
+                });
+                const d = await res.json();
+                if (d.success) {
+                    if (btn) { btn.innerText = "✅ Guardado"; btn.style.background = "#4ade80"; }
+                    setTimeout(() => {
+                        if (btn) { btn.innerText = "Guardar"; btn.style.background = "#10b981"; btn.disabled = false; }
+                    }, 2000);
+                } else {
+                    alert("❌ Error guardando plantilla");
+                    if (btn) { btn.innerText = "Guardar"; btn.disabled = false; }
+                }
+            } catch(e) {
+                alert("❌ Error de conexión");
+                if (btn) { btn.innerText = "Guardar"; btn.disabled = false; }
             }
         }
 
