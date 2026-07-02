@@ -684,8 +684,8 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
              !txt.includes("enviar") && !txt.includes("mandar") && !txt.includes("quiero") &&
              !txt.includes("quero") && !txt.includes("monto") && !txt.includes("cuanto") &&
              !txt.includes("quanto") && !montoValido
-            ) ||
-            txt.includes("mlc");
+            );
+        // MLC NO deriva a Yordanys — el bot lo cotiza directamente
 
         if (esCubaBrasil) {
             const msg = "Perfecto 😊\n\nYordanys te atenderá enseguida para ayudarte con esa operación.\n\nPor favor aguarda un momento. 👌";
