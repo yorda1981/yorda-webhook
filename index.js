@@ -8,6 +8,21 @@ require("dotenv").config();
 const pool = require("./db");
 
 const openaiService = require("./src/services/openai");
+
+// ─────────────────────────────────────────
+// AUDITORÍA — registrar acciones del admin
+// ─────────────────────────────────────────
+async function registrarAuditoria(accion, req, detalle = null, phone = null) {
+    try {
+        const ip = req?.ip || req?.headers?.["x-forwarded-for"] || "unknown";
+        await pool.query(
+            "INSERT INTO audit_logs (accion, operador, detalle, phone) VALUES ($1, $2, $3, $4)",
+            [accion, ip, detalle ? JSON.stringify(detalle) : null, phone || null]
+        );
+    } catch (e) {
+        console.warn("⚠️ Auditoría:", e.message);
+    }
+}
 const { obtenerTodos, obtenerCliente } = require("./src/services/customer-memory");
 const { obtenerTodas, confirmarOperacion, obtenerEstadisticas } = require("./src/services/operations");
 const crm         = require("./src/services/crm");
@@ -232,6 +247,7 @@ app.post("/admin/tasas", adminLimiter, verificarToken, async (req, res) => {
                 updated_at = NOW()
             WHERE id = 1
         `, [brl_0, brl_100, brl_500, brl_1000, usd1, usd2, mlc]);
+        await registrarAuditoria("cambiar_tasas", req, { brl_0, brl_100, brl_500, brl_1000, usd1, usd2, mlc });
         res.json({ success: true });
     } catch (e) {
         console.error("❌ ERROR TASAS:", e);
@@ -276,6 +292,11 @@ app.post("/admin/confirmar-operacion/:id", adminLimiter, verificarToken, async (
         } catch (err) {
             console.error("❌ Error enviando WhatsApp:", err.message);
         }
+        // Auditoría
+        await registrarAuditoria("confirmar_operacion", req,
+            { operacion_id: req.params.id, monto: operacion.monto, phone: operacion.phone },
+            operacion.phone
+        );
         res.json({ success: true });
     } catch (e) {
         res.status(500).json({ success: false, error: e.message });
@@ -416,6 +437,7 @@ app.post("/admin/pausar/:phone", adminLimiter, verificarToken, async (req, res) 
             SET pausa_hasta = NOW() + ($1 * INTERVAL '1 minute'), updated_at = NOW()
             WHERE phone = $2
         `, [minutos, req.params.phone]);
+        await registrarAuditoria("pausar_bot", req, { minutos }, req.params.phone);
         res.json({ success: true, hasta: new Date(Date.now() + minutos * 60000) });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -426,6 +448,7 @@ app.post("/admin/reanudar/:phone", adminLimiter, verificarToken, async (req, res
             "UPDATE customers SET pausa_hasta = NULL, updated_at = NOW() WHERE phone = $1",
             [req.params.phone]
         );
+        await registrarAuditoria("reanudar_bot", req, null, req.params.phone);
         res.json({ success: true });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -500,6 +523,49 @@ app.get("/admin/promo-activa", adminLimiter, verificarToken, async (req, res) =>
             ORDER BY created_at DESC LIMIT 1
         `);
         res.json(r.rows[0] || null);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ══════════════════════════════════════
+// 17. AUDITORÍA
+// ══════════════════════════════════════
+
+app.get("/admin/auditoria", adminLimiter, verificarToken, async (req, res) => {
+    try {
+        const limite = Math.min(Number(req.query.limit) || 50, 200);
+        const r = await pool.query(`
+            SELECT * FROM audit_logs
+            ORDER BY created_at DESC
+            LIMIT $1
+        `, [limite]);
+        res.json(r.rows);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ══════════════════════════════════════
+// 8. HISTORIAL DE COMPROBANTES
+// ══════════════════════════════════════
+
+app.get("/admin/comprobantes", adminLimiter, verificarToken, async (req, res) => {
+    try {
+        const r = await pool.query(`
+            SELECT c.*, cu.nombre
+            FROM comprobantes c
+            LEFT JOIN customers cu ON cu.phone = c.phone
+            ORDER BY c.created_at DESC
+            LIMIT 100
+        `);
+        res.json(r.rows);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get("/admin/comprobantes/:phone", adminLimiter, verificarToken, async (req, res) => {
+    try {
+        const r = await pool.query(
+            "SELECT * FROM comprobantes WHERE phone = $1 ORDER BY created_at DESC LIMIT 20",
+            [req.params.phone]
+        );
+        res.json(r.rows);
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
