@@ -55,6 +55,21 @@ async function enviarPIX(phone, cliente, esEs) {
         return msg;
     }
     const esRecarga = cliente?.tipo_favorito === "recarga_etecsa";
+
+    // SEGURIDAD: si el cliente no envió tarjeta en esta sesión (cliente.tarjeta = null)
+    // pero tiene tarjeta_frecuente histórica → mostrarla y pedir confirmación
+    // Nunca asumir silenciosamente que es la correcta
+    if (!esRecarga && !cliente?.tarjeta && cliente?.tarjeta_frecuente) {
+        const ultimos = String(cliente.tarjeta_frecuente).slice(-4);
+        const lang    = cliente?.idioma === "pt" ? "pt" : "es";
+        const msg     = lang === "pt"
+            ? `Tenho um cartão guardado *••••${ultimos}*. Vamos usar esse ou você quer enviar outro? 💳`
+            : `Tengo una tarjeta guardada *••••${ultimos}*. ¿Usamos esa o quieres enviar otra? 💳`;
+        await guardarCliente({ phone, estado: "seleccionando_tarjeta", fechaEstado: new Date().toISOString() });
+        await enviarSeguro(phone, msg);
+        return msg;
+    }
+
     if (!esRecarga && !cliente?.tarjeta && !cliente?.tarjeta_frecuente) {
         const msg = esEs
             ? "Solo me falta la tarjeta de destino 💳\n\nEnvíame una foto o los 16 dígitos."
@@ -105,83 +120,99 @@ async function _enviarPIXFinal(phone, cliente, esEs) {
 
 async function intentarCompletarOperacion(phone, pushName, cliente, esEs) {
     if (!cliente) return false;
+
     const esRecarga        = cliente.tipo_favorito === "recarga_etecsa";
-    const tieneTarjeta     = !!(cliente.tarjeta || cliente.tarjeta_frecuente);
+    const lang             = cliente.idioma === "pt" ? "pt" : "es";
+
+    // ── Resolver monto ──────────────────────────────────────────
+    // Prioridad: ultimo_monto → valor_comprobante → null
+    let monto = Number(cliente.ultimo_monto) > 0 ? Number(cliente.ultimo_monto) : null;
+    if (!monto && Number(cliente.valor_comprobante) > 0) {
+        monto = Number(cliente.valor_comprobante);
+        await guardarCliente({ phone, monto });
+        cliente = await obtenerCliente(phone);
+    }
+
+    // ── Resolver tarjeta ────────────────────────────────────────
+    // SEGURIDAD: solo usar tarjeta si el cliente la envió en esta sesión
+    // (cliente.tarjeta = enviada ahora, tarjeta_frecuente = histórica)
+    // NUNCA completar operación con tarjeta_frecuente sin confirmación explícita
+    const tarjeta = cliente.tarjeta || null;
+
+    // ── Resolver tipo ────────────────────────────────────────────
+    if (!cliente.tipo_favorito && tarjeta) {
+        await guardarCliente({ phone, tipo: "brl_cup" });
+        cliente = await obtenerCliente(phone);
+    }
+
+    const tieneMonto       = !!monto;
+    const tieneTarjeta     = !!tarjeta || esRecarga;
     const tieneComprobante = !!cliente.comprobante_pendiente;
 
-    if (tieneTarjeta && tieneComprobante && !cliente.ultimo_monto) {
-        const montoComp = Number(cliente.valor_comprobante);
-        if (montoComp > 0) {
-            await guardarCliente({ phone, monto: montoComp, tipo: cliente.tipo_favorito || "brl_cup" });
-            const cli2 = await obtenerCliente(phone);
-            return await intentarCompletarOperacion(phone, pushName, cli2, esEs);
-        }
-    }
-
-    const tieneMonto = Number(cliente.ultimo_monto) > 0;
-
-    if (tieneTarjeta && tieneComprobante && !cliente.tipo_favorito) {
-        await guardarCliente({ phone, tipo: "brl_cup" });
-        const cli2 = await obtenerCliente(phone);
-        return await intentarCompletarOperacion(phone, pushName, cli2, esEs);
-    }
-
-    if (!tieneMonto || !tieneComprobante || (!tieneTarjeta && !esRecarga)) {
-        if (!tieneMonto) {
-            await enviarSeguro(phone, esEs ? "¿Cuánto vas a enviar? 😊" : "Quanto vai enviar? 😊");
-            return false;
-        }
-        if (!tieneTarjeta && !esRecarga) {
-            await enviarSeguro(phone, esEs
-                ? "Solo me falta la tarjeta de destino 💳\n\nEnvíame foto o los 16 dígitos."
-                : "Só falta o cartão 💳\n\nFoto ou 16 dígitos."
-            );
-            return false;
-        }
+    // ── Faltan datos — pedir solo lo que falta ──────────────────
+    if (!tieneMonto && !tieneComprobante) {
+        // No tiene nada — pedir monto
+        const msg = lang === "pt" ? "Quanto vai enviar? 😊" : "¿Cuánto vas a enviar? 😊";
+        await enviarSeguro(phone, msg);
         return false;
     }
 
-    const yaExiste = await existeOperacionPendiente(phone, cliente.ultimo_monto);
+    if (!tieneMonto && tieneComprobante) {
+        // Tiene comprobante pero no monto — el OCR no detectó el valor
+        const msg = lang === "pt"
+            ? "Recebi o comprovante 📎 Mas não consegui ler o valor. ¿Qual o valor que você pagou?"
+            : "Recibí el comprobante 📎 Pero no pude leer el valor. ¿Cuánto pagaste?";
+        await enviarSeguro(phone, msg);
+        return false;
+    }
+
+    if (tieneMonto && !tieneComprobante && !tieneTarjeta) {
+        // Tiene monto pero no tarjeta ni comprobante — pedir tarjeta
+        const msg = lang === "pt"
+            ? "Solo me falta o cartão de destino 💳\n\nManda uma foto ou os 16 dígitos."
+            : "Solo me falta la tarjeta de destino 💳\n\nEnvíame foto o los 16 dígitos.";
+        await enviarSeguro(phone, msg);
+        return false;
+    }
+
+    if (tieneMonto && tieneTarjeta && !tieneComprobante) {
+        // Tiene monto y tarjeta — solo falta comprobante (ya debería tener PIX)
+        return false;
+    }
+
+    if (!tieneTarjeta && tieneComprobante && tieneMonto) {
+        // Tiene comprobante y monto pero no tarjeta
+        const msg = lang === "pt"
+            ? "Comprovante recebido ✅\n\nSó falta o cartão de destino 💳\n\nManda uma foto ou os 16 dígitos."
+            : "Comprobante recibido ✅\n\nSolo falta la tarjeta de destino 💳\n\nEnvíame foto o los 16 dígitos.";
+        await enviarSeguro(phone, msg);
+        return false;
+    }
+
+    // ── Tenemos todo — completar operación ──────────────────────
+    const yaExiste = await existeOperacionPendiente(phone, monto);
     if (yaExiste) return true;
 
-    const resultado = await calcularOperacion({ tipo: cliente.tipo_favorito, valor: cliente.ultimo_monto });
+    const resultado = await calcularOperacion({ tipo: cliente.tipo_favorito || "brl_cup", valor: monto });
 
     await guardarCliente({ phone, comprobantePendiente: false });
     const operacion = await agregarOperacion({
         phone,
         nombre:  pushName || cliente.nombre || "Cliente",
-        monto:   cliente.ultimo_monto,
+        monto,
         cup:     resultado?.cup || 0,
-        tarjeta: cliente.tarjeta || cliente.tarjeta_frecuente || "",
+        tarjeta: tarjeta || "",
         titular: cliente.titular || cliente.titular_frecuente || "",
         banco:   cliente.banco_detectado || "",
-        tipo:    cliente.tipo_favorito
+        tipo:    cliente.tipo_favorito || "brl_cup"
     });
 
     const opId      = operacion?.id ? `#${operacion.id} ` : "";
-    const tarjetaRaw = cliente.tarjeta || cliente.tarjeta_frecuente || "-";
-    const tarjetaFmt = tarjetaRaw !== "-" ? tarjetaRaw.replace(/(.{4})/g, "$1 ").trim() : "-";
+    const tarjetaFmt = tarjeta && tarjeta !== "-"
+        ? tarjeta.replace(/(.{4})/g, "$1 ").trim()
+        : "-";
 
-    const msgOperacion = `📥 *OPERACIÓN ${opId}PENDIENTE*
-
-👤 Cliente: ${pushName || cliente.nombre}
-
-📱 Teléfono: ${phone}
-
-💵 Enviado: R$${cliente.ultimo_monto}
-
-🇨🇺 Recibe: ${fmt(resultado?.cup || 0)} CUP
-
-🏦 Banco: ${cliente.banco_detectado || "-"}
-
-💳 Tarjeta:
-${tarjetaFmt}
-
-👤 Titular:
-${cliente.titular || cliente.titular_frecuente || "-"}
-
-⏳ Estado:
-Pendiente de validación`;
+    const msgOperacion = `📥 *OPERACIÓN ${opId}PENDIENTE*\n\n👤 Cliente: ${pushName || cliente.nombre}\n\n📱 Teléfono: ${phone}\n\n💵 Enviado: R$${monto}\n\n🇨🇺 Recibe: ${fmt(resultado?.cup || 0)} CUP\n\n🏦 Banco: ${cliente.banco_detectado || "-"}\n\n💳 Tarjeta:\n${tarjetaFmt}\n\n👤 Titular:\n${cliente.titular || cliente.titular_frecuente || "-"}\n\n⏳ Estado:\nPendiente de validación`;
 
     await enviarSeguro(phone, msgOperacion);
 
