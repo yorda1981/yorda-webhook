@@ -232,11 +232,43 @@ async function cotizarCUPInverso(phone, pushName, montoCUP, lang) {
 // CONSULTA DE TASAS GENERAL
 // ─────────────────────────────────────────
 
-async function consultarTasas(phone) {
+// Frases vendedoras sutiles — varían para no sonar repetitivas
+const NUDGE_TASA_ES = [
+    "La tasa de hoy está bastante buena 😊 ¿Te ayudo a hacer el envío ahora?",
+    "Si quieres aprovechar esta tasa, puedo preparar la operación ahora mismo.",
+    "Las tasas cambian a diario — si decides hoy puedo procesarlo enseguida 😊"
+];
+const NUDGE_TASA_PT = [
+    "A taxa de hoje está bem boa 😊 Quer que eu prepare o envio agora?",
+    "Se quiser aproveitar essa taxa, posso preparar a operação agora mesmo.",
+    "As taxas mudam todo dia — se decidir hoje processo na hora 😊"
+];
+
+async function consultarTasas(phone, lang = "es") {
     const t = await leerTasas();
     if (!t) return null;
-    const msg = `Tasas de hoy 💱\n\n🇧🇷 Reales → CUP\nHasta R$99: ${t.brl_0} CUP\nR$100–499: ${t.brl_100} CUP\nR$500–999: ${t.brl_500} CUP\nR$1000+: ${t.brl_1000} CUP\n\n💵 USD Clásica/Prepago: ${t.usd1} CUP${t.mlc ? `\n💳 MLC: ${t.mlc} CUP` : ""}\n\n¿Cuánto quieres enviar? 😊`;
+    const msg = `Tasas de hoy 💱
+
+🇧🇷 Reales → CUP
+Hasta R$99: ${t.brl_0} CUP
+R$100–499: ${t.brl_100} CUP
+R$500–999: ${t.brl_500} CUP
+R$1000+: ${t.brl_1000} CUP
+
+💵 USD Clásica/Prepago: ${t.usd1} CUP${t.mlc ? `
+💳 MLC: ${t.mlc} CUP` : ""}
+
+¿Cuánto quieres enviar? 😊`;
     await enviarSeguro(phone, msg);
+    // GRUPO A-3: IA vendedora — nudge sutil 2 segundos después de la tasa
+    setTimeout(async () => {
+        try {
+            const nudge = lang === "pt"
+                ? NUDGE_TASA_PT[Math.floor(Math.random() * NUDGE_TASA_PT.length)]
+                : NUDGE_TASA_ES[Math.floor(Math.random() * NUDGE_TASA_ES.length)];
+            await enviarSeguro(phone, nudge, 800);
+        } catch (_) {}
+    }, 2500);
     return msg;
 }
 
