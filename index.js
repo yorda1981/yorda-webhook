@@ -218,7 +218,7 @@ app.get("/admin/tasas", adminLimiter, verificarToken, async (req, res) => {
 
 app.post("/admin/tasas", adminLimiter, verificarToken, async (req, res) => {
     try {
-        const { brl_0, brl_100, brl_500, brl_1000, usd1, usd2 } = req.body;
+        const { brl_0, brl_100, brl_500, brl_1000, usd1, usd2, mlc } = req.body;
         await pool.query(`
             UPDATE rates SET
                 brl_0    = COALESCE($1, brl_0),
@@ -227,9 +227,10 @@ app.post("/admin/tasas", adminLimiter, verificarToken, async (req, res) => {
                 brl_1000 = COALESCE($4, brl_1000),
                 usd1     = COALESCE($5, usd1),
                 usd2     = COALESCE($6, usd2),
+                mlc      = COALESCE($7, mlc),
                 updated_at = NOW()
             WHERE id = 1
-        `, [brl_0, brl_100, brl_500, brl_1000, usd1, usd2]);
+        `, [brl_0, brl_100, brl_500, brl_1000, usd1, usd2, mlc]);
         res.json({ success: true });
     } catch (e) {
         console.error("❌ ERROR TASAS:", e);
