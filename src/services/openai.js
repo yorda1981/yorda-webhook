@@ -253,7 +253,6 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         }
 
         // FIX 6: BRL→CUP — NO disparar si el cliente está esperando comprobante
-        // Un cliente en aguardando_comprovante que manda un número no debe recibir cotización
         const esMonedaNacional = /moneda nacional|en cup\b|a cup\b|pesos cubanos|peso cubano/.test(txt);
         const estadoBloquea    = cliente?.estado === "aguardando_comprovante" ||
                                   cliente?.estado === "aguardando_numero_recarga";
@@ -261,10 +260,41 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             (!estadoBloquea && !!cliente?.estado) ||
             /enviar|mandar|envio|cotiz|transfer|pagar|monto|quant|cuant|quanto|quiero/.test(txt) ||
             esMonedaNacional;
-        if (montoValido && hayContextoBRL && !esUSD && !esMLC && !estadoBloquea)
+        if (montoValido && hayContextoBRL && !esUSD && !esMLC && !estadoBloquea) {
+            // MEJORA 2: beat de procesamiento antes de cotizar — sensación humana
+            const montoAnteriorCot = Number(cliente?.ultimo_monto);
+            const esMontoNuevo     = !montoAnteriorCot || Math.abs(montoAnteriorCot - valorFinal) > 1;
+            const hayIntencion     = /enviar|mandar|cotiz|quiero|necesito|quero|preciso/.test(txt);
+            if (esMontoNuevo && hayIntencion && valorFinal >= 50) {
+                const beat = lang === "pt"
+                    ? pick(["Entendido 👍 Deixa eu calcular o valor que vai chegar em Cuba...", "Certo 😊 Calculando agora..."])
+                    : pick(["Entendido 👍 Déjame calcular cuánto llega a Cuba...", "Perfecto 😊 Calculando ahora..."]);
+                await enviarSeguro(phone, beat, 600);
+            }
             return await cotizarBRL(phone, pushName, valorFinal, lang) || "";
+        }
 
         if (valorFinal && !montoValido) return "";
+
+        // MEJORA 4: Empatía en errores — respuesta calmada y de acompañamiento
+        if (/me equivoque|me equivoqué|error|equivocacion|me confundi|me confundí|hice mal|mande mal|envie mal|errei|me enganei/.test(txt)) {
+            const m = lang === "pt"
+                ? pick(["Não tem problema, vamos resolver juntos 😊 Me conta o que aconteceu.", "Tudo bem, sem estresse 😊 Me diz o que aconteceu e verificamos."])
+                : pick(["No pasa nada, lo revisamos juntos 😊 Cuéntame qué pasó.", "Tranquilo, sin problema 😊 Dime qué ocurrió y lo solucionamos."]);
+            await enviarSeguro(phone, m); return m;
+        }
+        if (/envie menos|envié menos|mande menos|pague menos|paguei menos|valor diferente|monto diferente/.test(txt)) {
+            const m = lang === "pt"
+                ? "Obrigada por avisar 😊 Vou verificar esse pagamento. Me manda o comprovante quando puder."
+                : "Gracias por avisar 😊 Voy a revisar ese pago. Mándame el comprobante cuando puedas.";
+            await enviarSeguro(phone, m); return m;
+        }
+        if (/es seguro|é seguro|confiable|confiavel|fraude|estafa|desconfio|desconfío/.test(txt)) {
+            const m = lang === "pt"
+                ? "Sim, é seguro 😊 Trabalhamos todos os dias com envios entre Brasil e Cuba. Se tiver qualquer dúvida durante o processo, estou aqui passo a passo."
+                : "Sí, es seguro 😊 Trabajamos todos los días con envíos entre Brasil y Cuba. Si tienes cualquier duda durante el proceso, te acompaño paso a paso.";
+            await enviarSeguro(phone, m); return m;
+        }
 
         // ── Cuba sin monto ──
         if (txt.includes("cuba") && /dinero|enviar|mandar|pasar|plata|remesa/.test(txt)) {
@@ -370,6 +400,37 @@ async function manejarSaludo(phone, pushName, cliente, yaSaludado, lang, esEs) {
         const m = pickL(ESPERA_COMPROBANTE_ES, ESPERA_COMPROBANTE_PT, lang);
         await enviarSeguro(phone, m); return "";
     }
+
+    // MEJORA 1: Memoria natural — recordar tarjeta y monto anteriores
+    const tarjetaGuardada = cliente?.tarjeta_frecuente || cliente?.tarjeta;
+    const montoAnterior   = Number(cliente?.ultimo_monto) > 0 ? cliente.ultimo_monto : null;
+    const esFrecuente     = !!cliente?.cliente_frecuente;
+
+    if (esFrecuente && tarjetaGuardada && montoAnterior) {
+        const ultimos = String(tarjetaGuardada).slice(-4);
+        const m = lang === "pt"
+            ? `Que bom te ver de novo 😊
+
+Da última vez enviaste R$${montoAnterior} para o cartão *••••${ultimos}*. Vamos fazer o mesmo hoje?`
+            : `¡Qué bueno verte de nuevo 😊
+
+La última vez enviaste R$${montoAnterior} a la tarjeta *••••${ultimos}*. ¿Hacemos lo mismo hoy?`;
+        await enviarSeguro(phone, m); return m;
+    }
+    if (esFrecuente && tarjetaGuardada) {
+        const ultimos = String(tarjetaGuardada).slice(-4);
+        const m = lang === "pt"
+            ? `Olá de novo 😊 Já tenho seu cartão *••••${ultimos}* guardado. Quanto vai enviar hoje?`
+            : `¡Hola de nuevo 😊 Ya tengo tu tarjeta *••••${ultimos}* guardada. ¿Cuánto vas a enviar hoy?`;
+        await enviarSeguro(phone, m); return m;
+    }
+    if (montoAnterior && !esFrecuente) {
+        const m = lang === "pt"
+            ? pick([`Da última vez enviaste R$${montoAnterior}. Vai ser o mesmo valor hoje? 😊`, `Quanto quer enviar hoje? 😊`])
+            : pick([`La última vez enviaste R$${montoAnterior}. ¿El mismo monto hoy? 😊`, `¿Cuánto quieres enviar? 😊`]);
+        await enviarSeguro(phone, m); return m;
+    }
+
     const m = lang === "pt"
         ? pick(["Quanto quer enviar? 😊", "O que precisa hoje? 😊"])
         : pick(["¿Cuánto quieres enviar? 😊", "¿En qué te ayudo? 😊"]);
