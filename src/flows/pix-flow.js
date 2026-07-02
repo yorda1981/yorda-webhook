@@ -1,6 +1,7 @@
 "use strict";
 
-const pool = require("../../db");
+const pool        = require("../../db");
+const memoryMotor = require("../services/memory-motor");
 const { guardarCliente, obtenerCliente }                                          = require("../services/customer-memory");
 const { agregarOperacion, existeOperacionPendiente, obtenerPendienteCliente }     = require("../services/operations");
 const { calcularOperacion }                                                        = require("../services/calculator");
@@ -189,6 +190,23 @@ Pendiente de validación`;
     else console.warn("⚠️ ADMIN_PHONE no configurado");
 
     await etiquetarNuevoPedido(phone);
+
+    // GRUPO B — Actualizar score de confianza al completar operación
+    try {
+        await pool.query(`
+            UPDATE customers SET
+                score_confianza = LEAST(100, COALESCE(score_confianza, 0) + 10),
+                ops_completadas = COALESCE(ops_completadas, 0) + 1,
+                updated_at = NOW()
+            WHERE phone = $1
+        `, [phone]);
+    } catch (_) {}
+
+    // GRUPO C — Actualizar motor de memoria comercial (background)
+    const fechaCotPrevia = cliente?.fecha_cotizacion;
+    memoryMotor.actualizarPatrones(phone).catch(() => {});
+    memoryMotor.actualizarVelocidadDecision(phone, fechaCotPrevia).catch(() => {});
+
     await limpiarSesion(phone);
     return true;
 }
