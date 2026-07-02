@@ -1109,6 +1109,52 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             return "";
         }
 
+        // — Cotización MLC
+        // "quiero enviar 100 mlc", "100 mlc cuanto es", "precio del mlc"
+        const esMLC = txt.includes("mlc");
+        if (esMLC && montoValido) {
+            const rMlc = await calcularOperacion({ tipo: "mlc", valor: valorFinal });
+            if (rMlc && rMlc.tasa > 0) {
+                const ofertaMlc = await leerOferta();
+                const ofertaMsgMlc = ofertaMlc ? `\n\n🔥 *OFERTA:* ${ofertaMlc}` : "";
+                const resMlc = lang === "pt"
+                    ? `💳 ${valorFinal} MLC = ${fmt(rMlc.cup)} CUP 🇨🇺${ofertaMsgMlc}\n\n${pickL(CIERRES_COT, CIERRES_COT_PT, lang)}`
+                    : `💳 ${valorFinal} MLC = ${fmt(rMlc.cup)} CUP 🇨🇺${ofertaMsgMlc}\n\n${pickL(CIERRES_COT, CIERRES_COT_PT, lang)}`;
+                await guardarCliente({
+                    phone, nombre: pushName, monto: valorFinal, tipo: "mlc",
+                    estado: "cotizacion_realizada",
+                    fechaEstado: new Date().toISOString(),
+                    fechaCotizacion: new Date().toISOString()
+                });
+                await crm.onCotizacion(phone, lang);
+                await enviarSeguro(phone, resMlc);
+                return resMlc;
+            } else {
+                // MLC no configurado aún
+                const msgMlcNA = lang === "pt"
+                    ? "O MLC não está disponível no momento. Me diz quanto quer em reais ou USD 😊"
+                    : "El MLC no está disponible por ahora. Dime cuánto quieres en reales o USD 😊";
+                await enviarSeguro(phone, msgMlcNA);
+                return msgMlcNA;
+            }
+        }
+
+        // Consulta precio MLC sin monto
+        if (esMLC && !montoValido) {
+            try {
+                const pool2 = require("../../db");
+                const rt = await pool2.query("SELECT mlc FROM rates LIMIT 1");
+                const tasaMlc = Number(rt.rows[0]?.mlc || 0);
+                if (tasaMlc > 0) {
+                    const msgMlc = lang === "pt"
+                        ? `💳 MLC hoje: *${tasaMlc} CUP* por MLC\n\nQual o valor que quer enviar? 😊`
+                        : `💳 MLC hoy: *${tasaMlc} CUP* por MLC\n\n¿Cuánto quieres enviar? 😊`;
+                    await enviarSeguro(phone, msgMlc);
+                    return msgMlc;
+                }
+            } catch(e) { console.error("❌ MLC tasa:", e.message); }
+        }
+
         // — Cálculo inverso: CUP → Reales
         // "85 mil cup cuanto es en reales", "quiero que lleguen 100 mil cuanto pago"
         // Detectar monto en CUP + intención de saber cuántos reales se necesitan
