@@ -623,8 +623,16 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         const yaSaludado = !!cliente?.saludo_enviado;
 
         // ── Idioma y primer contacto CRM ──
-        const lang = crm.detectarIdioma(text);
-        crm.registrarPrimerContacto(phone, pushName, lang).catch(() => {});
+        const langDetectado = crm.detectarIdioma(text);
+        crm.registrarPrimerContacto(phone, pushName, langDetectado).catch(() => {});
+        // Preferir idioma guardado en DB — evita que un mensaje ambiguo
+        // cambie el idioma de un cliente que ya lo tenía definido.
+        const langGuardado = cliente?.idioma;
+        const lang = langGuardado || langDetectado;
+        // Actualizar si detectamos idioma diferente con confianza
+        if (langDetectado && langDetectado !== langGuardado) {
+            crm.actualizarEstadoCRM(phone, cliente?.estado_crm || "nuevo_cliente", langDetectado).catch(() => {});
+        }
 
         await guardarCliente({ phone, ultimaInteraccion: new Date().toISOString() });
 
@@ -789,7 +797,10 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         const hayImagen   = !!imageUrl;
         const esNumero    = /^\d+([.,]\d{1,2})?$/.test(txt.trim());
         const esSolo16    = txt.replace(/\D/g,"").length === 16;
-        const esConfirma  = confirmaOperacion.includes(txt.trim());
+        const esConfirma  = confirmaOperacion.includes(txt.trim()) ||
+            // "ok te voy a mandar 100", "voy a enviar 200", "te mando 150 reais"
+            /\b(voy a|vou) (mandar|enviar|pagar|transferir)\b/.test(txt) ||
+            /\b(te|le) (mando|envio|pago|transfiero)\b/.test(txt);
 
         // Pasar solo si hay gatillo, negocio, estado activo, imagen, número o confirmación
         const debeResponder = hayGatillo || hayNegocio || hayEstado || hayImagen || esNumero || esSolo16 || esConfirma;
@@ -1000,9 +1011,22 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                 if (completado) return "";
             }
 
-            const msg = cli2.ultimo_monto
-                ? `¡Tarjeta guardada! 💳\n\n¿Te envío el PIX para pagar R$${cli2.ultimo_monto}?`
-                : pickL(CONFIRMA_TARJETA_SIN_MONTO, CONFIRMA_TARJETA_SIN_MONTO_PT, lang);
+            if (cli2.ultimo_monto && Number(cli2.ultimo_monto) > 0) {
+                // Ya tenía monto → ir directo al PIX sin preguntar de nuevo
+                await guardarCliente({
+                    phone,
+                    estado: "aguardando_comprovante",
+                    fechaEstado: new Date().toISOString(),
+                    fechaPix: new Date().toISOString()
+                });
+                const msgTarjeta = lang === "pt"
+                    ? `Cartão salvo! 💳\n\nVou te mandar o PIX para pagar R$${cli2.ultimo_monto} 👇`
+                    : `¡Tarjeta guardada! 💳\n\nTe envío el PIX para pagar R$${cli2.ultimo_monto} 👇`;
+                await enviarSeguro(phone, msgTarjeta);
+                return await enviarPIX(phone, cli2, esEs);
+            }
+            // Sin monto previo → preguntar
+            const msg = pickL(CONFIRMA_TARJETA_SIN_MONTO, CONFIRMA_TARJETA_SIN_MONTO_PT, lang);
             await enviarSeguro(phone, msg);
             return msg;
         }
@@ -1032,9 +1056,16 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
 
         // — Quiere pagar / PIX directo
         const quierePagar =
-            /^(pix|pasame (el )?pix|enviame (el )?pix|manda(me)? (el )?pix|envia(me)? (el )?pix|quiero (pagar|hacerlo)|voy a pagar|fazer pix|hacer pix|manda pix|envia pix|send pix)$/.test(txt.trim()) ||
+            // mensajes cortos directos
+            /^(pix|pasame (el )?pix|enviame (el )?pix|manda(me)? (el )?pix|envia(me)? (el )?pix|quiero (pagar|hacerlo)|voy a pagar|fazer pix|hacer pix|manda pix|envia pix|send pix|chave pix|llave pix|qual (o|a) pix|cual (es )?(el|la) (llave|chave|clave) pix|me manda(s)? (el|o) pix|me pasa(s)? el pix|pode (me )?mandar o pix|envia o pix)$/.test(txt.trim()) ||
+            // frases con contexto de pago
             /\b(quiero|voy a) (hacer|enviar|mandar)( el)? pix\b/.test(txt) ||
-            /\bvoy a pagar\b/.test(txt);
+            /\bvoy a pagar\b/.test(txt) ||
+            // "cual es la llave pix" / "me mandas el pix" / "me pasas el pix"
+            /\b(llave|chave|clave)\b.{0,15}\bpix\b/.test(txt) ||
+            /\bpix\b.{0,15}\b(llave|chave|clave)\b/.test(txt) ||
+            // "quiero pagar" / "vou pagar" / "quero pagar"
+            /\b(quiero|quero|vou)\s+pagar\b/.test(txt);
 
         if (quierePagar) {
             const ref = cliente?.fecha_cotizacion || cliente?.updated_at;
@@ -1078,6 +1109,129 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             return "";
         }
 
+        // — Cálculo inverso: CUP → Reales
+        // "85 mil cup cuanto es en reales", "quiero que lleguen 100 mil cuanto pago"
+        // Detectar monto en CUP + intención de saber cuántos reales se necesitan
+        const CUP_INVERSO = (() => {
+            // Patrones para detectar monto en CUP (con "mil", "k", o número directo)
+            const patrones = [
+                // "85 mil cup", "100000 cup", "50 mil pesos cubanos"
+                /(\d[\d.,]*)\s*(mil|k)\s*(cup|cuc|pesos?\s*cubanos?|pesos?)/i,
+                /(cup|pesos?\s*cubanos?)\s*(\d[\d.,]*)\s*(mil|k)?/i,
+                /(\d{4,6})\s*(cup|cuc|pesos?\s*cubanos?)/i,
+                // "que lleguen 85 mil", "reciban 100 mil", "chegar 85 mil"
+                /(?:lleguen?|recib[ae]n?|chegar?|chegue)\s+(\d[\d.,]*)\s*(mil|k)?/i,
+                // "para 85 mil", "para 100000"
+                /para\s+(\d[\d.,]*)\s*(mil|k)?\s*(?:cup|cuc|pesos?|$)/i,
+            ];
+
+            // Intención de conversión inversa
+            const esInverso =
+                /(cuanto|quanto|cu[aá]nto)\s+(es|son|seria|ser[ií]a|cuesta|vale|pago|envio|mando|preciso|necesito).{0,40}(cup|cuc|pesos?\s*cubanos?|mil)/i.test(txt) ||
+                /(cup|cuc|pesos?\s*cubanos?).{0,40}(reais?|reales?|brl|r\$|en reais?|em reais?)/i.test(txt) ||
+                /(que\s+)?(lleguen?|recib[ae]n?|chegar?|chegue).{0,20}(mil|\d{4,6})/i.test(txt) ||
+                /(para\s+)?(que\s+)?(lleguen?|recib[ae]n?)/i.test(txt) ||
+                /(cuanto|quanto)\s+(real|reais|pago|mando|envio|preciso|necesito).{0,40}(mil|\d{3,6})/i.test(txt) ||
+                /(quanto\s+preciso|quanto\s+envio|quanto\s+mando|cuanto\s+necesito|cuanto\s+pago)/i.test(txt);
+
+            if (!esInverso) return null;
+
+            // Extraer el monto en CUP
+            let montoCUP = null;
+            for (const p of patrones) {
+                const m = txt.match(p);
+                if (m) {
+                    // Buscar el número en los grupos
+                    const numStr = (m[1] || m[2] || "").replace(/[.,]/g, "");
+                    const esMil  = /mil|k/i.test(m[2] || m[3] || "");
+                    const num    = Number(numStr);
+                    if (num > 0) {
+                        montoCUP = esMil ? num * 1000 : num;
+                        break;
+                    }
+                }
+            }
+
+            // Si no encontró con patrones, buscar número de 4-6 dígitos o "X mil"
+            if (!montoCUP) {
+                const m2 = txt.match(/(\d+)\s*(mil|k)/i);
+                if (m2) montoCUP = Number(m2[1]) * 1000;
+                else {
+                    const m3 = txt.match(/(\d{4,6})/);
+                    if (m3) montoCUP = Number(m3[1]);
+                }
+            }
+
+            return montoCUP && montoCUP >= 1000 && montoCUP <= 5000000 ? montoCUP : null;
+        })();
+
+        if (CUP_INVERSO) {
+            try {
+                const pool2 = require("../../db");
+                const rt    = await pool2.query("SELECT * FROM rates LIMIT 1");
+                const t     = rt.rows[0];
+                if (t) {
+                    // Calcular reales necesarios iterando tramos de tasa
+                    // Como la tasa depende del monto en reales (que no sabemos aún),
+                    // usamos la tasa del tramo más probable (brl_100 para montos medios)
+                    // y verificamos si cae en ese tramo. Si no, ajustamos.
+                    const cup = CUP_INVERSO;
+                    const tasas = [
+                        { min: 0,    max: 99,    tasa: Number(t.brl_0)    },
+                        { min: 100,  max: 499,   tasa: Number(t.brl_100)  },
+                        { min: 500,  max: 999,   tasa: Number(t.brl_500)  },
+                        { min: 1000, max: 999999, tasa: Number(t.brl_1000) },
+                    ];
+
+                    let realesNecesarios = null;
+                    let tasaUsada = null;
+                    for (const tramo of tasas) {
+                        const realesEst = cup / tramo.tasa;
+                        if (realesEst >= tramo.min && realesEst <= tramo.max) {
+                            realesNecesarios = Math.ceil(realesEst);
+                            tasaUsada = tramo.tasa;
+                            break;
+                        }
+                    }
+                    // Si no encaja en ningún tramo, usar el mayor
+                    if (!realesNecesarios) {
+                        tasaUsada = Number(t.brl_1000);
+                        realesNecesarios = Math.ceil(cup / tasaUsada);
+                    }
+
+                    const cupFmt  = cup >= 1000
+                        ? (cup / 1000 % 1 === 0 ? `${cup/1000} mil` : `${(cup/1000).toFixed(1)} mil`)
+                        : cup.toString();
+
+                    const msgInv = lang === "pt"
+                        ? `Para chegar *${cupFmt} CUP* em Cuba 🇨🇺
+
+Você precisa enviar *R$${realesNecesarios}*
+_(taxa: ${tasaUsada} CUP por real)_
+
+${pickL(CIERRES_COT, CIERRES_COT_PT, lang)}`
+                        : `Para que lleguen *${cupFmt} CUP* en Cuba 🇨🇺
+
+Necesitas enviar *R$${realesNecesarios}*
+_(tasa: ${tasaUsada} CUP por real)_
+
+${pickL(CIERRES_COT, CIERRES_COT_PT, lang)}`;
+
+                    await guardarCliente({
+                        phone, nombre: pushName, monto: realesNecesarios, tipo: "brl_cup",
+                        estado: "cotizacion_realizada",
+                        fechaEstado: new Date().toISOString(),
+                        fechaCotizacion: new Date().toISOString()
+                    });
+                    await crm.onCotizacion(phone, lang);
+                    await enviarSeguro(phone, msgInv);
+                    return msgInv;
+                }
+            } catch (e) {
+                console.error("❌ CUP inverso:", e.message);
+            }
+        }
+
         // — Consulta de tasas sin monto
         if (/a cuanto|a como|tasa.*hoy|cambio.*hoy|hoy.*cambio|hoy.*tasa|cual es la tasa|como esta el cambio|como esta la tasa|cuanto vale|cuanto esta|precio.*hoy|hoy.*precio|tasa de hoy|cambio de hoy/.test(txt)) {
             try {
@@ -1111,6 +1265,25 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         // Si dice "reales" o "brl" junto a "usd" → deriva a Yordanys (USD→BRL, ya manejado arriba).
         // Detecta prepago/clásica por contexto; si no hay contexto, pregunta.
         const esUSD = (txt.includes("usd") || txt.includes("dolar") || txt.includes("dolares") || txt.includes("dólares"));
+
+        // USD mencionado sin monto → preguntar cuánto
+        if (esUSD && !montoValido && !txt.includes("real") && !txt.includes("brl")) {
+            const esClasicaCtx = /clasica|clásica|bpa|bandec/.test(txt);
+            const esPrepagCtx  = /prepago|nauta|internacional/.test(txt);
+            const esEfecCtx    = /efectivo|cash/.test(txt);
+            const tipoCtx = esEfecCtx ? "efectivo" : esClasicaCtx ? "clásica" : esPrepagCtx ? "prepago" : null;
+            // Guardar el tipo si lo mencionó, para no preguntar después
+            if (tipoCtx) {
+                const mapaTipo = { "efectivo": "usd_efectivo", "clásica": "usd_clasica", "prepago": "usd_prepago" };
+                await guardarCliente({ phone, tipo: mapaTipo[tipoCtx] });
+            }
+            const msgMonto = lang === "pt"
+                ? `Certo${tipoCtx ? ` (${tipoCtx})` : ""} 💵\n\nQual o valor em USD que quer enviar?`
+                : `Perfecto${tipoCtx ? ` (${tipoCtx})` : ""} 💵\n\n¿Cuánto USD quieres enviar?`;
+            await enviarSeguro(phone, msgMonto);
+            return msgMonto;
+        }
+
         if (montoValido && esUSD && !txt.includes("real") && !txt.includes("brl")) {
             const esEfectivo = /efectivo|cash|vender|cambiar|comprar/.test(txt);
             // Detectar tipo de tarjeta cubana mencionada
@@ -1164,13 +1337,17 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         //   - monto precedido/seguido de "reais/reales/R$" (señal monetaria explícita), o
         //   - contexto de envío en el mensaje (quiero enviar, mandar, cotizar, etc.)
         //   - cliente ya en estado activo (cotizó antes, está esperando algo)
+        // "moneda nacional" y "a cup" son sinónimos de BRL→CUP
+        const esMonedaNacional = /moneda nacional|en cup|a cup|pesos cubanos|peso cubano/.test(txt);
+
         const hayContextoBRL = (
             valorMonetario !== null ||          // número con señal monetaria explícita
             !!cliente?.estado ||                // cliente con flujo activo
-            CONTEXTO_ENVIO.test(txt)            // mensaje con intención de envío
+            CONTEXTO_ENVIO.test(txt) ||         // mensaje con intención de envío
+            esMonedaNacional                    // mención explícita de moneda cubana
         );
         if (montoValido && hayContextoBRL &&
-            !esUSD && !txt.includes("cup") && !txt.includes("mlc")
+            !esUSD && !txt.includes("mlc")
         ) {
             const r = await calcularOperacion({ tipo: "brl_cup", valor: valorFinal });
             if (r) {
