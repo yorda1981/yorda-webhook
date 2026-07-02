@@ -201,17 +201,29 @@ async function limpiarSesion(phone) { await limpiarSesionDB(phone); }
 function promptImagen() {
     const aliases = getPIXAliases().join(", ");
     const key     = getPIXKey();
-    return `Analiza la imagen. ¿Es tarjeta bancaria, comprobante PIX u otra cosa? Responde SOLO en JSON.
+    return `Analiza esta imagen con atención. Puede ser una tarjeta bancaria cubana, un comprobante PIX brasileño, u otra cosa. Responde SOLO en JSON válido, sin texto adicional.
 
-TARJETA: {"tipo":"tarjeta","tarjeta":"SOLO_DIGITOS","titular":"NOMBRE","banco":"banco","valida":true}
+FORMATOS:
+
+TARJETA: {"tipo":"tarjeta","tarjeta":"SOLO16DIGITOS","titular":"NOMBRE COMPLETO","banco":"bandec|bpa|metropolitano|otro","valida":true}
 COMPROBANTE: {"tipo":"comprovante_pix","valor":200,"fecha":"DD/MM/AAAA","hora":"HH:MM","banco":"banco origen","destinatario":"nombre","destino_correcto":true,"valido":true}
 OTRO: {"tipo":"otro"}
 
-- tarjeta: solo dígitos, 15 o 16 caracteres.
-- valor: número puro (200, no "R$200,00").
-- destino_correcto=true si destinatario coincide con: ${aliases}.
-${key ? `- destino_correcto=true si aparece la clave: ${key}` : ""}
-- datos faltantes → null. Sin texto extra.`;
+REGLAS TARJETA:
+- Tarjetas cubanas (BPA, Bandec, Metropolitano) tienen 16 dígitos en grupos de 4: XXXX XXXX XXXX XXXX
+- Extrae SOLO los dígitos sin espacios → exactamente 16 caracteres
+- Titular aparece en la parte inferior de la tarjeta
+- Banco: identifica por logo o texto (BPA=banco popular de ahorro, Bandec=logo rojo/naranja, Metropolitano)
+- Si la imagen está borrosa, girada o es reenvío, igualmente intenta extraer los dígitos visibles
+- Si logras ver al menos 12 dígitos, extráelos y pon valida:false
+
+REGLAS COMPROBANTE:
+- valor: número puro sin símbolo (200, no "R$200,00")
+- destino_correcto=true si destinatario coincide con: ${aliases}
+${key ? `- destino_correcto=true si aparece la clave PIX: ${key}` : ""}
+- datos faltantes → null
+
+Sin texto extra fuera del JSON.`;
 }
 
 function promptPDF() {
