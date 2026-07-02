@@ -62,18 +62,22 @@ async function enviarPIX(phone, cliente, esEs) {
         return msg;
     }
 
-    // Múltiples tarjetas → elegir cuál
+    // Múltiples tarjetas → mostrar de forma natural con nombre
     const tarjetas = Array.isArray(cliente?.tarjetas) ? cliente.tarjetas.filter(t => /^\d{15,16}$/.test(t)) : [];
     if (!esRecarga && tarjetas.length > 1) {
+        // MEJORA 5: lenguaje natural — "encontré estas tarjetas registradas"
+        const primerNombre = cliente?.nombre ? cliente.nombre.split(" ")[0] : null;
+        const titular      = cliente?.titular_frecuente ? cliente.titular_frecuente.split(" ")[0] : null;
         const opciones = tarjetas.map((t, i) => {
             const ultimos = t.slice(-4);
-            const titular = cliente.titular_frecuente || "";
-            return `${i + 1}️⃣ •••• ${ultimos}${titular ? " — " + titular.split(" ")[0] : ""}`;
+            return `${i + 1}️⃣ •••• ${ultimos}${titular ? " — " + titular : ""}`;
         }).join("\n");
-        const msg = `¿A cuál tarjeta envío hoy? 💳\n\n${opciones}`;
+        const intro = esEs
+            ? `Encontré estas tarjetas guardadas${primerNombre ? ` a tu nombre, ${primerNombre}` : ""} 💳\n\n${opciones}\n\n¿Cuál usamos hoy?`
+            : `Encontrei estes cartões salvos${primerNombre ? ` no seu nome, ${primerNombre}` : ""} 💳\n\n${opciones}\n\n¿Qual usamos hoje?`;
         await guardarCliente({ phone, estado: "seleccionando_tarjeta", fechaEstado: new Date().toISOString() });
-        await enviarSeguro(phone, msg);
-        return msg;
+        await enviarSeguro(phone, intro);
+        return intro;
     }
 
     return await _enviarPIXFinal(phone, cliente, esEs);
@@ -246,10 +250,19 @@ async function procesarComprobante(phone, pushName, cliente, datos, esEs) {
     }
 
     const clienteActualizado = await obtenerCliente(phone);
+    // MEJORA 3: Progreso paso a paso — reduce ansiedad del cliente
+    const msgPaso1 = esEs
+        ? "📄 *Paso 1/3* — Comprobante recibido ✅\n\nVerificando el pago..."
+        : "📄 *Passo 1/3* — Comprovante recebido ✅\n\nVerificando o pagamento...";
+    await enviarSeguro(phone, msgPaso1);
+
     const completado = await intentarCompletarOperacion(phone, pushName, clienteActualizado, esEs);
 
     if (!completado) {
-        await enviarSeguro(phone, esEs ? "¡Comprobante recibido! ✅" : "Comprovante recebido! ✅");
+        const msgPaso2 = esEs
+            ? "📋 *Paso 2/3* — Pago localizado ✅\n\nEsperando confirmación del operador. Te avisamos enseguida 😊"
+            : "📋 *Passo 2/3* — Pagamento localizado ✅\n\nAguardando confirmação do operador. Avisamos em breve 😊";
+        await enviarSeguro(phone, msgPaso2);
     }
 
     return "";
