@@ -30,24 +30,25 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
     try {
         if (!text || !phone) return "";
 
-        const txt  = norm(text);
-        const esEs = /hola|buenas|buenos|quiero|cuanto|enviar|mandar|giro|transferencia|dinero|cuba|pesos|cup|reales|usd|dolares|dolar|tasa|cambio/.test(txt);
+        const txt = norm(text);
 
         const cliente    = await obtenerCliente(phone);
         const yaSaludado = !!cliente?.saludo_enviado;
 
-        // Idioma y CRM
+        // ── Idioma y CRM ──
+        // FIX 1: usar lang en lugar de esEs para todos los mensajes
         const langDetectado = crm.detectarIdioma(text);
         crm.registrarPrimerContacto(phone, pushName, langDetectado).catch(() => {});
         const langGuardado = cliente?.idioma;
         const lang = langGuardado || langDetectado;
+        const esEs = lang !== "pt";   // derivado de lang, no del texto del mensaje
         if (langDetectado && langDetectado !== langGuardado) {
             crm.actualizarEstadoCRM(phone, cliente?.estado_crm || "nuevo_cliente", langDetectado).catch(() => {});
         }
 
         await guardarCliente({ phone, ultimaInteraccion: new Date().toISOString() });
 
-        // Horario
+        // ── Horario ──
         const horaBrasil = new Date(Date.now() - 3 * 60 * 60 * 1000).getUTCHours();
         if ((horaBrasil < 8 || horaBrasil >= 23) && !imageUrl) {
             const yaAvisado = cliente?.ultima_interaccion &&
@@ -61,27 +62,27 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             return "";
         }
 
-        // Extracción de monto
+        // FIX 3: Extraer monto ANTES de esCubaBrasil para que montoValido esté disponible
         const { valorFinal, valorMonetario, montoValido } = extraerMonto(txt, text);
         const soloNums = txt.replace(/\D/g, "");
 
-        // Cuba→Brasil
+        // ── Cuba→Brasil ──
         const esCubaBrasil = triggersCubaBrasil.some(t => txt.includes(norm(t))) ||
             (txt.includes("cup") && !txt.includes("usd") && !txt.includes("dolar") &&
              !txt.includes("real") && !txt.includes("brl") && !txt.includes("recibe") &&
              !txt.includes("enviar") && !txt.includes("mandar") && !txt.includes("quiero") &&
              !txt.includes("quero") && !txt.includes("monto") && !txt.includes("cuanto") &&
-             !txt.includes("quanto") && !montoValido);
+             !txt.includes("quanto") && !montoValido);   // ahora montoValido ya existe
         if (esCubaBrasil) {
             const msg = "Perfecto 😊\n\nYordanys te atenderá enseguida para ayudarte con esa operación.\n\nPor favor aguarda un momento. 👌";
             await enviarSeguro(phone, msg); return msg;
         }
 
-        // Saludo
+        // ── Saludo ──
         const esSaludo = /^(hola|oi|bom dia|buenas|buenos dias|boa tarde|boa noite|buen dia|hey|hi|hello|e ai|eai|buenas tardes|buenas noches|good morning)[\s!?.]*$/.test(txt);
         if (esSaludo) return await manejarSaludo(phone, pushName, cliente, yaSaludado, lang, esEs);
 
-        // Filtro de gatillo
+        // ── Filtro de gatillo ──
         const esConfirma = confirmaOperacion.includes(txt.trim()) ||
             /\b(voy a|vou) (mandar|enviar|pagar|transferir)\b/.test(txt) ||
             /\b(te|le) (mando|envio|pago|transfiero)\b/.test(txt);
@@ -90,7 +91,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             /^\d+([.,]\d{1,2})?$/.test(txt.trim()) || txt.replace(/\D/g,"").length === 16 || esConfirma;
         if (!debeResponder) return "";
 
-        // Derivación humano
+        // ── Derivación humano ──
         if (/yordanys|hablar con alguien|operador|asesor humano|hablar con una persona/.test(txt)) {
             const msg = esEs ? "Yordanys te atiende enseguida 😊 👌" : "Yordanys te atende agora 😊 👌";
             await enviarSeguro(phone, msg); return msg;
@@ -100,10 +101,22 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             await enviarSeguro(phone, msg); return msg;
         }
 
-        // Imágenes
+        // ── Imágenes ──
         if (imageUrl) return await manejarImagen(phone, pushName, cliente, imageUrl, lang, esEs);
 
-        // Selección de tarjeta
+        // FIX 2: Recarga sube antes de tarjetas — tiene su propio estado y no debe
+        // pasar por checks de tarjeta/monto innecesariamente
+        if (/recarga|recargar|recargas|recarga etecsa|recarga cuba|recargar telefono|recarga movil/.test(txt) &&
+            cliente?.estado !== "aguardando_numero_recarga" && cliente?.estado !== "aguardando_comprovante")
+            return await mostrarMenuRecargas(phone);
+
+        if (cliente?.estado === "seleccionando_recarga" && /^[12]$/.test(txt.trim()))
+            return await seleccionarRecarga(phone, txt.trim());
+
+        if (cliente?.estado === "aguardando_numero_recarga" && /^5\d{7}$/.test(soloNums))
+            return await procesarNumeroRecarga(phone, soloNums, esEs);
+
+        // ── Selección de tarjeta ──
         if (cliente?.estado === "seleccionando_tarjeta" && /^[1-9]$/.test(txt.trim())) {
             const tarjetas = Array.isArray(cliente?.tarjetas) ? cliente.tarjetas.filter(t => /^\d{15,16}$/.test(t)) : [];
             const idx = parseInt(txt.trim()) - 1;
@@ -113,29 +126,21 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             }
         }
 
-        // Selección tipo (comprobante sin tipo)
+        // ── Selección tipo (comprobante sin tipo) ──
         if (cliente?.comprobante_pendiente && !cliente?.tipo_favorito && /^[123]$/.test(txt.trim())) {
             await guardarCliente({ phone, tipo: { "1": "brl_cup", "2": "usd_clasica", "3": "usd_prepago" }[txt.trim()] });
             await intentarCompletarOperacion(phone, pushName, await obtenerCliente(phone), esEs);
             return "";
         }
 
-        // Selección Clásica/Prepago USD
+        // ── Selección Clásica/Prepago USD ──
         if (cliente?.tipo_favorito === "usd_pendiente_tipo" && /^[12]$/.test(txt.trim())) {
             const tipoUSD = txt.trim() === "1" ? "usd_clasica" : "usd_prepago";
             const montoG  = Number(cliente?.ultimo_monto);
             if (montoG > 0) return await cotizarUSD(phone, pushName, montoG, tipoUSD, lang, esEs) || "";
         }
 
-        // Selección recarga
-        if (cliente?.estado === "seleccionando_recarga" && /^[12]$/.test(txt.trim()))
-            return await seleccionarRecarga(phone, txt.trim());
-
-        // Número cubano para recarga
-        if (cliente?.estado === "aguardando_numero_recarga" && /^5\d{7}$/.test(soloNums))
-            return await procesarNumeroRecarga(phone, soloNums, esEs);
-
-        // Tarjeta por texto
+        // ── Tarjeta por texto ──
         const esTarjeta = detectarTarjetaTexto(text);
         if (esTarjeta) {
             await guardarTarjeta(phone, esTarjeta, null, null, cliente);
@@ -151,15 +156,29 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             await enviarSeguro(phone, m); return m;
         }
 
-        // QR ilegible
+        // ── QR ilegible ──
         if (/qr|codigo qr|no puedo escanear|no leo el qr|no consigo escanear/.test(txt)) {
             const key = getPIXKey();
             const m   = key ? `No hay problema 😊\n\nCopia la clave PIX:\n\n${key}` : "Pídele la clave directamente a Yordanys 😊";
             await enviarSeguro(phone, m); return m;
         }
 
-        // Confirmación post-cotización
-        if (esConfirma && cliente?.estado === "cotizacion_realizada") {
+        // FIX 4: Número solo con estado activo → cotizar en lugar de silencio
+        // Si el cliente manda solo "200" y tiene estado activo, tratar como monto
+        if (/^\d+$/.test(txt.trim()) && montoValido && cliente?.estado) {
+            const estadoActual = cliente.estado;
+            if (estadoActual === "cotizacion_realizada") {
+                // Ya cotizó, este número puede ser confirmación de monto diferente
+                return await cotizarBRL(phone, pushName, valorFinal, lang) || "";
+            }
+            if (!estadoActual || estadoActual === "nuevo_cliente") {
+                return await cotizarBRL(phone, pushName, valorFinal, lang) || "";
+            }
+        }
+
+        // FIX 5: Confirmación — verificar que NO hay monto nuevo en el mensaje
+        // "quiero 200 reales" no debe confirmar, debe cotizar
+        if (esConfirma && cliente?.estado === "cotizacion_realizada" && !montoValido) {
             if (!cliente.tarjeta && !cliente.tarjeta_frecuente) {
                 await enviarSeguro(phone, pickL(
                     ["¡Casi listo! Solo necesito la tarjeta 💳\n\nMándame foto o los 16 dígitos."],
@@ -170,7 +189,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             return await enviarPIX(phone, cliente, esEs);
         }
 
-        // PIX directo
+        // ── PIX directo ──
         const quierePagar =
             /^(pix|pasame (el )?pix|enviame (el )?pix|manda(me)? (el )?pix|envia(me)? (el )?pix|quiero (pagar|hacerlo)|voy a pagar|fazer pix|hacer pix|manda pix|envia pix|send pix|chave pix|llave pix|qual (o|a) pix|cual (es )?(el|la) (llave|chave|clave) pix|me manda(s)? (el|o) pix|me pasa(s)? el pix|pode (me )?mandar o pix|envia o pix)$/.test(txt.trim()) ||
             /\b(quiero|voy a) (hacer|enviar|mandar)( el)? pix\b/.test(txt) ||
@@ -195,26 +214,26 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             return await enviarPIX(phone, cliente, esEs);
         }
 
-        // Comprobante verbal
+        // ── Comprobante verbal ──
         if (/paguei|pague|comprovante|comprobante|feito|realizado|ya envie|ya mande|ya pague|hice el pago/.test(txt)) {
             await enviarSeguro(phone, esEs ? "¡Perfecto! Mándame el comprobante (foto o PDF) 📎" : "Ótimo! Me manda o comprovante (foto ou PDF) 📎");
             return "";
         }
 
-        // MLC
+        // ── MLC ──
         const esMLC = txt.includes("mlc");
         if (esMLC && montoValido) return await cotizarMLC(phone, pushName, valorFinal, lang) || "";
         if (esMLC)                return await tasaMLC(phone, lang) || "";
 
-        // CUP inverso
+        // ── CUP inverso ──
         const cupInv = detectarCUPInverso(txt);
         if (cupInv) { const r = await cotizarCUPInverso(phone, pushName, cupInv, lang); if (r) return r; }
 
-        // Consulta tasas
+        // ── Consulta tasas ──
         if (/a cuanto|a como|tasa.*hoy|cambio.*hoy|hoy.*cambio|hoy.*tasa|cual es la tasa|como esta el cambio|como esta la tasa|cuanto vale|cuanto esta|precio.*hoy|hoy.*precio|tasa de hoy|cambio de hoy/.test(txt))
             return await consultarTasas(phone) || "";
 
-        // Estado de operación
+        // ── Estado de operación ──
         if (/estado|mi operacion|mi envio|cuando llega|cuando llego|cuanto falta|ya llego|esta listo/.test(txt)) {
             const ultima = await obtenerUltimaOperacion(phone);
             if (!ultima) { await enviarSeguro(phone, "No encuentro operaciones registradas 🤔\n\n¿Quieres hacer un envío?"); return ""; }
@@ -222,7 +241,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             return "";
         }
 
-        // USD
+        // ── USD ──
         const esUSD = txt.includes("usd") || txt.includes("dolar") || txt.includes("dolares") || txt.includes("dólares");
         if (esUSD && !txt.includes("real") && !txt.includes("brl")) {
             if (!montoValido) return await preguntarCantidadUSD(phone, txt, lang, esEs) || "";
@@ -233,34 +252,39 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             return await cotizarUSD(phone, pushName, valorFinal, esEfectivo ? "usd_efectivo" : esPrepago ? "usd_prepago" : "usd_clasica", lang, esEs) || "";
         }
 
-        // BRL → CUP
+        // FIX 6: BRL→CUP — NO disparar si el cliente está esperando comprobante
+        // Un cliente en aguardando_comprovante que manda un número no debe recibir cotización
         const esMonedaNacional = /moneda nacional|en cup\b|a cup\b|pesos cubanos|peso cubano/.test(txt);
-        const hayContextoBRL   = valorMonetario !== null || !!cliente?.estado ||
-            /enviar|mandar|envio|cotiz|transfer|pagar|monto|quant|cuant|quanto|quiero/.test(txt) || esMonedaNacional;
-        if (montoValido && hayContextoBRL && !esUSD && !esMLC)
+        const estadoBloquea    = cliente?.estado === "aguardando_comprovante" ||
+                                  cliente?.estado === "aguardando_numero_recarga";
+        const hayContextoBRL   = valorMonetario !== null ||
+            (!estadoBloquea && !!cliente?.estado) ||
+            /enviar|mandar|envio|cotiz|transfer|pagar|monto|quant|cuant|quanto|quiero/.test(txt) ||
+            esMonedaNacional;
+        if (montoValido && hayContextoBRL && !esUSD && !esMLC && !estadoBloquea)
             return await cotizarBRL(phone, pushName, valorFinal, lang) || "";
 
         if (valorFinal && !montoValido) return "";
 
-        // Cuba sin monto
+        // ── Cuba sin monto ──
         if (txt.includes("cuba") && /dinero|enviar|mandar|pasar|plata|remesa/.test(txt)) {
             const n = pushName ? `, ${pushName.split(" ")[0]}` : "";
             await enviarSeguro(phone, `¡Hola${n}! 😊\n\n¿Cuánto quieres enviar a Cuba?`); return "";
         }
 
-        // Intención sin monto
+        // ── Intención sin monto ──
         if (/quiero enviar|necesito enviar|quiero mandar|quiero hacer (una )?(remesa|transferencia)|necesito (una )?(remesa|transferencia)/.test(txt)) {
             await enviarSeguro(phone, "Perfecto 😊\n\n¿Cuánto deseas enviar?"); return "";
         }
 
-        // Despedida
+        // ── Despedida ──
         if (/^(gracias|ok gracias|hasta luego|chau|tchau|obrigado|obrigada|flw|valeu|até mais)[\s!.]*$/.test(txt.trim())) {
             const n = pushName ? `, ${pushName.split(" ")[0]}` : "";
             const m = `¡Fue un placer${n}! 😊 Gracias por la confianza. Aquí estaremos cuando nos necesites. 👋`;
             await enviarSeguro(phone, m); return m;
         }
 
-        // Cierre inteligente
+        // ── Cierre inteligente ──
         if (Number(cliente?.ultimo_monto) > 0 && !!(cliente?.tarjeta || cliente?.tarjeta_frecuente)) {
             if (/mismo|misma|llave|chave|transferir|depositar|proceder|continuar|reales|real|brl|r\$|envio el dinero|voy a pagar|quiero pagar/.test(txt)) {
                 await guardarCliente({ phone, estado: "aguardando_comprovante", fechaEstado: new Date().toISOString(), fechaPix: new Date().toISOString() });
@@ -268,12 +292,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             }
         }
 
-        // Recarga
-        if (/recarga|recargar|recargas|recarga etecsa|recarga cuba|recargar telefono|recarga movil/.test(txt) &&
-            cliente?.estado !== "aguardando_numero_recarga" && cliente?.estado !== "aguardando_comprovante")
-            return await mostrarMenuRecargas(phone);
-
-        // Asistente GPT fallback
+        // ── Asistente GPT fallback ──
         const palabras = txt.trim().split(/\s+/);
         if (palabras.length < 4 || /^\d+$/.test(txt.trim())) return "";
         try {
@@ -319,23 +338,23 @@ function detectarTarjetaTexto(text) {
 }
 
 async function manejarSaludo(phone, pushName, cliente, yaSaludado, lang, esEs) {
-    const n   = pushName ? pushName.split(" ")[0] : null;
+    const n    = pushName ? pushName.split(" ")[0] : null;
     const frec = !!cliente?.cliente_frecuente;
-    const h   = new Date(Date.now() - 3 * 60 * 60 * 1000).getUTCHours();
+    const h    = new Date(Date.now() - 3 * 60 * 60 * 1000).getUTCHours();
     if (!yaSaludado) {
         let s;
         if (lang === "pt") {
             const pn = n ? ` ${n}` : "";
-            if (frec) s = pick([`Oi${pn}! Que bom te ver de novo 😊 Em que posso te ajudar hoje?`, `Olá${pn}! Sempre bom contar com você 😊 O que precisa hoje?`]);
+            if (frec)      s = pick([`Oi${pn}! Que bom te ver de novo 😊 Em que posso te ajudar hoje?`, `Olá${pn}! Sempre bom contar com você 😊 O que precisa hoje?`]);
             else if (h < 12) s = pick([`Bom dia${pn}! ☀️ Como posso te ajudar?`, `Olá${pn}, bom dia! ☀️ Em que posso ajudar?`]);
             else if (h < 18) s = pick([`Boa tarde${pn}! 🌤️ Como posso te ajudar?`, `Oi${pn}! Boa tarde ☀️ Em que posso ajudar hoje?`]);
-            else s = pick([`Boa noite${pn}! 🌙 Como posso te ajudar?`, `Oi${pn}! Boa noite 🌙 Estou aqui para o que precisar.`]);
+            else             s = pick([`Boa noite${pn}! 🌙 Como posso te ajudar?`, `Oi${pn}! Boa noite 🌙 Estou aqui para o que precisar.`]);
         } else {
             const pn = n ? `, ${n}` : "";
-            if (frec) s = pick([`¡Hola${pn}! Qué bueno verte de nuevo 😊 ¿En qué te ayudo hoy?`, `¡Hola${pn}! Siempre un placer 😊 ¿Qué necesitas?`]);
+            if (frec)      s = pick([`¡Hola${pn}! Qué bueno verte de nuevo 😊 ¿En qué te ayudo hoy?`, `¡Hola${pn}! Siempre un placer 😊 ¿Qué necesitas?`]);
             else if (h < 12) s = pick([`¡Buenos días${pn}! ☀️ ¿En qué te puedo ayudar?`, `¡Hola${pn}, buenos días! ☀️ ¿Qué necesitas?`]);
             else if (h < 18) s = pick([`¡Buenas tardes${pn}! 🌤️ ¿En qué te ayudo?`, `¡Hola${pn}! Buenas tardes 😊 ¿Qué necesitas?`]);
-            else s = pick([`¡Buenas noches${pn}! 🌙 ¿En qué te ayudo?`, `¡Hola${pn}! Buenas noches 😊 ¿Qué necesitas?`]);
+            else             s = pick([`¡Buenas noches${pn}! 🌙 ¿En qué te ayudo?`, `¡Hola${pn}! Buenas noches 😊 ¿Qué necesitas?`]);
         }
         await guardarCliente({ phone, saludoEnviado: true });
         await enviarSeguro(phone, s);
@@ -351,7 +370,9 @@ async function manejarSaludo(phone, pushName, cliente, yaSaludado, lang, esEs) {
         const m = pickL(ESPERA_COMPROBANTE_ES, ESPERA_COMPROBANTE_PT, lang);
         await enviarSeguro(phone, m); return "";
     }
-    const m = lang === "pt" ? pick(["Quanto quer enviar? 😊", "O que precisa hoje? 😊"]) : pick(["¿Cuánto quieres enviar? 😊", "¿En qué te ayudo? 😊"]);
+    const m = lang === "pt"
+        ? pick(["Quanto quer enviar? 😊", "O que precisa hoje? 😊"])
+        : pick(["¿Cuánto quieres enviar? 😊", "¿En qué te ayudo? 😊"]);
     await enviarSeguro(phone, m); return m;
 }
 
