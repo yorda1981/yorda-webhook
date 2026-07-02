@@ -288,6 +288,21 @@ async function procesarComprobante(phone, pushName, cliente, datos, esEs) {
         ...(datos.valor && !cliente.ultimo_monto && { monto: datos.valor })
     });
 
+    // #8 Guardar en historial de comprobantes
+    try {
+        await pool.query(`
+            INSERT INTO comprobantes
+                (phone, nombre, valor, fecha_pix, hora_pix, banco_origen, destinatario, destino_correcto, valido)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+            ON CONFLICT DO NOTHING
+        `, [
+            phone, pushName || null,
+            datos.valor || null, datos.fecha || null, datos.hora || null,
+            datos.banco || null, datos.destinatario || null,
+            datos.destino_correcto ?? null, datos.valido ?? null
+        ]);
+    } catch (_) {}
+
     const opPend = await obtenerPendienteCliente(phone);
     if (opPend && datos.valor &&
         Math.round(Number(datos.valor)) !== Math.round(Number(opPend.monto))
