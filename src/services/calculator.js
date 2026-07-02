@@ -41,6 +41,10 @@ async function calcularOperacion({ tipo, valor }) {
         return { valor: monto, tasa: Number(tasas.usd1), brl: Math.floor(monto * Number(tasas.usd1)) };
     }
 
+    if (tipo === "mlc") {
+        return { valor: monto, tasa: Number(tasas.mlc || 0), cup: Math.floor(monto * Number(tasas.mlc || 0)) };
+    }
+
     return null;
 }
 
