@@ -459,63 +459,49 @@ async function manejarSaludo(phone, pushName, cliente, yaSaludado, lang, esEs) {
     const n    = pushName ? pushName.split(" ")[0] : null;
     const frec = !!cliente?.cliente_frecuente;
     const h    = new Date(Date.now() - 3 * 60 * 60 * 1000).getUTCHours();
-    if (!yaSaludado) {
-        let s;
-        if (lang === "pt") {
-            const pn = n ? ` ${n}` : "";
-            if (frec)      s = pick([`Oi${pn}! Que bom te ver de novo 😊 Em que posso te ajudar hoje?`, `Olá${pn}! Sempre bom contar com você 😊 O que precisa hoje?`]);
-            else if (h < 12) s = pick([`Bom dia${pn}! ☀️ Como posso te ajudar?`, `Olá${pn}, bom dia! ☀️ Em que posso ajudar?`]);
-            else if (h < 18) s = pick([`Boa tarde${pn}! 🌤️ Como posso te ajudar?`, `Oi${pn}! Boa tarde ☀️ Em que posso ajudar hoje?`]);
-            else             s = pick([`Boa noite${pn}! 🌙 Como posso te ajudar?`, `Oi${pn}! Boa noite 🌙 Estou aqui para o que precisar.`]);
-        } else {
-            const pn = n ? `, ${n}` : "";
-            if (frec)      s = pick([`¡Hola${pn}! Qué bueno verte de nuevo 😊 ¿En qué te ayudo hoy?`, `¡Hola${pn}! Siempre un placer 😊 ¿Qué necesitas?`]);
-            else if (h < 12) s = pick([`¡Buenos días${pn}! ☀️ ¿En qué te puedo ayudar?`, `¡Hola${pn}, buenos días! ☀️ ¿Qué necesitas?`]);
-            else if (h < 18) s = pick([`¡Buenas tardes${pn}! 🌤️ ¿En qué te ayudo?`, `¡Hola${pn}! Buenas tardes 😊 ¿Qué necesitas?`]);
-            else             s = pick([`¡Buenas noches${pn}! 🌙 ¿En qué te ayudo?`, `¡Hola${pn}! Buenas noches 😊 ¿Qué necesitas?`]);
-        }
-        await guardarCliente({ phone, saludoEnviado: true });
-        await enviarSeguro(phone, s);
-        return s;
-    }
-    if (cliente?.estado === "cotizacion_realizada" && cliente?.ultimo_monto) {
-        const m = pick(lang === "pt"
-            ? [`Oi! Ainda quer fazer o envio de R$${cliente.ultimo_monto}? 💸`, `Olá! Continuamos com o envio de R$${cliente.ultimo_monto}? 😊`]
-            : [`¡Hola! ¿Seguimos con el envío de R$${cliente.ultimo_monto}? 💸`, `¡Qué tal! ¿Continuamos con R$${cliente.ultimo_monto}? 😊`]);
-        await enviarSeguro(phone, m); return m;
-    }
-    if (cliente?.estado === "aguardando_comprovante") {
-        const m = pickL(ESPERA_COMPROBANTE_ES, ESPERA_COMPROBANTE_PT, lang);
-        await enviarSeguro(phone, m); return "";
-    }
 
-    // MEJORA 1: Memoria natural — recordar tarjeta y monto anteriores
+    // Datos de memoria
     const tarjetaGuardada = cliente?.tarjeta_frecuente || cliente?.tarjeta;
     const montoAnterior   = Number(cliente?.ultimo_monto) > 0 ? cliente.ultimo_monto : null;
-    const esFrecuente     = !!cliente?.cliente_frecuente;
     const scoreCliente    = Number(cliente?.score_confianza || 0);
-    const esVIP           = scoreCliente >= 80 || esFrecuente;
-
-    // GRUPO B-2 + C: Cliente que regresa — usar patrones de memoria
+    const esVIP           = scoreCliente >= 80 || frec;
     const ultimaInteraccion = cliente?.ultima_interaccion;
     const diasInactivo = ultimaInteraccion
         ? Math.floor((Date.now() - new Date(ultimaInteraccion).getTime()) / (1000 * 60 * 60 * 24))
         : 0;
 
-    // Obtener anticipación del motor de memoria (background)
-    const anticipacion = await memoryMotor.generarAnticipacion(phone).catch(() => null);
-
-    if (esVIP && diasInactivo >= 30 && !yaSaludado) {
-        const dias = diasInactivo >= 90 ? (lang === "pt" ? "muito tempo" : "mucho tiempo") : (lang === "pt" ? "um tempo" : "un tiempo");
-        const m = lang === "pt"
-            ? `Que bom te ver de volta após ${dias} 😊 Já tenho seus dados. Como posso te ajudar hoje?`
-            : `¡Qué bueno verte de nuevo después de ${dias}! 😊 Ya tengo tus datos. ¿Cómo puedo ayudarte hoy?`;
-        await guardarCliente({ phone, saludoEnviado: true });
-        await enviarSeguro(phone, m); return m;
+    // Cliente que ya fue saludado — retomar conversacion
+    if (yaSaludado) {
+        if (cliente?.estado === "cotizacion_realizada" && cliente?.ultimo_monto) {
+            const m = pick(lang === "pt"
+                ? [`Oi! Ainda quer fazer o envio de R$${cliente.ultimo_monto}? 💸`, `Olá! Continuamos com o envio de R$${cliente.ultimo_monto}? 😊`]
+                : [`¡Hola! ¿Seguimos con el envío de R$${cliente.ultimo_monto}? 💸`, `¡Qué tal! ¿Continuamos con R$${cliente.ultimo_monto}? 😊`]);
+            await enviarSeguro(phone, m); return m;
+        }
+        if (cliente?.estado === "aguardando_comprovante") {
+            const m = pickL(ESPERA_COMPROBANTE_ES, ESPERA_COMPROBANTE_PT, lang);
+            await enviarSeguro(phone, m); return "";
+        }
+        if (esVIP && diasInactivo >= 30) {
+            const dias = diasInactivo >= 90
+                ? (lang === "pt" ? "muito tempo" : "mucho tiempo")
+                : (lang === "pt" ? "um tempo" : "un tiempo");
+            const m = lang === "pt"
+                ? `Que bom te ver de volta após ${dias} 😊 Já tenho seus dados. Como posso te ajudar hoje?`
+                : `¡Qué bueno verte de nuevo después de ${dias}! 😊 Ya tengo tus datos. ¿Cómo puedo ayudarte hoy?`;
+            await enviarSeguro(phone, m); return m;
+        }
+        // Fallback siempre presente para cliente que ya saludó
+        const mf = lang === "pt"
+            ? pick(["Olá de novo! 😊 Em que posso te ajudar?", "Oi! 😊 O que precisa hoje?"])
+            : pick(["¡Hola de nuevo! 😊 ¿En qué te ayudo?", "¡Hola! 😊 ¿Qué necesitas hoy?"]);
+        await enviarSeguro(phone, mf); return mf;
     }
 
-    // GRUPO C: Sugerir repetir si el motor detecta patrón claro
-    if (!yaSaludado && anticipacion?.sugerirRepetir && anticipacion?.sugerirMonto && tarjetaGuardada) {
+    // Primer saludo — motor de memoria + anticipacion
+    const anticipacion = await memoryMotor.generarAnticipacion(phone).catch(() => null);
+
+    if (anticipacion?.sugerirRepetir && anticipacion?.sugerirMonto && tarjetaGuardada) {
         const ultimos = String(tarjetaGuardada).slice(-4);
         const monto   = anticipacion.sugerirMonto;
         const m = lang === "pt"
@@ -524,36 +510,48 @@ async function manejarSaludo(phone, pushName, cliente, yaSaludado, lang, esEs) {
         await guardarCliente({ phone, saludoEnviado: true });
         await enviarSeguro(phone, m); return m;
     }
-
-    if (esFrecuente && tarjetaGuardada && montoAnterior) {
+    if (frec && tarjetaGuardada && montoAnterior) {
         const ultimos = String(tarjetaGuardada).slice(-4);
         const m = lang === "pt"
-            ? `Que bom te ver de novo 😊
-
-Da última vez enviaste R$${montoAnterior} para o cartão *••••${ultimos}*. Vamos fazer o mesmo hoje?`
-            : `¡Qué bueno verte de nuevo 😊
-
-La última vez enviaste R$${montoAnterior} a la tarjeta *••••${ultimos}*. ¿Hacemos lo mismo hoy?`;
+            ? `Que bom te ver de novo 😊\n\nDa última vez enviaste R$${montoAnterior} para o cartão *••••${ultimos}*. Vamos fazer o mesmo hoje?`
+            : `¡Qué bueno verte de nuevo 😊\n\nLa última vez enviaste R$${montoAnterior} a la tarjeta *••••${ultimos}*. ¿Hacemos lo mismo hoy?`;
+        await guardarCliente({ phone, saludoEnviado: true });
         await enviarSeguro(phone, m); return m;
     }
-    if (esFrecuente && tarjetaGuardada) {
+    if (frec && tarjetaGuardada) {
         const ultimos = String(tarjetaGuardada).slice(-4);
         const m = lang === "pt"
             ? `Olá de novo 😊 Já tenho seu cartão *••••${ultimos}* guardado. Quanto vai enviar hoje?`
             : `¡Hola de nuevo 😊 Ya tengo tu tarjeta *••••${ultimos}* guardada. ¿Cuánto vas a enviar hoy?`;
+        await guardarCliente({ phone, saludoEnviado: true });
         await enviarSeguro(phone, m); return m;
     }
-    if (montoAnterior && !esFrecuente) {
+    if (montoAnterior && !frec) {
         const m = lang === "pt"
             ? pick([`Da última vez enviaste R$${montoAnterior}. Vai ser o mesmo valor hoje? 😊`, `Quanto quer enviar hoje? 😊`])
             : pick([`La última vez enviaste R$${montoAnterior}. ¿El mismo monto hoy? 😊`, `¿Cuánto quieres enviar? 😊`]);
+        await guardarCliente({ phone, saludoEnviado: true });
         await enviarSeguro(phone, m); return m;
     }
 
-    const m = lang === "pt"
-        ? pick(["Quanto quer enviar? 😊", "O que precisa hoje? 😊"])
-        : pick(["¿Cuánto quieres enviar? 😊", "¿En qué te ayudo? 😊"]);
-    await enviarSeguro(phone, m); return m;
+    // Saludo nuevo por hora e idioma
+    let s;
+    if (lang === "pt") {
+        const pn = n ? ` ${n}` : "";
+        if (frec)        s = pick([`Oi${pn}! Que bom te ver de novo 😊 Em que posso te ajudar hoje?`, `Olá${pn}! Sempre bom contar com você 😊 O que precisa hoje?`]);
+        else if (h < 12) s = pick([`Bom dia${pn}! ☀️ Como posso te ajudar?`, `Olá${pn}, bom dia! ☀️ Em que posso ajudar?`]);
+        else if (h < 18) s = pick([`Boa tarde${pn}! 🌤️ Como posso te ajudar?`, `Oi${pn}! Boa tarde ☀️ Em que posso ajudar hoje?`]);
+        else             s = pick([`Boa noite${pn}! 🌙 Como posso te ajudar?`, `Oi${pn}! Boa noite 🌙 Estou aqui para o que precisar.`]);
+    } else {
+        const pn = n ? `, ${n}` : "";
+        if (frec)        s = pick([`¡Hola${pn}! Qué bueno verte de nuevo 😊 ¿En qué te ayudo hoy?`, `¡Hola${pn}! Siempre un placer 😊 ¿Qué necesitas?`]);
+        else if (h < 12) s = pick([`¡Buenos días${pn}! ☀️ ¿En qué te puedo ayudar?`, `¡Hola${pn}, buenos días! ☀️ ¿Qué necesitas?`]);
+        else if (h < 18) s = pick([`¡Buenas tardes${pn}! 🌤️ ¿En qué te ayudo?`, `¡Hola${pn}! Buenas tardes 😊 ¿Qué necesitas?`]);
+        else             s = pick([`¡Buenas noches${pn}! 🌙 ¿En qué te ayudo?`, `¡Hola${pn}! Buenas noches 😊 ¿Qué necesitas?`]);
+    }
+    await guardarCliente({ phone, saludoEnviado: true });
+    await enviarSeguro(phone, s);
+    return s;
 }
 
 async function manejarImagen(phone, pushName, cliente, imageUrl, lang, esEs) {
