@@ -323,6 +323,28 @@ app.post("/admin/oferta", adminLimiter, verificarToken, async (req, res) => {
     } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
+// ── Plantillas de mensajes ──────────────────
+app.get("/admin/plantillas", adminLimiter, verificarToken, async (req, res) => {
+    try {
+        const r = await pool.query("SELECT * FROM plantillas ORDER BY clave, idioma");
+        res.json(r.rows);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post("/admin/plantillas/:id", adminLimiter, verificarToken, async (req, res) => {
+    try {
+        const { texto } = req.body;
+        if (!texto || !texto.trim()) return res.status(400).json({ error: "Texto requerido" });
+        await pool.query(
+            "UPDATE plantillas SET texto = $1, updated_at = NOW() WHERE id = $2",
+            [texto.trim(), req.params.id]
+        );
+        // Invalidar cache de CRM para que tome los cambios inmediatamente
+        crm.invalidarCachePlantillas();
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get("/", (req, res) => res.send("YordaBot Online ✅"));
 
 app.listen(PORT, () => console.log(`🚀 Servidor en puerto ${PORT}`));
@@ -337,6 +359,54 @@ const { enviarMensaje } = require("./src/services/zapi");
 
 // Migrar columnas CRM al arrancar (safe: IF NOT EXISTS)
 crm.migrarColumnasCRM().catch(e => console.error("❌ CRM migración:", e.message));
+
+// Crear tabla plantillas si no existe (safe)
+(async () => {
+    try {
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS plantillas (
+                id          VARCHAR(40)  PRIMARY KEY,
+                clave       VARCHAR(40)  NOT NULL,
+                idioma      VARCHAR(2)   NOT NULL,
+                texto       TEXT         NOT NULL,
+                descripcion VARCHAR(200),
+                updated_at  TIMESTAMPTZ  DEFAULT NOW()
+            )
+        `);
+        // Insertar plantillas default solo si la tabla está vacía
+        const count = await pool.query("SELECT COUNT(*) FROM plantillas");
+        if (Number(count.rows[0].count) === 0) {
+            await pool.query(`
+                INSERT INTO plantillas (id, clave, idioma, texto, descripcion) VALUES
+                ('recuperar_30m_es','recuperar_30m','es','Hola{nombre} 😊 ¿Pudiste hacer el pago de R${monto}?
+
+Estoy aquí si necesitas ayuda. 👌','Recordatorio 30 min (español)'),
+                ('recuperar_30m_pt','recuperar_30m','pt','Oi{nombre} 😊 Conseguiu fazer o pagamento de R${monto}?
+
+Estou aqui se precisar de ajuda. 👌','Recordatorio 30 min (portugués)'),
+                ('recuperar_24h_es','recuperar_24h','es','Hola{nombre} 👋 Las tasas pueden haber cambiado.
+
+¿Quieres una nueva cotización? Solo dime el monto 😊','Recordatorio 24h (español)'),
+                ('recuperar_24h_pt','recuperar_24h','pt','Oi{nombre} 👋 As taxas podem ter mudado.
+
+Quer uma nova cotação? É só me dizer o valor 😊','Recordatorio 24h (portugués)'),
+                ('recuperar_7d_es','recuperar_7d','es','Hola{nombre} 🇨🇺 Estamos disponibles cuando necesites enviar a Cuba.
+
+¿Alguna novedad? 😊','Reactivación 7 días (español)'),
+                ('recuperar_7d_pt','recuperar_7d','pt','Oi{nombre} 🇨🇺 Estamos disponíveis quando precisar enviar para Cuba.
+
+Alguma novidade? 😊','Reactivación 7 días (portugués)'),
+                ('completado_frecuente_es','completado_frecuente','es','¡Gracias{nombre}! 🎉 Eres un cliente frecuente — aquí siempre tienes prioridad 💪','Cliente frecuente al completar (español)'),
+                ('completado_frecuente_pt','completado_frecuente','pt','Obrigada{nombre}! 🎉 Você é um cliente frequente — aqui sempre tem prioridade 💪','Cliente frecuente al completar (portugués)')
+                ON CONFLICT (id) DO NOTHING
+            `);
+            console.log("✅ Plantillas default insertadas");
+        }
+        console.log("✅ Tabla plantillas lista");
+    } catch (e) {
+        console.warn("⚠️ Plantillas init:", e.message);
+    }
+})();
 
 // Ejecutar cada 15 minutos
 setInterval(() => {
