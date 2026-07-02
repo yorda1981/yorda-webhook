@@ -105,13 +105,20 @@ async function limpiarSesionDB(phone) {
     try {
         await pool.query(`
             UPDATE customers SET
-                estado               = NULL,
-                fecha_estado         = NULL,
-                fecha_pix            = NULL,
+                estado                = NULL,
+                fecha_estado          = NULL,
+                fecha_pix             = NULL,
                 comprobante_pendiente = NULL,
-                valor_comprobante    = NULL,
-                last_response_id     = NULL,
-                updated_at           = NOW()
+                valor_comprobante     = NULL,
+                last_response_id      = NULL,
+                -- Limpiar datos de la operación anterior para evitar que
+                -- se reutilicen en una nueva cotización del mismo cliente
+                ultimo_monto          = NULL,
+                tipo_favorito         = NULL,
+                tarjeta_frecuente     = NULL,
+                titular_frecuente     = NULL,
+                banco_favorito        = NULL,
+                updated_at            = NOW()
             WHERE phone = $1
         `, [phone]);
         return true;
