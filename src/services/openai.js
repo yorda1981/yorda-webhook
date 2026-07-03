@@ -122,8 +122,11 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             const tarjetas = Array.isArray(cliente?.tarjetas) ? cliente.tarjetas.filter(t => /^\d{15,16}$/.test(t)) : [];
 
             // Respuesta a "¿usamos la guardada?" → sí/no
-            const esSi = /^(si|sí|yes|sim|claro|ok|dale|esa|essa|la misma|la de siempre|usala|use essa)$/i.test(txt.trim());
-            const esNo = /^(no|nao|não|otra|outra|cambiar|mudar|nueva|nova)$/i.test(txt.trim());
+            const esSi =
+                /^(si|sí|yes|sim|claro|ok|dale|esa|essa|la misma|la de siempre|usala|use essa|esa misma|esa que te envie|esa que te envié|a esa|usa esa|manda el pix|envia el pix|envía el pix|manda o pix|envia o pix|esa misma tarjeta|con esa|con esa misma)$/i.test(txt.trim()) ||
+                // Frases más largas que contienen confirmación de tarjeta
+                /a esa (que|tarjeta)|esa (que|tarjeta) (te |le )?(envie|envié|mande|mandé|pasé|pase)|usa(r)? (esa|la misma)|con (esa|la misma)|envia(me)? (el|o) pix|manda(me)? (el|o) pix/i.test(txt);
+            const esNo = /^(no|nao|não|otra|outra|cambiar|mudar|nueva|nova|otra tarjeta|outra tarjeta)$/i.test(txt.trim());
 
             if (esSi && cliente?.tarjeta_frecuente && !tarjetas.length) {
                 // Confirma usar la tarjeta frecuente
@@ -574,6 +577,7 @@ async function manejarImagen(phone, pushName, cliente, imageUrl, lang, esEs) {
         const num = String(det.tarjeta || "").replace(/\D/g, "");
         if (det.banco?.toLowerCase().includes("bpa") && num.startsWith("1239")) { await enviarSeguro(phone, pick(TARJETA_ILEGIBLE)); return ""; }
         if (det.valida && /^\d{15,16}$/.test(num)) {
+            const estabaSeleccionando = cliente?.estado === "seleccionando_tarjeta";
             await guardarTarjeta(phone, num, det.titular, det.banco, cliente);
             const cli2 = await obtenerCliente(phone);
             if (cli2.comprobante_pendiente && await intentarCompletarOperacion(phone, pushName, cli2, esEs)) return "";
@@ -581,7 +585,14 @@ async function manejarImagen(phone, pushName, cliente, imageUrl, lang, esEs) {
                 await guardarCliente({ phone, estado: "aguardando_comprovante", fechaEstado: new Date().toISOString(), fechaPix: new Date().toISOString() });
                 const m = lang === "pt" ? `Cartão salvo! 💳\n\nVou te mandar o PIX para pagar R$${cli2.ultimo_monto} 👇` : `¡Tarjeta guardada! 💳\n\nTe envío el PIX para pagar R$${cli2.ultimo_monto} 👇`;
                 await enviarSeguro(phone, m);
-                return await enviarPIX(phone, cli2, esEs);
+                // Si estaba en seleccionando_tarjeta → enviar PIX directo con nueva tarjeta, sin preguntar
+                const cli3 = await obtenerCliente(phone);
+                return await _enviarPIXFinal(phone, cli3, esEs);
+            }
+            // Si estaba seleccionando tarjeta y no tiene monto → solo confirmar tarjeta guardada
+            if (estabaSeleccionando) {
+                const m = lang === "pt" ? `Cartão salvo! 💳 Quanto vai enviar?` : `¡Tarjeta guardada! 💳 ¿Cuánto vas a enviar?`;
+                await enviarSeguro(phone, m); return m;
             }
             const m = pickL(CONFIRMA_TARJETA_SIN_MONTO, CONFIRMA_TARJETA_SIN_MONTO_PT, lang);
             await enviarSeguro(phone, m); return m;
