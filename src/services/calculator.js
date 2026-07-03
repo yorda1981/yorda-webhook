@@ -42,7 +42,12 @@ async function calcularOperacion({ tipo, valor }) {
     }
 
     if (tipo === "mlc") {
-        return { valor: monto, tasa: Number(tasas.mlc || 0), cup: Math.floor(monto * Number(tasas.mlc || 0)) };
+        // tasa MLC = precio en reales de 1 MLC (ej: 1 MLC = R$5)
+        // cliente paga X reales → recibe X / tasa MLC
+        const tasaMlc = Number(tasas.mlc || 0);
+        if (!tasaMlc) return null;
+        const mlcRecibe = parseFloat((monto / tasaMlc).toFixed(2));
+        return { valor: monto, tasa: tasaMlc, mlc: mlcRecibe };
     }
 
     return null;
