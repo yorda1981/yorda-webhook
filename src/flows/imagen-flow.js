@@ -8,6 +8,28 @@ const { parseGPT, getPIXKey, getPIXAliases } = require("./shared");
 const openai = new OpenAI({ apiKey: env.OPENAI_API_KEY });
 
 // ─────────────────────────────────────────
+// RETRY — reintento automático ante fallos de OpenAI
+// ─────────────────────────────────────────
+async function conReintento(fn, intentos = 3, delayMs = 1500) {
+    for (let i = 0; i < intentos; i++) {
+        try {
+            return await fn();
+        } catch (e) {
+            const esPrematureClose = e.message?.includes("Premature close") ||
+                                     e.message?.includes("fetch failed") ||
+                                     e.message?.includes("ECONNRESET") ||
+                                     e.message?.includes("timeout");
+            if (esPrematureClose && i < intentos - 1) {
+                console.warn(`⚠️ OpenAI fallo (intento ${i+1}/${intentos}): ${e.message} — reintentando...`);
+                await new Promise(r => setTimeout(r, delayMs * (i + 1)));
+                continue;
+            }
+            throw e;
+        }
+    }
+}
+
+// ─────────────────────────────────────────
 // PROMPT OCR — IMAGEN
 // ─────────────────────────────────────────
 
@@ -52,20 +74,35 @@ FALSOS POSITIVOS A EVITAR:
 ═══════════════════════════
 REGLAS PARA COMPROBANTE PIX
 ═══════════════════════════
-IDENTIFICACIÓN:
-- Son capturas de pantalla o PDFs de transferencias PIX brasileñas
-- Suelen tener: "Pix enviado", "Transferência realizada", "Comprovante"
-- Tienen valor en R$, fecha, hora, nombre del destinatario y banco
+IDENTIFICACIÓN — MÚLTIPLES FORMATOS:
+El comprobante PIX puede aparecer en varios formatos:
+
+FORMATO 1 — Comprobante estándar:
+- Texto: "Pix enviado", "Transferência realizada", "Comprovante", "Pix efetuado"
+- Tiene valor en R$, fecha, hora, destinatario
+
+FORMATO 2 — Detalle de transacción bancaria (Banco do Brasil, Nubank, etc.):
+- Tiene campos como: "Chave Pix", "Pagador", "Instituição", "Conta", "Agência"
+- Tiene ID de transação (formato: E + números largos)
+- Puede NO tener el valor visible pero tiene la chave PIX
+- Este formato es igualmente válido como comprobante
+
+FORMATO 3 — Recibo de app bancario:
+- Puede tener "Comprovante de transferência", "Dados da transação"
+- Campos: "Valor", "Data do débito", "Número de controle"
 
 EXTRACCIÓN:
-- valor: número puro sin símbolo ni separadores (200.50, no "R$200,50")
-- fecha: formato DD/MM/AAAA
-- hora: formato HH:MM
-- banco: nombre del banco de origen del pagador
-- destinatario: nombre completo de quien recibe el PIX
-- destino_correcto: true si el destinatario coincide con alguno de estos nombres: ${aliases}
-${key ? `- destino_correcto: true también si aparece la clave PIX: ${key}` : ""}
-- valido: true si el comprobante parece auténtico (no editado, no repetido)
+- valor: número puro sin símbolo (200.50, no "R$200,50") — si no está visible, null
+- fecha: DD/MM/AAAA — buscar en "Data do débito", "Data", fecha de la transacción
+- hora: HH:MM — buscar en la fecha o campo de hora
+- banco: banco del PAGADOR (quien envió) — campo "Instituição" del pagador
+- destinatario: buscar en campo "Recebedor", "Destinatário", "Nome" del recibidor — si no está, null
+- destino_correcto: true si aparece la chave PIX: ${key || "(no configurada)"}
+  O si el destinatario coincide con: ${aliases}
+  O si la "Instituição" del recibidor contiene "NU PAGAMENTOS" o "NUBANK"
+- valido: true si el documento parece auténtico
+
+IMPORTANTE: Si ves "Chave Pix: ${key || ""}" en la imagen → destino_correcto: true automáticamente
 - datos faltantes o ilegibles → null
 
 SEÑALES DE COMPROBANTE FALSO:
@@ -108,14 +145,14 @@ Sin texto extra fuera del JSON.`;
 
 async function detectarImagenUnificada(imageUrl) {
     try {
-        const r = await openai.chat.completions.create({
+        const r = await conReintento(() => openai.chat.completions.create({
             model: "gpt-4o",
             messages: [{ role: "user", content: [
                 { type: "text",      text: promptImagen() },
                 { type: "image_url", image_url: { url: imageUrl, detail: "high" } }
             ]}],
             max_tokens: 300
-        });
+        }));
         return parseGPT(r.choices?.[0]?.message?.content);
     } catch (e) {
         console.error("❌ OCR:", e.message);
@@ -132,11 +169,11 @@ async function detectarComprobantePDF(pdfUrl) {
         const resp     = await fetch(pdfUrl);
         const buf      = Buffer.from(await resp.arrayBuffer());
         const { text } = await pdfParse(buf);
-        const r = await openai.chat.completions.create({
+        const r = await conReintento(() => openai.chat.completions.create({
             model: "gpt-4o-mini",
             messages: [{ role: "user", content: promptPDF() + `\n\nTexto del comprobante:\n${text}` }],
             max_tokens: 250
-        });
+        }));
         return parseGPT(r.choices?.[0]?.message?.content);
     } catch (e) {
         console.error("❌ PDF:", e.message);
@@ -329,12 +366,12 @@ async function llamarAsistente(mensajeUsuario, lastResponseId = null, contextoCl
         }
     }
 
-    const response = await openai.responses.create({
+    const response = await conReintento(() => openai.responses.create({
         model: "gpt-4o-mini",
         input: mensajeUsuario,
         instructions: buildSystemPrompt() + instruccionesExtra,
         ...(lastResponseId && { previous_response_id: lastResponseId })
-    });
+    }));
 
     const texto = response.output
         ?.filter(b => b.type === "message")
