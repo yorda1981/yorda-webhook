@@ -203,6 +203,13 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             if (montoG > 0) return await cotizarUSD(phone, pushName, montoG, tipoUSD, lang, esEs) || "";
         }
 
+        // ── Estado aguardando monto USD — número siguiente es USD ──
+        if (cliente?.estado === "aguardando_monto_usd" && montoValido) {
+            const tipoUSD = cliente?.tipo_favorito || "usd_clasica";
+            await guardarCliente({ phone, estado: null });
+            return await cotizarUSD(phone, pushName, valorFinal, tipoUSD, lang, esEs) || "";
+        }
+
         // ── Tarjeta por texto ──
         const esTarjeta = detectarTarjetaTexto(text);
         if (esTarjeta) {
@@ -666,16 +673,21 @@ async function manejarImagen(phone, pushName, cliente, imageUrl, lang, esEs) {
             const estabaSeleccionando = cliente?.estado === "seleccionando_tarjeta";
             await guardarTarjeta(phone, num, det.titular, det.banco, cliente);
             const cli2 = await obtenerCliente(phone);
-            if (cli2.comprobante_pendiente && await intentarCompletarOperacion(phone, pushName, cli2, esEs)) return "";
+
+            // Si hay comprobante pendiente → intentar completar operación directamente
+            if (cli2.comprobante_pendiente) {
+                const completado = await intentarCompletarOperacion(phone, pushName, cli2, esEs);
+                if (completado) return "";
+            }
+
             if (cli2.ultimo_monto && Number(cli2.ultimo_monto) > 0) {
-                await guardarCliente({ phone, estado: "aguardando_comprovante", fechaEstado: new Date().toISOString(), fechaPix: new Date().toISOString() });
+                await guardarCliente({ phone, tarjeta: num, estado: "aguardando_comprovante", fechaEstado: new Date().toISOString(), fechaPix: new Date().toISOString() });
                 const m = lang === "pt" ? `Cartão salvo! 💳\n\nVou te mandar o PIX para pagar R$${cli2.ultimo_monto} 👇` : `¡Tarjeta guardada! 💳\n\nTe envío el PIX para pagar R$${cli2.ultimo_monto} 👇`;
                 await enviarSeguro(phone, m);
-                // Si estaba en seleccionando_tarjeta → enviar PIX directo con nueva tarjeta, sin preguntar
                 const cli3 = await obtenerCliente(phone);
                 return await _enviarPIXFinal(phone, cli3, esEs);
             }
-            // Si estaba seleccionando tarjeta y no tiene monto → solo confirmar tarjeta guardada
+            // Sin monto ni comprobante → confirmar tarjeta y pedir monto
             if (estabaSeleccionando) {
                 const m = lang === "pt" ? `Cartão salvo! 💳 Quanto vai enviar?` : `¡Tarjeta guardada! 💳 ¿Cuánto vas a enviar?`;
                 await enviarSeguro(phone, m); return m;
@@ -697,7 +709,12 @@ async function preguntarCantidadUSD(phone, txt, lang, esEs) {
     const esClasica = /clasica|clásica|classica|clássica|clasica|bpa|bandec/.test(txt);
     const esPrepago = /prepago|nauta|internacional/.test(txt);
     const esEfec    = /efectivo|cash/.test(txt);
-    const tipo = esEfec ? "efectivo" : esClasica ? "clásica" : esPrepago ? "prepago" : null;
+    const tipo      = esEfec ? "efectivo" : esClasica ? "clásica" : esPrepago ? "prepago" : null;
+    const tipoDb    = esEfec ? "usd_efectivo" : esClasica ? "usd_clasica" : esPrepago ? "usd_prepago" : "usd_pendiente_tipo";
+
+    // Guardar tipo USD para que el próximo número sea procesado como USD
+    await guardarCliente({ phone, tipo: tipoDb, estado: "aguardando_monto_usd", fechaEstado: new Date().toISOString() });
+
     const m = lang === "pt"
         ? `Certo${tipo ? ` (${tipo})` : ""} 💵\n\nQual o valor em USD que quer enviar?`
         : `Perfecto${tipo ? ` (${tipo})` : ""} 💵\n\n¿Cuánto USD quieres enviar?`;
