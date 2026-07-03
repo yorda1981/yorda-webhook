@@ -271,12 +271,43 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
 
         // ── MLC ──
         const esMLC = txt.includes("mlc");
+
+        // "300 reales cuántos MLC serían" → BRL→MLC, deriva a Yordanys
+        if (esMLC && (txt.includes("real") || txt.includes("brl") || txt.includes("reais")) && montoValido) {
+            const m = esEs
+                ? "Para envíos en MLC, Yordanys te atiende directamente 😊 Aguarda un momento."
+                : "Para envios em MLC, Yordanys te atende diretamente 😊 Aguarda um momento.";
+            await enviarSeguro(phone, m); return m;
+        }
         if (esMLC && montoValido) return await cotizarMLC(phone, pushName, valorFinal, lang) || "";
         if (esMLC)                return await tasaMLC(phone, lang) || "";
 
         // ── CUP inverso ──
         const cupInv = detectarCUPInverso(txt);
         if (cupInv) { const r = await cotizarCUPInverso(phone, pushName, cupInv, lang); if (r) return r; }
+
+        // ── Despedida ──
+        const esDespedida =
+            // Palabras exactas de despedida
+            /^(gracias|ok gracias|hasta luego|chau|tchau|obrigado|obrigada|flw|valeu|até mais|adeus|hasta pronto|nos vemos|ciao|bye|byebye|hasta la proxima|até logo|até mais|muito obrigado|muito obrigada|muchas gracias|ok muchas gracias|gracias yordanys|obrigado yordanys)[\s!.😊👋]*$/i.test(txt.trim()) ||
+            // Frases de cierre
+            /^(ok (muchas )?gracias|(muchas )?gracias (yordanys|por todo|por tu ayuda)?|muito obrigad[ao]( yordanys)?|valeu (demais|muito)?|até (logo|mais|a próxima)|nos vemos pronto)[\s!.😊👋]*$/i.test(txt.trim());
+
+        if (esDespedida) {
+            const n = pushName ? `, ${pushName.split(" ")[0]}` : "";
+            const m = lang === "pt"
+                ? pick([
+                    `Obrigada${n}! 😊 Foi um prazer. Aqui estaremos quando precisar. 👋`,
+                    `Até logo${n}! 😊 Obrigada pela confiança. Qualquer coisa é só chamar. 👋`,
+                    `Foi um prazer${n}! 😊 Quando precisar enviar para Cuba, estamos aqui. 👋`
+                ])
+                : pick([
+                    `¡Fue un placer${n}! 😊 Gracias por la confianza. Aquí estaremos cuando nos necesites. 👋`,
+                    `¡Hasta pronto${n}! 😊 Fue un gusto ayudarte. Cuando quieras, aquí estamos. 👋`,
+                    `¡Gracias${n}! 😊 Aquí estaremos siempre que lo necesites. 👋`
+                ]);
+            await enviarSeguro(phone, m); return m;
+        }
 
         // ── Consulta tasas ──
         if (/a cuanto|a como|tasa.*hoy|cambio.*hoy|hoy.*cambio|hoy.*tasa|cual es la tasa|como esta el cambio|como esta la tasa|cuanto vale|cuanto esta|precio.*hoy|hoy.*precio|tasa de hoy|cambio de hoy/.test(txt))
@@ -415,28 +446,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             await enviarSeguro(phone, "Perfecto 😊\n\n¿Cuánto deseas enviar?"); return "";
         }
 
-        // ── Despedida ──
-        const esDespedida =
-            // Palabras exactas de despedida
-            /^(gracias|ok gracias|hasta luego|chau|tchau|obrigado|obrigada|flw|valeu|até mais|adeus|hasta pronto|nos vemos|ciao|bye|byebye|hasta la proxima|até logo|até mais|muito obrigado|muito obrigada|muchas gracias|ok muchas gracias|gracias yordanys|obrigado yordanys)[\s!.😊👋]*$/i.test(txt.trim()) ||
-            // Frases de cierre
-            /^(ok (muchas )?gracias|(muchas )?gracias (yordanys|por todo|por tu ayuda)?|muito obrigad[ao]( yordanys)?|valeu (demais|muito)?|até (logo|mais|a próxima)|nos vemos pronto)[\s!.😊👋]*$/i.test(txt.trim());
 
-        if (esDespedida) {
-            const n = pushName ? `, ${pushName.split(" ")[0]}` : "";
-            const m = lang === "pt"
-                ? pick([
-                    `Obrigada${n}! 😊 Foi um prazer. Aqui estaremos quando precisar. 👋`,
-                    `Até logo${n}! 😊 Obrigada pela confiança. Qualquer coisa é só chamar. 👋`,
-                    `Foi um prazer${n}! 😊 Quando precisar enviar para Cuba, estamos aqui. 👋`
-                ])
-                : pick([
-                    `¡Fue un placer${n}! 😊 Gracias por la confianza. Aquí estaremos cuando nos necesites. 👋`,
-                    `¡Hasta pronto${n}! 😊 Fue un gusto ayudarte. Cuando quieras, aquí estamos. 👋`,
-                    `¡Gracias${n}! 😊 Aquí estaremos siempre que lo necesites. 👋`
-                ]);
-            await enviarSeguro(phone, m); return m;
-        }
 
         // ── Cierre inteligente ──
         if (Number(cliente?.ultimo_monto) > 0 && !!(cliente?.tarjeta || cliente?.tarjeta_frecuente)) {
@@ -476,17 +486,25 @@ function detectarEmocion(txt) {
 }
 
 function extraerMonto(txt, text) {
-    const MONTO_MONETARIO = /(?:r\$|reais|reales|real|brl|usd|d[oó]lar(?:es)?|cup|mlc|pesos?|plata|dinero)\s*(\d{2,5})|\b(\d{2,5})\s*(?:r\$|reais|reales|real|brl|usd|d[oó]lar(?:es)?|cup|mlc|pesos?)/i;
-    const matchMonetario  = text.match(MONTO_MONETARIO);
+    // Normalizar texto: "2.6000" → "2600", "400 000" → "400000", "2,600" → "2600"
+    const textNorm = text
+        .replace(/(\d)[\s.](?=\d{3}\b)/g, "$1")   // "400 000" → "400000", "2.600" → "2600"
+        .replace(/(\d),(\d{3})\b/g, "$1$2");         // "2,600" → "2600"
+    const txtNorm = textNorm.toLowerCase()
+        .normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+    const MONTO_MONETARIO = /(?:r\$|reais|reales|real|brl|usd|d[oó]lar(?:es)?|cup|mlc|pesos?|plata|dinero)\s*(\d{2,6})|\b(\d{2,6})\s*(?:r\$|reais|reales|real|brl|usd|d[oó]lar(?:es)?|cup|mlc|pesos?)/i;
+    const matchMonetario  = textNorm.match(MONTO_MONETARIO);
     const valorMonetario  = matchMonetario ? Number(matchMonetario[1] || matchMonetario[2]) : null;
+
     let valorContextual = null;
-    if (!valorMonetario && /enviar|mandar|envio|cotiz|transfer|pagar|monto|quant|cuant|quanto|quiero/.test(txt)) {
-        const mc = /\b(\d{2,5})\b/g;
+    if (!valorMonetario && /enviar|mandar|envio|cotiz|transfer|pagar|monto|quant|cuant|quanto|quiero/.test(txtNorm)) {
+        const mc = /\b(\d{2,6})\b/g;
         let m;
-        while ((m = mc.exec(txt)) !== null) { const n = Number(m[1]); if (n >= 10 && n <= 50000) { valorContextual = n; break; } }
+        while ((m = mc.exec(txtNorm)) !== null) { const n = Number(m[1]); if (n >= 10 && n <= 99999) { valorContextual = n; break; } }
     }
     const valorFinal  = valorMonetario || valorContextual || null;
-    const montoValido = !!(valorFinal && valorFinal >= 10 && valorFinal <= 50000);
+    const montoValido = !!(valorFinal && valorFinal >= 10 && valorFinal <= 99999);
     return { valorFinal, valorMonetario, montoValido };
 }
 
