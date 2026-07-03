@@ -109,9 +109,10 @@ async function cotizarMLC(phone, pushName, valorFinal, lang) {
     }
     const oferta    = await leerOferta();
     const ofertaMsg = oferta ? `\n\n🔥 *OFERTA:* ${oferta}` : "";
+    // MLC: cliente paga reales y recibe MLC en Cuba
     const res = lang === "pt"
-        ? `💳 ${valorFinal} MLC = ${fmt(r.cup)} CUP 🇨🇺${ofertaMsg}\n\n${pickL(CIERRES_COT, CIERRES_COT_PT, lang)}`
-        : `💳 ${valorFinal} MLC = ${fmt(r.cup)} CUP 🇨🇺${ofertaMsg}\n\n${pickL(CIERRES_COT, CIERRES_COT_PT, lang)}`;
+        ? `💳 R$${valorFinal} = *${r.mlc} MLC* 🇨🇺\n_(taxa: R$${r.tasa} por MLC)_${ofertaMsg}\n\n${pickL(CIERRES_COT, CIERRES_COT_PT, lang)}`
+        : `💳 R$${valorFinal} = *${r.mlc} MLC* 🇨🇺\n_(tasa: R$${r.tasa} por MLC)_${ofertaMsg}\n\n${pickL(CIERRES_COT, CIERRES_COT_PT, lang)}`;
     await guardarCliente({
         phone, nombre: pushName, monto: valorFinal, tipo: "mlc",
         estado: "cotizacion_realizada",
@@ -255,8 +256,8 @@ R$100–499: ${t.brl_100} CUP
 R$500–999: ${t.brl_500} CUP
 R$1000+: ${t.brl_1000} CUP
 
-💵 USD Clásica/Prepago: ${t.usd1} CUP${t.mlc ? `
-💳 MLC: ${t.mlc} CUP` : ""}
+💵 USD: R$${t.usd1} por dólar${t.mlc ? `
+💳 MLC: R$${t.mlc} por MLC` : ""}
 
 ¿Cuánto quieres enviar? 😊`;
     await enviarSeguro(phone, msg);
