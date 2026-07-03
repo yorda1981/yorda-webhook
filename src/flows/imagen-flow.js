@@ -1,16 +1,27 @@
 "use strict";
 
+const https    = require("https");
 const OpenAI   = require("openai");
 const pdfParse = require("pdf-parse");
 const env      = require("../config/env");
 const { parseGPT, getPIXKey, getPIXAliases } = require("./shared");
 
-const openai = new OpenAI({ apiKey: env.OPENAI_API_KEY });
+const openai = new OpenAI({
+    apiKey: env.OPENAI_API_KEY,
+    timeout: 30000,  // 30s default timeout
+    httpAgent: new https.Agent({
+        keepAlive: true,
+        keepAliveMsecs: 30000,
+        maxSockets: 50,
+        maxFreeSockets: 10,
+        timeout: 30000
+    })
+});
 
 // ─────────────────────────────────────────
 // RETRY — reintento automático ante fallos de OpenAI
 // ─────────────────────────────────────────
-async function conReintento(fn, intentos = 3, delayMs = 1500) {
+async function conReintento(fn, intentos = 3, delayBase = 1000) {
     for (let i = 0; i < intentos; i++) {
         try {
             return await fn();
@@ -20,8 +31,12 @@ async function conReintento(fn, intentos = 3, delayMs = 1500) {
                                      e.message?.includes("ECONNRESET") ||
                                      e.message?.includes("timeout");
             if (esPrematureClose && i < intentos - 1) {
-                console.warn(`⚠️ OpenAI fallo (intento ${i+1}/${intentos}): ${e.message} — reintentando...`);
-                await new Promise(r => setTimeout(r, delayMs * (i + 1)));
+                // Exponential backoff with jitter: 1s, 2s, 4s (± up to 20% jitter)
+                const expDelay = delayBase * Math.pow(2, i);
+                const jitter   = Math.floor(Math.random() * expDelay * 0.2);
+                const waitMs   = expDelay + jitter;
+                console.warn(`⚠️ OpenAI fallo (intento ${i+1}/${intentos}): ${e.message} — reintentando en ${waitMs}ms...`);
+                await new Promise(r => setTimeout(r, waitMs));
                 continue;
             }
             throw e;
