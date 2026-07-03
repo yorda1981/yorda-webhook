@@ -65,11 +65,21 @@ EXTRACCIÓN:
 - NO confundas con números de teléfono (empiezan con 55 + 11 dígitos en Brasil)
 - NO confundas con DNI, RG, CPF u otros documentos
 
-FALSOS POSITIVOS A EVITAR:
+FALSOS POSITIVOS A EVITAR — MUY IMPORTANTE:
 - Capturas de pantalla de conversaciones de WhatsApp → tipo:"otro"
 - Fotos de billetes o efectivo → tipo:"otro"
-- Tarjetas de crédito brasileñas (Visa, Master, Elo) → tipo:"otro" (no son cubanas)
-- Documentos de identidad → tipo:"otro"
+- Tarjetas de crédito brasileñas (Visa, Master, Elo, Hipercard) → tipo:"otro"
+- Documentos de identidad (RG, CPF, pasaporte) → tipo:"otro"
+- Tarjetas de fidelidad, puntos o incentivos (aunque digan "Clásica") → tipo:"otro"
+- Tarjetas que digan "Tarjeta de Incentivos", "Fidelidade", "Pontos", "Rewards" → tipo:"otro"
+- El reverso de cualquier tarjeta (sin número visible al frente) → tipo:"otro"
+- Tarjetas que NO sean BPA, Bandec o Metropolitano y no tengan formato cubano → tipo:"otro"
+
+Una tarjeta cubana SIEMPRE tiene:
+✓ 16 dígitos numéricos en grupos de 4
+✓ Logo de BPA, Bandec o Metropolitano
+✓ Texto "CUP", "MLC" o "USD"
+✓ Fecha de vencimiento MM/AA
 
 ═══════════════════════════
 REGLAS PARA COMPROBANTE PIX
