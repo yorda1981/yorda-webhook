@@ -18,7 +18,7 @@
         .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin-bottom: 30px; }
         .stat-card { background: var(--card); padding: 20px; border-radius: 16px; border: 1px solid #2d355a; }
         .stat-card span { font-size: 11px; color: #8b949e; text-transform: uppercase; font-weight: 700; letter-spacing: 1px; }
-        .stat-card h2 { margin: 8px 0 0; color: var(--accent); font-size: 26px; }
+        .stat-card h2 { margin: 8px 0 0; color: var(--accent); font-size: 22px; word-break: break-all; overflow-wrap: break-word; }
         .config-section { background: var(--card); padding: 28px; border-radius: 20px; border: 1px solid #2d355a; margin-bottom: 24px; }
         h3 { margin-top: 0; margin-bottom: 20px; display: flex; align-items: center; gap: 10px; }
         .table-wrapper { overflow-x: auto; }
@@ -106,6 +106,11 @@
         <div class="stat-card"><span>Cierres Hoy</span><h2 id="stat-cierres" style="color:var(--green);">—</h2></div>
         <div class="stat-card"><span>Conversión</span><h2 id="stat-conversion" style="color:#a78bfa;">—%</h2></div>
         <div class="stat-card"><span>Abandonos</span><h2 id="stat-abandonos" style="color:var(--red);">—</h2></div>
+        <div class="stat-card" style="border:1px solid #22c55e; cursor:pointer;" onclick="editarPorcentajeLucro()" title="Clic para cambiar el porcentaje">
+            <span>Lucro Est. <span id="lucro-pct-label" style="color:#22c55e;">(10%)</span></span>
+            <h2 id="stat-lucro" style="color:#22c55e;">—</h2>
+            <div style="font-size:11px;color:#8b949e;margin-top:4px;">aprox. del volumen total</div>
+        </div>
     </div>
 
     <!-- TASAS -->
@@ -150,6 +155,14 @@
             <div style="background:#0b0e1a;border-radius:12px;padding:16px;border:1px solid #2d355a;">
                 <div style="font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:1px;">Mayor Operación</div>
                 <div style="font-size:22px;font-weight:700;color:var(--red);margin-top:6px;" id="fin-mayor">—</div>
+            </div>
+            <div style="background:#0f2518;border-radius:12px;padding:16px;border:1px solid #22c55e;">
+                <div style="font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:1px;">Lucro Est. Hoy <span id="lucro-pct-fin" style="color:#22c55e;"></span></div>
+                <div style="font-size:22px;font-weight:700;color:#22c55e;margin-top:6px;" id="fin-lucro-hoy">—</div>
+            </div>
+            <div style="background:#0f2518;border-radius:12px;padding:16px;border:1px solid #22c55e;">
+                <div style="font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:1px;">Lucro Est. Mes</div>
+                <div style="font-size:22px;font-weight:700;color:#22c55e;margin-top:6px;" id="fin-lucro-mes">—</div>
             </div>
         </div>
     </div>
@@ -312,6 +325,14 @@
 
     function authH() { return { "Authorization": "Bearer " + token, "Content-Type": "application/json" }; }
 
+    // Formatea números grandes de forma compacta: 24354 → R$24,3k | 1234567 → R$1,2M
+    function fmtCompact(n) {
+        const v = Number(n);
+        if (v >= 1000000) return "R$" + (v/1000000).toFixed(1).replace(".", ",") + "M";
+        if (v >= 1000)    return "R$" + (v/1000).toFixed(1).replace(".", ",") + "k";
+        return "R$" + v.toLocaleString("pt-BR");
+    }
+
     // ── CONEXIÓN ──────────────────────────────────
     function conectar() {
         token = document.getElementById("tokenField").value.trim();
@@ -366,7 +387,7 @@
             // Stats base
             document.getElementById("stat-clientes").innerText = _clientesGlobal.length;
             document.getElementById("stat-ops").innerText      = stats.totalOperaciones || 0;
-            document.getElementById("stat-vol").innerText      = Number(stats.volumenTotal || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+            document.getElementById("stat-vol").innerText      = fmtCompact(stats.volumenTotal || 0);
             document.getElementById("stat-pend").innerText     = stats.pendientes || 0;
 
             // CRM métricas
@@ -415,6 +436,25 @@
         document.getElementById("fin-promedio").innerText= fmt(promedio);
         document.getElementById("fin-nuevos").innerText  = nuevosHoy;
         document.getElementById("fin-mayor").innerText   = fmt(mayor);
+
+        // Lucro estimado
+        const pct = Number(localStorage.getItem("lucro_pct") || 10) / 100;
+        const volTotal = suma(confirmadas);
+        const lucroTotal = Math.round(volTotal * pct);
+        const lucroHoy  = Math.round(suma(opsHoy) * pct);
+        const lucroMes  = Math.round(suma(opsMes) * pct);
+        const pctLabel  = `(${Math.round(pct*100)}%)`;
+
+        const sl = document.getElementById("stat-lucro");
+        const ll = document.getElementById("lucro-pct-label");
+        const lf = document.getElementById("lucro-pct-fin");
+        const lh = document.getElementById("fin-lucro-hoy");
+        const lm = document.getElementById("fin-lucro-mes");
+        if (sl) sl.innerText = fmt(lucroTotal);
+        if (ll) ll.innerText = pctLabel;
+        if (lf) lf.innerText = pctLabel;
+        if (lh) lh.innerText = fmt(lucroHoy);
+        if (lm) lm.innerText = fmt(lucroMes);
     }
 
     // ── PENDIENTES ────────────────────────────────
@@ -666,6 +706,17 @@
     }
 
     // ── TASAS ─────────────────────────────────────
+    // ── LUCRO ESTIMADO ───────────────────────────
+    function editarPorcentajeLucro() {
+        const actual = localStorage.getItem("lucro_pct") || "10";
+        const nuevo  = prompt("¿Qué porcentaje de lucro aproximado tienes sobre el volumen?\nEjemplo: 10 = 10%", actual);
+        if (nuevo === null) return;
+        const n = parseFloat(nuevo);
+        if (isNaN(n) || n <= 0 || n > 100) return alert("Ingresa un número entre 1 y 100");
+        localStorage.setItem("lucro_pct", n);
+        refreshData();
+    }
+
     async function guardarTasas() {
         const btn = document.getElementById("btnSave");
         btn.innerText = "Guardando...";
