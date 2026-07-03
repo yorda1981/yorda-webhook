@@ -338,7 +338,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             if (!montoValido) return await preguntarCantidadUSD(phone, txt, lang, esEs) || "";
             const esEfectivo = /efectivo|cash|vender|cambiar|comprar/.test(txt);
             const esPrepago  = /prepago|nauta|internacional/.test(txt);
-            const esClasica  = /clasica|clásica|bpa|bandec|metropolitano/.test(txt);
+            const esClasica  = /clasica|clásica|classica|clássica|clasica|bpa|bandec|metropolitano/.test(txt);
             if (!esEfectivo && !esPrepago && !esClasica) return await preguntarTipoUSD(phone, pushName, valorFinal, lang, esEs) || "";
             return await cotizarUSD(phone, pushName, valorFinal, esEfectivo ? "usd_efectivo" : esPrepago ? "usd_prepago" : "usd_clasica", lang, esEs) || "";
         }
@@ -694,7 +694,7 @@ async function manejarImagen(phone, pushName, cliente, imageUrl, lang, esEs) {
 }
 
 async function preguntarCantidadUSD(phone, txt, lang, esEs) {
-    const esClasica = /clasica|clásica|bpa|bandec/.test(txt);
+    const esClasica = /clasica|clásica|classica|clássica|clasica|bpa|bandec/.test(txt);
     const esPrepago = /prepago|nauta|internacional/.test(txt);
     const esEfec    = /efectivo|cash/.test(txt);
     const tipo = esEfec ? "efectivo" : esClasica ? "clásica" : esPrepago ? "prepago" : null;
