@@ -155,6 +155,14 @@ app.post("/webhook", webhookLimiter, async (req, res) => {
 
         const pushName = body.senderName || "Cliente";
 
+        // Ignorar mensajes editados — Z-API los reenvía como nuevos webhooks
+        // pero el cliente ya los procesó antes
+        if (body.isEdit || body.edited || body.messageStubType === "REVOKE" ||
+            body.type === "edited_message" || body.updateType === "edit") {
+            console.log(`✏️ Mensaje editado ignorado: ${phoneRaw}`);
+            return;
+        }
+
         if (await enPausaHumana(phoneRaw)) {
             console.log(`🤫 BOT SILENCIADO PARA ${phoneRaw}`);
             return;
