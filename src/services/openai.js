@@ -272,13 +272,8 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         // ── MLC ──
         const esMLC = txt.includes("mlc");
 
-        // "300 reales cuántos MLC serían" → BRL→MLC, deriva a Yordanys
-        if (esMLC && (txt.includes("real") || txt.includes("brl") || txt.includes("reais")) && montoValido) {
-            const m = esEs
-                ? "Para envíos en MLC, Yordanys te atiende directamente 😊 Aguarda un momento."
-                : "Para envios em MLC, Yordanys te atende diretamente 😊 Aguarda um momento.";
-            await enviarSeguro(phone, m); return m;
-        }
+        // MLC: cliente paga reales y recibe MLC → cotizar directamente
+        // "300 reales cuántos MLC" o "quiero enviar 300 en MLC" → cotizarMLC(300)
         if (esMLC && montoValido) return await cotizarMLC(phone, pushName, valorFinal, lang) || "";
         if (esMLC)                return await tasaMLC(phone, lang) || "";
 
