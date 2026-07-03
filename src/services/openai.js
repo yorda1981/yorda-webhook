@@ -667,8 +667,19 @@ async function manejarImagen(phone, pushName, cliente, imageUrl, lang, esEs) {
     }
     const det = await detectarImagenUnificada(imageUrl);
     if (det.tipo === "tarjeta") {
-        const num = String(det.tarjeta || "").replace(/\D/g, "");
-        if (det.banco?.toLowerCase().includes("bpa") && num.startsWith("1239")) { await enviarSeguro(phone, pick(TARJETA_ILEGIBLE)); return ""; }
+        const num   = String(det.tarjeta || "").replace(/\D/g, "");
+        const banco = String(det.banco || "").toLowerCase();
+
+        // Bancos cubanos válidos — incluyendo Clásica Tarjeta de Incentivos
+        const esBancoCubano = banco.includes("bpa") || banco.includes("bandec") ||
+                              banco.includes("metropolitano") || banco.includes("clasica") ||
+                              banco.includes("incentivo") || banco === "otro";
+        if (!esBancoCubano) {
+            console.log(`⚠️ Tarjeta rechazada — banco no cubano: ${banco}`);
+            return "";
+        }
+
+        if (banco.includes("bpa") && num.startsWith("1239")) { await enviarSeguro(phone, pick(TARJETA_ILEGIBLE)); return ""; }
         if (det.valida && /^\d{15,16}$/.test(num)) {
             const estabaSeleccionando = cliente?.estado === "seleccionando_tarjeta";
             await guardarTarjeta(phone, num, det.titular, det.banco, cliente);
