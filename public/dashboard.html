@@ -741,7 +741,15 @@
         if (!token) return;
         try {
             const r = await fetch("/admin/conversaciones", { headers: authH() });
-            _conversaciones = await r.json();
+            const raw = await r.json();
+            // Pausados primero, luego por última actividad
+            _conversaciones = raw.sort((a, b) => {
+                const aPausado = a.pausa_hasta && new Date(a.pausa_hasta) > new Date();
+                const bPausado = b.pausa_hasta && new Date(b.pausa_hasta) > new Date();
+                if (aPausado && !bPausado) return -1;
+                if (!aPausado && bPausado) return 1;
+                return new Date(b.ultima_interaccion) - new Date(a.ultima_interaccion);
+            });
             renderConversaciones(_conversaciones);
         } catch(e) { console.error("Error conversaciones:", e); }
     }
