@@ -80,7 +80,13 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         }
 
         // ── Saludo ──
-        const esSaludo = /^(hola|oi|bom dia|buenas|buenos dias|boa tarde|boa noite|buen dia|hey|hi|hello|e ai|eai|buenas tardes|buenas noches|good morning)[\s!?.]*$/.test(txt);
+        const esSaludo =
+            // Saludo puro (con emojis, signos, nombre del bot al final)
+            /^(hola|oi|bom dia|buenas|buenos dias|boa tarde|boa noite|buen dia|hey|hi|hello|e ai|eai|buenas tardes|buenas noches|good morning|ola|olá|eae|salve|boas|boa|que tal|como estas|como estás|tudo bem|tudo bom|bom dia yordanys|ola yordanys|hola yordanys|hola buen|hola buenas)[\s!?.🌙☀️🌤️]*$/i.test(txt) ||
+            // Saludo seguido de nombre del bot
+            /^(hola|oi|ola|olá|buenas|bom dia|boa tarde|boa noite)\s+(yordanys|yorda|bot)[\s!?.]*$/i.test(txt) ||
+            // Solo emoji de saludo
+            /^(👋|🙋|😊|🤝)$/.test(txt.trim());
         if (esSaludo) return await manejarSaludo(phone, pushName, cliente, yaSaludado, lang, esEs);
 
         // ── Filtro de gatillo ──
@@ -410,9 +416,25 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         }
 
         // ── Despedida ──
-        if (/^(gracias|ok gracias|hasta luego|chau|tchau|obrigado|obrigada|flw|valeu|até mais)[\s!.]*$/.test(txt.trim())) {
+        const esDespedida =
+            // Palabras exactas de despedida
+            /^(gracias|ok gracias|hasta luego|chau|tchau|obrigado|obrigada|flw|valeu|até mais|adeus|hasta pronto|nos vemos|ciao|bye|byebye|hasta la proxima|até logo|até mais|muito obrigado|muito obrigada|muchas gracias|ok muchas gracias|gracias yordanys|obrigado yordanys)[\s!.😊👋]*$/i.test(txt.trim()) ||
+            // Frases de cierre
+            /^(ok (muchas )?gracias|(muchas )?gracias (yordanys|por todo|por tu ayuda)?|muito obrigad[ao]( yordanys)?|valeu (demais|muito)?|até (logo|mais|a próxima)|nos vemos pronto)[\s!.😊👋]*$/i.test(txt.trim());
+
+        if (esDespedida) {
             const n = pushName ? `, ${pushName.split(" ")[0]}` : "";
-            const m = `¡Fue un placer${n}! 😊 Gracias por la confianza. Aquí estaremos cuando nos necesites. 👋`;
+            const m = lang === "pt"
+                ? pick([
+                    `Obrigada${n}! 😊 Foi um prazer. Aqui estaremos quando precisar. 👋`,
+                    `Até logo${n}! 😊 Obrigada pela confiança. Qualquer coisa é só chamar. 👋`,
+                    `Foi um prazer${n}! 😊 Quando precisar enviar para Cuba, estamos aqui. 👋`
+                ])
+                : pick([
+                    `¡Fue un placer${n}! 😊 Gracias por la confianza. Aquí estaremos cuando nos necesites. 👋`,
+                    `¡Hasta pronto${n}! 😊 Fue un gusto ayudarte. Cuando quieras, aquí estamos. 👋`,
+                    `¡Gracias${n}! 😊 Aquí estaremos siempre que lo necesites. 👋`
+                ]);
             await enviarSeguro(phone, m); return m;
         }
 
