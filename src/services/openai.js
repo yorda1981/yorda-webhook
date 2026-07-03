@@ -105,6 +105,25 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         // ── Imágenes ──
         if (imageUrl) return await manejarImagen(phone, pushName, cliente, imageUrl, lang, esEs);
 
+        // ── GUARD: Cliente esperando comprobante → solo aceptar comprobante verbal o imagen ──
+        // Cualquier otro texto en este estado se ignora o recibe recordatorio suave
+        if (cliente?.estado === "aguardando_comprovante") {
+            // Si es comprobante verbal → pedir foto
+            if (/paguei|pague|comprovante|comprobante|feito|realizado|ya envie|ya mande|ya pague|hice el pago|fiz o pix|hice el pix/.test(txt)) {
+                const m = esEs ? "¡Perfecto! Mándame el comprobante (foto o PDF) 📎" : "Ótimo! Me manda o comprovante (foto ou PDF) 📎";
+                await enviarSeguro(phone, m); return m;
+            }
+            // Si es quierePagar → recordar que ya se envió el PIX
+            if (/pix|llave|chave|clave/.test(txt)) {
+                const m = esEs
+                    ? pickL(ESPERA_COMPROBANTE_ES, ESPERA_COMPROBANTE_PT, lang)
+                    : pickL(ESPERA_COMPROBANTE_ES, ESPERA_COMPROBANTE_PT, lang);
+                await enviarSeguro(phone, m); return m;
+            }
+            // Cualquier otro texto → silencio (no interrumpir el flujo de pago)
+            return "";
+        }
+
         // FIX 2: Recarga sube antes de tarjetas — tiene su propio estado y no debe
         // pasar por checks de tarjeta/monto innecesariamente
         if (/recarga|recargar|recargas|recarga etecsa|recarga cuba|recargar telefono|recarga movil/.test(txt) &&
