@@ -87,6 +87,20 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             /^(hola|oi|ola|olá|buenas|bom dia|boa tarde|boa noite)\s+(yordanys|yorda|bot)[\s!?.]*$/i.test(txt) ||
             // Solo emoji de saludo
             /^(👋|🙋|😊|🤝)$/.test(txt.trim());
+
+        // Si el mensaje tiene saludo + pregunta juntos (buffer de varios mensajes)
+        // ignorar el saludo y procesar solo la parte de negocio
+        const lineas = text.split("\n").map(l => l.trim()).filter(Boolean);
+        const primerLineaEsSaludo = lineas.length > 1 && esSaludo === false &&
+            /^(hola|oi|bom dia|buenas|buenos|boa tarde|boa noite|hey|hi|hello|e ai|olá|ola)[\s!?.🌙☀️🌤️]*$/i.test(lineas[0]);
+
+        if (primerLineaEsSaludo) {
+            // Procesar solo las líneas de negocio, no el saludo
+            const sinSaludo = lineas.slice(1).join(" ");
+            if (sinSaludo) {
+                return await procesarMensaje(phone, sinSaludo, pushName, imageUrl);
+            }
+        }
         if (esSaludo) return await manejarSaludo(phone, pushName, cliente, yaSaludado, lang, esEs);
 
         // ── Filtro de gatillo ──
@@ -196,10 +210,12 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             const cli2 = await obtenerCliente(phone);
             if (cli2.comprobante_pendiente && await intentarCompletarOperacion(phone, pushName, cli2, esEs)) return "";
             if (cli2.ultimo_monto && Number(cli2.ultimo_monto) > 0) {
-                await guardarCliente({ phone, estado: "aguardando_comprovante", fechaEstado: new Date().toISOString(), fechaPix: new Date().toISOString() });
-                const m = lang === "pt" ? `Cartão salvo! 💳\n\nVou te mandar o PIX para pagar R$${cli2.ultimo_monto} 👇` : `¡Tarjeta guardada! 💳\n\nTe envío el PIX para pagar R$${cli2.ultimo_monto} 👇`;
+                // Guardar estado Y recargar cliente ANTES de enviar PIX
+                await guardarCliente({ phone, tarjeta: esTarjeta, estado: "aguardando_comprovante", fechaEstado: new Date().toISOString(), fechaPix: new Date().toISOString() });
+                const cli3 = await obtenerCliente(phone);   // recargar con tarjeta + estado actualizados
+                const m = lang === "pt" ? `Cartão salvo! 💳\n\nVou te mandar o PIX para pagar R$${cli3.ultimo_monto} 👇` : `¡Tarjeta guardada! 💳\n\nTe envío el PIX para pagar R$${cli3.ultimo_monto} 👇`;
                 await enviarSeguro(phone, m);
-                return await enviarPIX(phone, cli2, esEs);
+                return await _enviarPIXFinal(phone, cli3, esEs);   // usar _enviarPIXFinal directamente, tarjeta ya guardada
             }
             const m = pickL(CONFIRMA_TARJETA_SIN_MONTO, CONFIRMA_TARJETA_SIN_MONTO_PT, lang);
             await enviarSeguro(phone, m); return m;
@@ -438,7 +454,17 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
 
         // ── Intención sin monto ──
         if (/quiero enviar|necesito enviar|quiero mandar|quiero hacer (una )?(remesa|transferencia)|necesito (una )?(remesa|transferencia)/.test(txt)) {
-            await enviarSeguro(phone, "Perfecto 😊\n\n¿Cuánto deseas enviar?"); return "";
+            // Si ya tiene monto guardado → no preguntar de nuevo, avanzar al siguiente paso
+            if (Number(cliente?.ultimo_monto) > 0) {
+                if (!cliente?.tarjeta && !cliente?.tarjeta_frecuente) {
+                    const m = lang === "pt"
+                        ? `Só falta o cartão de destino 💳\n\nManda uma foto ou os 16 dígitos.`
+                        : `Solo falta la tarjeta de destino 💳\n\nEnvíame foto o los 16 dígitos.`;
+                    await enviarSeguro(phone, m); return m;
+                }
+                return await enviarPIX(phone, cliente, esEs);
+            }
+            await enviarSeguro(phone, lang === "pt" ? "Perfeito 😊\n\nQual o valor que quer enviar?" : "Perfecto 😊\n\n¿Cuánto deseas enviar?"); return "";
         }
 
 
