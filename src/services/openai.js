@@ -455,7 +455,13 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         const palabras = txt.trim().split(/\s+/);
         if (palabras.length < 4 || /^\d+$/.test(txt.trim())) return "";
         try {
-            const { texto, responseId } = await llamarAsistente(text, cliente?.last_response_id);
+            const { texto, responseId } = await llamarAsistente(text, cliente?.last_response_id, {
+                nombre:          cliente?.nombre,
+                idioma:          lang,
+                ultimo_monto:    cliente?.ultimo_monto,
+                tipo_favorito:   cliente?.tipo_favorito,
+                ops_completadas: cliente?.ops_completadas
+            });
             const esIgnorar = /^ignorar[.!]?$/i.test(texto.trim()) || /silencio total/i.test(texto) || texto.trim() === "";
             if (texto && !esIgnorar) {
                 await guardarCliente({ phone, lastResponseId: responseId });
