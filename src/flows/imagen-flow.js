@@ -68,18 +68,18 @@ EXTRACCIÓN:
 FALSOS POSITIVOS A EVITAR — MUY IMPORTANTE:
 - Capturas de pantalla de conversaciones de WhatsApp → tipo:"otro"
 - Fotos de billetes o efectivo → tipo:"otro"
-- Tarjetas de crédito brasileñas (Visa, Master, Elo, Hipercard) → tipo:"otro"
+- Tarjetas de crédito brasileñas (Visa, Master, Elo, Hipercard, Nubank) → tipo:"otro"
 - Documentos de identidad (RG, CPF, pasaporte) → tipo:"otro"
-- Tarjetas de fidelidad, puntos o incentivos (aunque digan "Clásica") → tipo:"otro"
-- Tarjetas que digan "Tarjeta de Incentivos", "Fidelidade", "Pontos", "Rewards" → tipo:"otro"
 - El reverso de cualquier tarjeta (sin número visible al frente) → tipo:"otro"
-- Tarjetas que NO sean BPA, Bandec o Metropolitano y no tengan formato cubano → tipo:"otro"
 
-Una tarjeta cubana SIEMPRE tiene:
-✓ 16 dígitos numéricos en grupos de 4
-✓ Logo de BPA, Bandec o Metropolitano
-✓ Texto "CUP", "MLC" o "USD"
-✓ Fecha de vencimiento MM/AA
+TARJETAS CUBANAS VÁLIDAS — RECONOCER ESTAS:
+1. BPA (Banco Popular de Ahorro): logo azul/verde, texto "banco popular de ahorro"
+2. Bandec (Banco de Crédito y Comercio): logo rojo/naranja, a veces "PREPAID CARD"
+3. Metropolitano: logo azul
+4. "Clásica Tarjeta de Incentivos": fondo azul oscuro con diseño geométrico turquesa/dorado, texto "Clásica" en cursiva dorada + "TARJETA DE INCENTIVOS" — SIN logo de banco pero ES cubana → banco:"clasica_incentivos"
+5. Bandec Prepaid Card: fondo con playa tropical, logo Bandec, "PREPAID CARD / Only POS/ATM use" → banco:"bandec"
+
+Cualquier tarjeta con 16 dígitos que tenga diseño cubano (colores, texto en español, vence MM/AA) → intentar extraer
 
 ═══════════════════════════
 REGLAS PARA COMPROBANTE PIX
