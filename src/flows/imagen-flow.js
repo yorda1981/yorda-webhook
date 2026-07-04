@@ -1,27 +1,44 @@
 "use strict";
 
 const OpenAI   = require("openai");
+const https    = require("https");
 const pdfParse = require("pdf-parse");
 const env      = require("../config/env");
 const { parseGPT, getPIXKey, getPIXAliases } = require("./shared");
 
-const openai = new OpenAI({ apiKey: env.OPENAI_API_KEY });
+// Agente HTTP com keepAlive — mantém conexões abertas para reutilizar
+// Reduz "Premature close" en Railway → OpenAI
+const httpsAgent = new https.Agent({
+    keepAlive:      true,
+    keepAliveMsecs: 10000,
+    maxSockets:     10
+});
+
+const openai = new OpenAI({
+    apiKey:     env.OPENAI_API_KEY,
+    timeout:    25000,
+    maxRetries: 0,
+    httpAgent:  httpsAgent
+});
 
 // ─────────────────────────────────────────
 // RETRY — reintento automático ante fallos de OpenAI
 // ─────────────────────────────────────────
-async function conReintento(fn, intentos = 3, delayMs = 1500) {
+async function conReintento(fn, intentos = 3, delayMs = 2000) {
     for (let i = 0; i < intentos; i++) {
         try {
             return await fn();
         } catch (e) {
-            const esPrematureClose = e.message?.includes("Premature close") ||
-                                     e.message?.includes("fetch failed") ||
-                                     e.message?.includes("ECONNRESET") ||
-                                     e.message?.includes("timeout");
-            if (esPrematureClose && i < intentos - 1) {
-                console.warn(`⚠️ OpenAI fallo (intento ${i+1}/${intentos}): ${e.message} — reintentando...`);
-                await new Promise(r => setTimeout(r, delayMs * (i + 1)));
+            const esRetriable = e.message?.includes("Premature close") ||
+                                e.message?.includes("fetch failed") ||
+                                e.message?.includes("ECONNRESET") ||
+                                e.message?.includes("timeout") ||
+                                e.message?.includes("ETIMEDOUT") ||
+                                e.status === 503 || e.status === 429;
+            if (esRetriable && i < intentos - 1) {
+                const espera = delayMs * Math.pow(2, i); // backoff exponencial: 2s, 4s
+                console.warn(`⚠️ OpenAI fallo (intento ${i+1}/${intentos}): ${e.message} — reintentando en ${espera/1000}s...`);
+                await new Promise(r => setTimeout(r, espera));
                 continue;
             }
             throw e;
