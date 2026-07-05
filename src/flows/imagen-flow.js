@@ -9,8 +9,8 @@ const anthropic = new Anthropic({
     apiKey: env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY
 });
 
-const MODEL_VISION = "claude-3-5-sonnet-20241022";  // OCR imágenes
-const MODEL_CHAT   = "claude-3-5-haiku-20241022";   // Asistente (más barato)
+const MODEL_VISION = "claude-opus-4-6";   // OCR imágenes — modelo actual
+const MODEL_CHAT   = "claude-haiku-4-5-20251001";  // Asistente — más barato
 
 // ─────────────────────────────────────────
 // RETRY
