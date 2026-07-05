@@ -125,22 +125,50 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         // ── Imágenes ──
         if (imageUrl) return await manejarImagen(phone, pushName, cliente, imageUrl, lang, esEs);
 
-        // ── GUARD: Cliente esperando comprobante → solo aceptar comprobante verbal o imagen ──
-        // Cualquier otro texto en este estado se ignora o recibe recordatorio suave
+        // ── GUARD: Cliente esperando comprobante ──
         if (cliente?.estado === "aguardando_comprovante") {
-            // Si es comprobante verbal → pedir foto
-            if (/paguei|pague|comprovante|comprobante|feito|realizado|ya envie|ya mande|ya pague|hice el pago|fiz o pix|hice el pix/.test(txt)) {
-                const m = esEs ? "¡Perfecto! Mándame el comprobante (foto o PDF) 📎" : "Ótimo! Me manda o comprovante (foto ou PDF) 📎";
+            // "Ya pagué" / "Já paguei" → confirmar recepción + notificar admin
+            if (/paguei|pague|feito|realizado|ya envie|ya mande|ya pague|hice el pago|fiz o pix|hice el pix|já paguei|ya pague|hice la transferencia|hice el transfer/.test(txt)) {
+                // Respuesta al cliente — tranquilizadora
+                const mCliente = esEs
+                    ? "Ok, revisaremos la transferencia 😊\n\nEn breve te confirmamos el estado de tu operación."
+                    : "Ok, vamos verificar a transferência 😊\n\nEm breve confirmamos o status da sua operação.";
+                await enviarSeguro(phone, mCliente);
+
+                // Notificar al admin con todos los datos disponibles
+                try {
+                    const { getAdminPhone } = require("../flows/shared");
+                    const { enviarSeguro: enviarAdmin } = require("../flows/shared");
+                    const adminPhone = getAdminPhone();
+                    if (adminPhone) {
+                        const tarjetaFmt = (cliente?.tarjeta || cliente?.tarjeta_frecuente || "")
+                            .replace(/(.{4})/g, "$1 ").trim() || "—";
+                        const msgAdmin = `⚠️ *PAGO VERBAL REPORTADO*\n\n` +
+                            `👤 Cliente: ${pushName || cliente?.nombre || "Desconocido"}\n` +
+                            `📱 Teléfono: ${phone.replace("@s.whatsapp.net","").replace("@c.us","")}\n` +
+                            `💵 Monto: R$${cliente?.ultimo_monto || "—"}\n` +
+                            `💳 Tarjeta:\n${tarjetaFmt}\n` +
+                            `👤 Titular: ${cliente?.titular || cliente?.titular_frecuente || "—"}\n` +
+                            `🏦 Banco: ${cliente?.banco_detectado || "—"}\n` +
+                            `⏳ Estado: Pendiente de validación\n\n` +
+                            `⚠️ El cliente dice que ya pagó pero no envió comprobante.`;
+                        await enviarAdmin(adminPhone, msgAdmin);
+                    }
+                } catch(e) { console.error("❌ Notif admin pago verbal:", e.message); }
+
+                return mCliente;
+            }
+            // "Comprobante" → recordar que puede enviarlo
+            if (/comprovante|comprobante/.test(txt)) {
+                const m = esEs ? "Puedes enviarme la foto o PDF del comprobante 📎" : "Pode me mandar a foto ou PDF do comprovante 📎";
                 await enviarSeguro(phone, m); return m;
             }
-            // Si es quierePagar → recordar que ya se envió el PIX
+            // Si pide el PIX de nuevo → recordar
             if (/pix|llave|chave|clave/.test(txt)) {
-                const m = esEs
-                    ? pickL(ESPERA_COMPROBANTE_ES, ESPERA_COMPROBANTE_PT, lang)
-                    : pickL(ESPERA_COMPROBANTE_ES, ESPERA_COMPROBANTE_PT, lang);
+                const m = pickL(ESPERA_COMPROBANTE_ES, ESPERA_COMPROBANTE_PT, lang);
                 await enviarSeguro(phone, m); return m;
             }
-            // Cualquier otro texto → silencio (no interrumpir el flujo de pago)
+            // Cualquier otro texto → silencio
             return "";
         }
 
@@ -177,7 +205,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             }
             if (esNo && !tarjetas.length) {
                 // Quiere usar otra tarjeta
-                const msg = lang === "pt" ? "Tudo bem! Manda uma foto ou os 16 dígitos do novo cartão 💳" : "¡Sin problema! Mándame foto o los 16 dígitos de la nueva tarjeta 💳";
+                const msg = lang === "pt" ? "Tudo bem! Manda os 16 dígitos do cartão (ou uma foto se preferir) 💳" : "¡Sin problema! Mándame los 16 dígitos de la tarjeta (o una foto si prefieres) 💳";
                 await guardarCliente({ phone, estado: null });
                 await enviarSeguro(phone, msg); return msg;
             }
@@ -256,8 +284,8 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         if (esConfirma && cliente?.estado === "cotizacion_realizada" && !montoValido) {
             if (!cliente.tarjeta && !cliente.tarjeta_frecuente) {
                 await enviarSeguro(phone, pickL(
-                    ["¡Casi listo! Solo necesito la tarjeta 💳\n\nMándame foto o los 16 dígitos."],
-                    ["Quase lá! Só preciso do cartão 💳\n\nManda uma foto ou os 16 dígitos."], lang));
+                    ["¡Casi listo! Solo necesito la tarjeta 💳\n\nEscríbeme los 16 dígitos (o foto si prefieres)."],
+                    ["Quase lá! Só preciso do cartão 💳\n\nEscreve os 16 dígitos (ou foto se preferir)."], lang));
                 return "";
             }
             await guardarCliente({ phone, estado: "aguardando_comprovante", fechaEstado: new Date().toISOString(), fechaPix: new Date().toISOString() });
@@ -290,9 +318,14 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         }
 
         // ── Comprobante verbal ──
-        if (/paguei|pague|comprovante|comprobante|feito|realizado|ya envie|ya mande|ya pague|hice el pago/.test(txt)) {
-            await enviarSeguro(phone, esEs ? "¡Perfecto! Mándame el comprobante (foto o PDF) 📎" : "Ótimo! Me manda o comprovante (foto ou PDF) 📎");
-            return "";
+        if (/paguei|pague|feito|realizado|ya envie|ya mande|ya pague|hice el pago|fiz o pix|hice el pix/.test(txt)) {
+            const mComp = esEs
+                ? "Ok, revisaremos la transferencia 😊\n\nEn breve te confirmamos."
+                : "Ok, vamos verificar 😊\n\nEm breve confirmamos.";
+            await enviarSeguro(phone, mComp);
+            // Cambiar estado para esperar el comprobante
+            await guardarCliente({ phone, estado: "aguardando_comprovante", fechaEstado: new Date().toISOString() });
+            return mComp;
         }
 
         // ── MLC ──
@@ -468,8 +501,8 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             if (Number(cliente?.ultimo_monto) > 0) {
                 if (!cliente?.tarjeta && !cliente?.tarjeta_frecuente) {
                     const m = lang === "pt"
-                        ? `Só falta o cartão de destino 💳\n\nManda uma foto ou os 16 dígitos.`
-                        : `Solo falta la tarjeta de destino 💳\n\nEnvíame foto o los 16 dígitos.`;
+                        ? `Só falta o cartão de destino 💳\n\nEscreve os 16 dígitos (ou foto se preferir).`
+                        : `Solo falta la tarjeta de destino 💳\n\nEscríbeme los 16 dígitos (o envía foto si prefieres).`;
                     await enviarSeguro(phone, m); return m;
                 }
                 return await enviarPIX(phone, cliente, esEs);
