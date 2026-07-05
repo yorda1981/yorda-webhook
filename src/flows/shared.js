@@ -109,9 +109,9 @@ const ESPERA_COMPROBANTE_PT = [
 ];
 
 const TARJETA_ILEGIBLE = [
-    "No pude leer bien la imagen 📸\n\nMándame otra más clara o escríbeme los 16 dígitos.",
-    "La imagen no salió bien 📸\n\nPrueba con otra foto o escríbeme los números directamente.",
-    "No logré capturar los datos de la tarjeta 📸\n\n¿Puedes mandarme otra foto o escribir los 16 dígitos?"
+    "No pude leer bien la imagen 📸\n\nEscríbeme los 16 dígitos de la tarjeta (o manda otra foto más clara).",
+    "La imagen no salió bien 📸\n\nEscríbeme los números directamente y lo proceso enseguida.",
+    "No logré capturar los datos de la tarjeta 📸\n\n¿Puedes escribirme los 16 dígitos?"
 ];
 
 // ─────────────────────────────────────────
