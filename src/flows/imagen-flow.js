@@ -1,43 +1,31 @@
 "use strict";
 
-const OpenAI   = require("openai");
-const https    = require("https");
-const pdfParse = require("pdf-parse");
-const env      = require("../config/env");
+const Anthropic = require("@anthropic-ai/sdk");
+const pdfParse  = require("pdf-parse");
+const env       = require("../config/env");
 const { parseGPT, getPIXKey, getPIXAliases } = require("./shared");
 
-// Agente HTTP com keepAlive — mantém conexões abertas para reutilizar
-// Reduz "Premature close" en Railway → OpenAI
-const httpsAgent = new https.Agent({
-    keepAlive:      true,
-    keepAliveMsecs: 10000,
-    maxSockets:     10
+const anthropic = new Anthropic({
+    apiKey: env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY
 });
 
-const openai = new OpenAI({
-    apiKey:     env.OPENAI_API_KEY,
-    timeout:    25000,
-    maxRetries: 0,
-    httpAgent:  httpsAgent
-});
+const MODEL_VISION = "claude-3-5-sonnet-20241022";  // OCR imágenes
+const MODEL_CHAT   = "claude-3-5-haiku-20241022";   // Asistente (más barato)
 
 // ─────────────────────────────────────────
-// RETRY — reintento automático ante fallos de OpenAI
+// RETRY
 // ─────────────────────────────────────────
 async function conReintento(fn, intentos = 3, delayMs = 2000) {
     for (let i = 0; i < intentos; i++) {
         try {
             return await fn();
         } catch (e) {
-            const esRetriable = e.message?.includes("Premature close") ||
-                                e.message?.includes("fetch failed") ||
-                                e.message?.includes("ECONNRESET") ||
-                                e.message?.includes("timeout") ||
-                                e.message?.includes("ETIMEDOUT") ||
-                                e.status === 503 || e.status === 429;
+            const esRetriable = e.status === 529 || e.status === 503 ||
+                                e.status === 429 || e.message?.includes("overloaded") ||
+                                e.message?.includes("timeout") || e.message?.includes("ECONNRESET");
             if (esRetriable && i < intentos - 1) {
-                const espera = delayMs * Math.pow(2, i); // backoff exponencial: 2s, 4s
-                console.warn(`⚠️ OpenAI fallo (intento ${i+1}/${intentos}): ${e.message} — reintentando en ${espera/1000}s...`);
+                const espera = delayMs * Math.pow(2, i);
+                console.warn(`⚠️ Claude OCR fallo (intento ${i+1}/${intentos}) — reintentando en ${espera/1000}s...`);
                 await new Promise(r => setTimeout(r, espera));
                 continue;
             }
@@ -47,12 +35,12 @@ async function conReintento(fn, intentos = 3, delayMs = 2000) {
 }
 
 // ─────────────────────────────────────────
-// PROMPTS OCR — MODULARES
+// PROMPTS OCR
 // ─────────────────────────────────────────
 
 function promptTarjeta() {
     return `Analiza esta imagen. ¿Es una tarjeta bancaria cubana con 16 dígitos?
-Responde SOLO en JSON, sin texto extra.
+Responde SOLO en JSON, sin texto extra ni markdown.
 
 SI es tarjeta cubana:
 {"tipo":"tarjeta","tarjeta":"16DIGITOS","titular":"NOMBRE","banco":"bpa|bandec|metropolitano|clasica_incentivos|otro","valida":true}
@@ -66,113 +54,91 @@ TARJETAS CUBANAS VÁLIDAS:
 - Clásica Tarjeta de Incentivos: fondo azul oscuro geométrico, texto "Clásica" cursiva dorada → banco:"clasica_incentivos"
 
 EXTRACCIÓN:
-- 16 dígitos sin espacios → string exacto "9205129976352031"
-- Si borrosa/girada → intenta igual; si ves 12+ dígitos → valida:false
-- Titular en la parte inferior en mayúsculas
+- 16 dígitos sin espacios → "9205129976352031"
+- Si borrosa/girada → intenta igual; 12+ dígitos visibles → valida:false
+- Titular en mayúsculas en la parte inferior
 
-NO ES TARJETA CUBANA → {"tipo":"otro"}:
-- Tarjetas brasileñas (Visa/Master/Elo/Nubank)
-- Documentos (RG/CPF/pasaporte)
-- Billetes, reverso de tarjeta, capturas de WhatsApp`;
+NO es tarjeta cubana → {"tipo":"otro"}:
+- Tarjetas brasileñas (Visa/Master/Elo/Nubank), documentos, billetes, reverso`;
 }
 
-function promptPIX(key, aliases) {
-    return `Analiza esta imagen. ¿Es un comprobante de pago PIX brasileño?
-Responde SOLO en JSON, sin texto extra.
-
-SI es comprobante PIX:
-{"tipo":"comprovante_pix","valor":200,"fecha":"DD/MM/AAAA","hora":"HH:MM","banco":"banco pagador","destinatario":"nombre","destino_correcto":true,"valido":true}
-
-SI NO es comprobante: {"tipo":"otro"}
-
-FORMATOS VÁLIDOS (todos son comprobantes PIX):
-1. "Pix enviado" / "Transferência realizada" — con valor, fecha, destinatario
-2. Detalle bancario — campos "Chave Pix", "Pagador", "Instituição", ID "E+números"
-3. Recibo app — "Dados da transação", "Data do débito", "Número de controle"
-
-EXTRACCIÓN:
-- valor: número puro (200.50, no "R$200,50") — null si no visible
-- fecha: DD/MM/AAAA — null si no visible
-- banco: institución del PAGADOR
-- destino_correcto: true si aparece chave "${key}" O destinatario contiene "${aliases}" O instituição recibidor es "NU PAGAMENTOS"
-- valido: false si fuentes inconsistentes o fecha imposible`;
-}
-
-function promptImagen() {
-    const aliases = getPIXAliases().join("|");
-    const key     = getPIXKey();
-    // Prompt unificado — GPT decide el tipo primero
+function promptUnificado(key, aliases) {
     return `Analiza esta imagen. Puede ser: tarjeta bancaria cubana, comprobante PIX brasileño, u otro.
-Responde SOLO en JSON, sin texto extra.
+Responde SOLO en JSON válido, sin texto extra ni markdown.
 
 TARJETA CUBANA: {"tipo":"tarjeta","tarjeta":"16DIGITOS","titular":"NOMBRE","banco":"bpa|bandec|metropolitano|clasica_incentivos|otro","valida":true}
 COMPROBANTE PIX: {"tipo":"comprovante_pix","valor":200,"fecha":"DD/MM/AAAA","hora":"HH:MM","banco":"banco pagador","destinatario":"nombre","destino_correcto":true,"valido":true}
 OTRO: {"tipo":"otro"}
 
-TARJETAS CUBANAS: BPA (azul/verde), Bandec (rojo/naranja, a veces playa), Metropolitano, Clásica Tarjeta de Incentivos (azul oscuro geométrico, cursiva dorada→banco:"clasica_incentivos"). 16 dígitos sin espacios. Titular abajo en mayúsculas. NO: Visa/Master/Elo/Nubank/documentos/billetes/reverso.
+TARJETAS CUBANAS: BPA (azul/verde), Bandec (rojo/naranja, a veces playa), Metropolitano, Clásica Tarjeta de Incentivos (azul oscuro geométrico, cursiva dorada→"clasica_incentivos"). 16 dígitos sin espacios. Titular abajo en mayúsculas. NO: Visa/Master/Elo/documentos/billetes/reverso.
 
-COMPROBANTE PIX (3 formatos): (1)"Pix enviado"/"Transferência realizada" con valor+fecha; (2)detalle bancario con "Chave Pix"/"Pagador"/"Instituição"/ID "E+números"; (3)recibo con "Dados da transação"/"Data do débito". valor=número puro, destino_correcto=true si chave="${key}" O destinatario="${aliases}" O instituição="NU PAGAMENTOS".`;
+COMPROBANTE PIX (3 formatos): (1)"Pix enviado"/"Transferência" con valor+fecha; (2)detalle con "Chave Pix"/"Pagador"/"Instituição"/ID "E+números"; (3)recibo con "Dados da transação"/"Data do débito". valor=número puro. destino_correcto=true si chave="${key}" O destinatario="${aliases}" O instituição="NU PAGAMENTOS".`;
 }
 
+function promptPDF(key, aliases) {
+    return `Analiza este texto de un comprobante de pago PIX. Responde SOLO en JSON válido, sin texto extra.
 
-// ─────────────────────────────────────────
-// PROMPT OCR — PDF
-// ─────────────────────────────────────────
+{"tipo":"comprovante_pdf","valor":200,"fecha":"DD/MM/AAAA","hora":"HH:MM","banco":"banco pagador","destinatario":"nombre","destino_correcto":true,"valido":true}
 
-function promptPDF() {
-    const aliases = getPIXAliases().join(", ");
-    const key     = getPIXKey();
-    return `Analiza el siguiente texto extraído de un comprobante de pago. Responde SOLO en JSON válido, sin texto adicional.
-
-FORMATO:
-{"tipo":"comprovante_pdf","valor":200,"fecha":"DD/MM/AAAA","hora":"HH:MM","banco":"banco origen","destinatario":"nombre completo","destino_correcto":true,"valido":true}
-
-REGLAS:
-- valor: número puro sin símbolo (200.50, no "R$200,50")
-- fecha: DD/MM/AAAA — si no está clara, null
-- banco: banco de origen del pagador
-- destinatario: nombre de quien recibe
-- destino_correcto: true si el destinatario coincide con: ${aliases}
-${key ? `- destino_correcto: true también si aparece la clave: ${key}` : ""}
-- valido: true si parece un comprobante auténtico
-- datos faltantes → null
-
-Sin texto extra fuera del JSON.`;
+valor=número puro (200.50). destino_correcto=true si chave="${key}" O destinatario="${aliases}" O instituição="NU PAGAMENTOS". datos faltantes=null.`;
 }
 
 // ─────────────────────────────────────────
-// OCR — Imagen (prompt adaptado al contexto)
+// HELPERS
+// ─────────────────────────────────────────
+
+async function urlToBase64(url) {
+    const resp = await fetch(url);
+    const buf  = Buffer.from(await resp.arrayBuffer());
+    return buf.toString("base64");
+}
+
+function mimeTypeFromUrl(url) {
+    const u = url.toLowerCase();
+    if (u.includes(".png"))  return "image/png";
+    if (u.includes(".webp")) return "image/webp";
+    if (u.includes(".gif"))  return "image/gif";
+    return "image/jpeg";
+}
+
+// ─────────────────────────────────────────
+// OCR — Imagen con Claude Vision
 // ─────────────────────────────────────────
 
 async function detectarImagenUnificada(imageUrl, contexto = "auto") {
     try {
-        // Elegir prompt según contexto — menos tokens = menos costo y latencia
-        let promptTexto;
-        if (contexto === "comprobante") {
-            promptTexto = promptPIX(getPIXKey(), getPIXAliases().join("|"));
-        } else if (contexto === "tarjeta") {
-            promptTexto = promptTarjeta();
-        } else {
-            promptTexto = promptImagen(); // unificado cuando no sabemos
-        }
+        const key     = getPIXKey();
+        const aliases = getPIXAliases().join("|");
+        const promptTexto = contexto === "tarjeta"
+            ? promptTarjeta()
+            : promptUnificado(key, aliases);
 
-        const r = await conReintento(() => openai.chat.completions.create({
-            model: "gpt-4o",
-            messages: [{ role: "user", content: [
-                { type: "text",      text: promptTexto },
-                { type: "image_url", image_url: { url: imageUrl, detail: "high" } }
-            ]}],
-            max_tokens: 200  // reducido de 300 — la respuesta JSON es corta
+        const base64   = await urlToBase64(imageUrl);
+        const mimeType = mimeTypeFromUrl(imageUrl);
+
+        const response = await conReintento(() => anthropic.messages.create({
+            model:      MODEL_VISION,
+            max_tokens: 256,
+            messages: [{
+                role: "user",
+                content: [
+                    { type: "image", source: { type: "base64", media_type: mimeType, data: base64 } },
+                    { type: "text", text: promptTexto }
+                ]
+            }]
         }));
-        return parseGPT(r.choices?.[0]?.message?.content);
+
+        const texto = response.content?.[0]?.text || "";
+        console.log(`🔍 OCR Claude: ${texto.substring(0, 120)}`);
+        return parseGPT(texto);
     } catch (e) {
-        console.error("❌ OCR:", e.message);
+        console.error("❌ OCR Claude:", e.message);
         return { tipo: "otro" };
     }
 }
 
 // ─────────────────────────────────────────
-// OCR — PDF
+// OCR — PDF con Claude
 // ─────────────────────────────────────────
 
 async function detectarComprobantePDF(pdfUrl) {
@@ -180,218 +146,99 @@ async function detectarComprobantePDF(pdfUrl) {
         const resp     = await fetch(pdfUrl);
         const buf      = Buffer.from(await resp.arrayBuffer());
         const { text } = await pdfParse(buf);
-        const r = await conReintento(() => openai.chat.completions.create({
-            model: "gpt-4o-mini",
-            messages: [{ role: "user", content: promptPDF() + `\n\nTexto del comprobante:\n${text}` }],
-            max_tokens: 250
+
+        const key     = getPIXKey();
+        const aliases = getPIXAliases().join("|");
+
+        const response = await conReintento(() => anthropic.messages.create({
+            model:      MODEL_VISION,
+            max_tokens: 256,
+            messages: [{
+                role:    "user",
+                content: promptPDF(key, aliases) + `\n\nTexto del comprobante:\n${text.substring(0, 3000)}`
+            }]
         }));
-        return parseGPT(r.choices?.[0]?.message?.content);
+
+        const texto = response.content?.[0]?.text || "";
+        return parseGPT(texto);
     } catch (e) {
-        console.error("❌ PDF:", e.message);
+        console.error("❌ PDF Claude:", e.message);
         return {};
     }
 }
 
 // ─────────────────────────────────────────
-// ASISTENTE GPT — fallback conversacional
-// Prompt máximo para mínimo de errores
+// ASISTENTE — Claude conversacional
 // ─────────────────────────────────────────
 
 function buildSystemPrompt() {
-    return `Eres Yorda, asistente virtual de un servicio de remesas entre Brasil y Cuba. Atiendes clientes en español o portugués según cómo escriban. Eres cálida, paciente, directa y profesional — nunca robótica.
+    return `Eres Yorda, asistente virtual de un servicio de remesas entre Brasil y Cuba. Atiendes en español o portugués según el cliente. Eres cálida, directa y profesional.
 
-═══════════════════════════════════════════
-IDENTIDAD
-═══════════════════════════════════════════
-- Tu nombre es Yorda
-- Trabajas para un servicio de remesas Brasil→Cuba
-- NUNCA digas que eres una IA, un bot o un sistema automático
-- Si te preguntan si eres humana: "Soy Yorda, la asistente del servicio 😊"
-- Habla siempre en el idioma del cliente (español o portugués)
+REGLA PRINCIPAL: Si el mensaje NO tiene relación con envíos de dinero, remesas, tasas, PIX, tarjetas cubanas, Cuba, recargas ETECSA → responde ÚNICAMENTE: IGNORAR
 
-═══════════════════════════════════════════
-REGLA PRINCIPAL — MUY IMPORTANTE
-═══════════════════════════════════════════
-Si el mensaje NO tiene relación con: envíos de dinero, remesas, tasas de cambio, PIX, tarjetas cubanas, Cuba, recargas ETECSA, monedas (BRL/CUP/USD/MLC) → responde ÚNICAMENTE la palabra: IGNORAR
+EL SERVICIO: Cliente paga en reales (BRL) por PIX → familia recibe en Cuba en tarjeta bancaria cubana.
 
-No expliques por qué ignoras. Solo escribe: IGNORAR
+MONEDAS:
+- BRL: lo que paga el cliente
+- CUP (peso cubano): lo que recibe en Cuba
+- USD: modalidad en dólares (tarjetas Clásica o Prepago)
+- MLC: moneda digital cubana similar al dólar, precio en reales
 
-═══════════════════════════════════════════
-EL SERVICIO — CÓMO FUNCIONA
-═══════════════════════════════════════════
-FLUJO COMPLETO:
-1. Cliente pide cotización (cuánto llega en Cuba)
-2. Bot calcula y muestra el resultado
-3. Cliente confirma y da la tarjeta cubana de destino
-4. Bot envía la clave PIX para que el cliente pague
-5. Cliente hace el PIX y manda el comprobante (foto o PDF)
-6. Operador verifica y realiza la transferencia a Cuba
-7. Cliente recibe confirmación
+TARJETAS CUBANAS: BPA, Bandec, Metropolitano, Clásica Tarjeta de Incentivos. Tienen 16 dígitos.
 
-TIEMPO: Entre 1 y 24 horas según la conectividad en Cuba
-PAGO: Solo por PIX (transferencia bancaria instantánea de Brasil)
-MÍNIMO: No hay monto mínimo fijo
+PREGUNTAS FRECUENTES:
+- "¿Es seguro?" → "Llevamos tiempo ayudando a familias cubanas en Brasil, sin problemas 😊 ¿Cuánto quieres enviar?"
+- "¿Cómo funciona?" → "Tú pagas por PIX y nosotros transferimos a la tarjeta en Cuba. Rápido y seguro 💪"
+- "¿Cuánto tarda?" → "Normalmente entre 1 y 24h según la conectividad en Cuba 😊"
+- "¿Qué es MLC?" → "MLC es similar al dólar en Cuba, se usa en tiendas en divisa 😊"
+- "¿MLC es la de dólares?" → "Sí, similar al dólar en Cuba 😊"
 
-═══════════════════════════════════════════
-MONEDAS — EXPLICACIÓN DETALLADA
-═══════════════════════════════════════════
-BRL (Real brasileño):
-- Lo que el cliente PAGA aquí en Brasil
-- Se transfiere por PIX
+DERIVAR A YORDANYS: problemas con operaciones, reclamos, errores de monto.
+Frase: "Yordanys revisa eso directamente 😊 Aguarda un momento."
 
-CUP (Peso cubano / Moneda Nacional / MN):
-- Lo que RECIBE la familia en Cuba
-- Es la moneda del día a día en Cuba
-- También llamada "moneda nacional" o "pesos"
-- Ejemplo: R$100 = 15.000 CUP aproximadamente (según tasa del día)
-
-USD (Dólar americano):
-- Otra modalidad — el cliente paga en reales pero se calcula en dólares
-- Se deposita en tarjetas cubanas en USD
-- Tipos: Clásica (BPA/Bandec) o Prepago (Nauta/Internacional)
-
-MLC (Moneda Libremente Convertible):
-- Moneda digital cubana equivalente al dólar
-- Se usa en tiendas en divisa y tarjetas prepago/MLC
-- El cliente paga en reales, recibe MLC en Cuba
-- 1 MLC tiene un precio en reales (ejemplo: R$5 por MLC)
-- MLC ≠ CUP (son monedas diferentes)
-- Si preguntan "¿MLC es la de dólares?": SÍ, es similar al dólar en Cuba
-
-═══════════════════════════════════════════
-TARJETAS CUBANAS
-═══════════════════════════════════════════
-- Tienen 16 dígitos
-- Bancos: BPA (Banco Popular de Ahorro), Bandec, Metropolitano
-- Tipos: CUP (pesos), MLC (divisa), USD
-- El cliente debe enviar foto de la tarjeta o los 16 dígitos
-
-═══════════════════════════════════════════
-PREGUNTAS FRECUENTES — RESPUESTAS EXACTAS
-═══════════════════════════════════════════
-"¿Es seguro?" →
-"Llevamos tiempo ayudando a familias cubanas en Brasil, sin problemas 😊 ¿Cuánto quieres enviar?"
-
-"¿Cómo funciona?" →
-"Tú pagas por PIX aquí en Brasil y nosotros transferimos a la tarjeta de tu familiar en Cuba. Rápido y seguro 💪 ¿Cuánto quieres mandar?"
-
-"¿Cuánto tarda?" →
-"Normalmente entre 1 y 24h según la conectividad en Cuba. Te avisamos cuando se complete 😊"
-
-"¿Cuánto es el mínimo?" →
-"No tenemos monto mínimo. ¿Cuánto deseas enviar? 😊"
-
-"¿Qué bancos aceptan?" →
-"Trabajamos con BPA, Bandec y Metropolitano 😊"
-
-"¿Tienen comprobante?" →
-"Sí, cuando completamos la transferencia te enviamos la confirmación 😊"
-
-"¿Qué es MLC?" →
-"MLC es la Moneda Libremente Convertible en Cuba, similar al dólar. Se usa en tiendas en divisa y tarjetas prepago. ¿Quieres enviar MLC o pesos cubanos (CUP)? 😊"
-
-"¿MLC es la de dólares?" →
-"Sí, MLC es similar al dólar en Cuba. Se usa en las tiendas en divisa y supermercados. ¿Quieres enviar MLC? 😊"
-
-"¿Qué es CUP?" →
-"CUP es el peso cubano, la moneda del día a día en Cuba. Con reales brasileños compramos pesos cubanos para tu familia 😊"
-
-"¿Por qué no llegó?" →
-"Entiendo tu preocupación 😊 Yordanys revisa eso directamente. Aguarda un momento."
-
-"No llegó el dinero" →
-"Entiendo, disculpa la demora. Yordanys revisa tu operación ahora mismo 😊 Aguarda un momento."
-
-"Me equivoqué / envié mal" →
-"No te preocupes, lo revisamos juntos 😊 ¿Qué pasó exactamente?"
-
-"Envié menos de lo acordado" →
-"Gracias por avisar 😊 Yordanys revisa ese pago. ¿Puedes mandarme el comprobante?"
-
-═══════════════════════════════════════════
-SITUACIONES EMOCIONALES
-═══════════════════════════════════════════
-Cliente nervioso o preocupado:
-→ "Entiendo tu preocupación 😊 Estoy aquí contigo durante todo el proceso."
-
-Cliente frustrado o molesto:
-→ "Entiendo, disculpa el inconveniente. Vamos a resolverlo juntos 😊"
-
-Cliente con urgencia:
-→ "Vamos a agilizarlo 😊 [continúa con la acción concreta]"
-
-Cliente agradecido:
-→ "¡Fue un placer ayudarte! 😊 Aquí estamos siempre que lo necesites."
-
-Cliente confundido:
-→ Explica de forma simple, una cosa a la vez, sin tecnicismos
-
-═══════════════════════════════════════════
-CUÁNDO DERIVAR A YORDANYS
-═══════════════════════════════════════════
-Deriva SIEMPRE en estos casos:
-- "No llegó el dinero" / "Ya pagué pero no llegó"
-- Reclamos o quejas sobre operaciones pasadas
-- Operaciones con errores o montos incorrectos
-- Preguntas sobre estado de una operación específica
-- Situaciones que requieren revisión manual
-
-Frase de derivación:
-ES: "Yordanys revisa eso directamente 😊 Aguarda un momento."
-PT: "Yordanys verifica isso diretamente 😊 Aguarda um momento."
-
-═══════════════════════════════════════════
-REGLAS DE FORMATO Y COMPORTAMIENTO
-═══════════════════════════════════════════
-✅ SIEMPRE:
-- Máximo 3 líneas por respuesta
-- Terminar con una pregunta o acción concreta
-- Usar el idioma del cliente (español o portugués)
-- Ser cálida pero directa
-- Un emoji por mensaje máximo (al final)
-
-❌ NUNCA:
-- Inventar tasas, montos o porcentajes
-- Prometer tiempos exactos de entrega
-- Decir que eres IA o bot
-- Responder sobre política cubana o brasileña
-- Responder sobre salud, noticias o temas no relacionados
-- Usar respuestas largas o parrafadas
-- Repetir exactamente la misma frase dos veces seguidas
-- Pedir datos que el sistema ya tiene guardados`;
+FORMATO: Máximo 3 líneas. Terminar con pregunta o acción. Un emoji máximo. NUNCA inventar tasas. NUNCA decir que eres IA.`;
 }
 
+const historialConv = new Map();
+
 async function llamarAsistente(mensajeUsuario, lastResponseId = null, contextoCliente = null) {
-    // Enriquecer el prompt con contexto del cliente si está disponible
-    let instruccionesExtra = "";
-    if (contextoCliente) {
-        const partes = [];
-        if (contextoCliente.nombre)        partes.push(`Nombre del cliente: ${contextoCliente.nombre}`);
-        if (contextoCliente.idioma)        partes.push(`Idioma preferido: ${contextoCliente.idioma === "pt" ? "portugués" : "español"}`);
-        if (contextoCliente.ultimo_monto)  partes.push(`Último monto cotizado: R$${contextoCliente.ultimo_monto}`);
-        if (contextoCliente.tipo_favorito) partes.push(`Tipo de operación habitual: ${contextoCliente.tipo_favorito}`);
-        if (contextoCliente.ops_completadas && contextoCliente.ops_completadas > 0)
-            partes.push(`Operaciones completadas: ${contextoCliente.ops_completadas}`);
-        if (partes.length) {
-            instruccionesExtra = `\n\n═══════════════════════════════════════════\nCONTEXTO DEL CLIENTE ACTUAL\n═══════════════════════════════════════════\n${partes.join("\n")}`;
+    try {
+        const phoneKey = contextoCliente?.phone || "default";
+        let historial  = historialConv.get(phoneKey) || [];
+
+        // Enriquecer con contexto del cliente
+        let msgFinal = mensajeUsuario;
+        if (contextoCliente) {
+            const partes = [];
+            if (contextoCliente.nombre)       partes.push(`Cliente: ${contextoCliente.nombre}`);
+            if (contextoCliente.idioma)       partes.push(`Idioma: ${contextoCliente.idioma === "pt" ? "portugués" : "español"}`);
+            if (contextoCliente.ultimo_monto) partes.push(`Último monto: R$${contextoCliente.ultimo_monto}`);
+            if (partes.length) msgFinal = `[${partes.join(", ")}]\n\n${mensajeUsuario}`;
         }
+
+        // Agregar al historial
+        historial.push({ role: "user", content: msgFinal });
+        if (historial.length > 20) historial = historial.slice(-20);
+
+        const response = await conReintento(() => anthropic.messages.create({
+            model:      MODEL_CHAT,
+            max_tokens: 300,
+            system:     buildSystemPrompt(),
+            messages:   historial
+        }));
+
+        const texto = response.content?.[0]?.text?.trim() || "";
+
+        // Guardar respuesta en historial
+        historial.push({ role: "assistant", content: texto });
+        historialConv.set(phoneKey, historial);
+        setTimeout(() => historialConv.delete(phoneKey), 60 * 60 * 1000);
+
+        return { texto, responseId: null };
+    } catch (e) {
+        console.error("❌ Asistente Claude:", e.message);
+        return { texto: "", responseId: null };
     }
-
-    const response = await conReintento(() => openai.responses.create({
-        model: "gpt-4o-mini",
-        input: mensajeUsuario,
-        instructions: buildSystemPrompt() + instruccionesExtra,
-        ...(lastResponseId && { previous_response_id: lastResponseId })
-    }));
-
-    const texto = response.output
-        ?.filter(b => b.type === "message")
-        ?.flatMap(b => b.content)
-        ?.filter(c => c.type === "output_text")
-        ?.map(c => c.text)
-        ?.join("") || "";
-
-    return { texto: texto.trim(), responseId: response.id };
 }
 
 module.exports = { detectarImagenUnificada, detectarComprobantePDF, llamarAsistente };
