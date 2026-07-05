@@ -47,99 +47,73 @@ async function conReintento(fn, intentos = 3, delayMs = 2000) {
 }
 
 // ─────────────────────────────────────────
-// PROMPT OCR — IMAGEN
+// PROMPTS OCR — MODULARES
 // ─────────────────────────────────────────
 
+function promptTarjeta() {
+    return `Analiza esta imagen. ¿Es una tarjeta bancaria cubana con 16 dígitos?
+Responde SOLO en JSON, sin texto extra.
+
+SI es tarjeta cubana:
+{"tipo":"tarjeta","tarjeta":"16DIGITOS","titular":"NOMBRE","banco":"bpa|bandec|metropolitano|clasica_incentivos|otro","valida":true}
+
+SI NO es tarjeta cubana: {"tipo":"otro"}
+
+TARJETAS CUBANAS VÁLIDAS:
+- BPA: logo azul/verde, "banco popular de ahorro"
+- Bandec: logo rojo/naranja, a veces "PREPAID CARD" con playa
+- Metropolitano: logo azul
+- Clásica Tarjeta de Incentivos: fondo azul oscuro geométrico, texto "Clásica" cursiva dorada → banco:"clasica_incentivos"
+
+EXTRACCIÓN:
+- 16 dígitos sin espacios → string exacto "9205129976352031"
+- Si borrosa/girada → intenta igual; si ves 12+ dígitos → valida:false
+- Titular en la parte inferior en mayúsculas
+
+NO ES TARJETA CUBANA → {"tipo":"otro"}:
+- Tarjetas brasileñas (Visa/Master/Elo/Nubank)
+- Documentos (RG/CPF/pasaporte)
+- Billetes, reverso de tarjeta, capturas de WhatsApp`;
+}
+
+function promptPIX(key, aliases) {
+    return `Analiza esta imagen. ¿Es un comprobante de pago PIX brasileño?
+Responde SOLO en JSON, sin texto extra.
+
+SI es comprobante PIX:
+{"tipo":"comprovante_pix","valor":200,"fecha":"DD/MM/AAAA","hora":"HH:MM","banco":"banco pagador","destinatario":"nombre","destino_correcto":true,"valido":true}
+
+SI NO es comprobante: {"tipo":"otro"}
+
+FORMATOS VÁLIDOS (todos son comprobantes PIX):
+1. "Pix enviado" / "Transferência realizada" — con valor, fecha, destinatario
+2. Detalle bancario — campos "Chave Pix", "Pagador", "Instituição", ID "E+números"
+3. Recibo app — "Dados da transação", "Data do débito", "Número de controle"
+
+EXTRACCIÓN:
+- valor: número puro (200.50, no "R$200,50") — null si no visible
+- fecha: DD/MM/AAAA — null si no visible
+- banco: institución del PAGADOR
+- destino_correcto: true si aparece chave "${key}" O destinatario contiene "${aliases}" O instituição recibidor es "NU PAGAMENTOS"
+- valido: false si fuentes inconsistentes o fecha imposible`;
+}
+
 function promptImagen() {
-    const aliases = getPIXAliases().join(", ");
+    const aliases = getPIXAliases().join("|");
     const key     = getPIXKey();
-    return `Analiza esta imagen con máxima atención. Puede ser una tarjeta bancaria cubana, un comprobante PIX brasileño, u otra cosa. Responde SOLO en JSON válido, sin texto adicional.
+    // Prompt unificado — GPT decide el tipo primero
+    return `Analiza esta imagen. Puede ser: tarjeta bancaria cubana, comprobante PIX brasileño, u otro.
+Responde SOLO en JSON, sin texto extra.
 
-FORMATOS POSIBLES:
-
-TARJETA: {"tipo":"tarjeta","tarjeta":"SOLO16DIGITOS","titular":"NOMBRE COMPLETO","banco":"bandec|bpa|metropolitano|otro","valida":true}
-COMPROBANTE PIX: {"tipo":"comprovante_pix","valor":200,"fecha":"DD/MM/AAAA","hora":"HH:MM","banco":"banco origen","destinatario":"nombre","destino_correcto":true,"valido":true}
+TARJETA CUBANA: {"tipo":"tarjeta","tarjeta":"16DIGITOS","titular":"NOMBRE","banco":"bpa|bandec|metropolitano|clasica_incentivos|otro","valida":true}
+COMPROBANTE PIX: {"tipo":"comprovante_pix","valor":200,"fecha":"DD/MM/AAAA","hora":"HH:MM","banco":"banco pagador","destinatario":"nombre","destino_correcto":true,"valido":true}
 OTRO: {"tipo":"otro"}
 
-═══════════════════════════
-REGLAS PARA TARJETA CUBANA
-═══════════════════════════
-IDENTIFICACIÓN:
-- Las tarjetas cubanas tienen 16 dígitos numéricos en grupos de 4: XXXX XXXX XXXX XXXX
-- Bancos cubanos conocidos:
-  * BPA = Banco Popular de Ahorro (logo azul/verde, texto "bpa" o "banco popular de ahorro")
-  * Bandec = Banco de Crédito y Comercio (logo rojo/naranja)
-  * Metropolitano = Banco Metropolitano (logo azul)
-- El titular aparece en la parte inferior en mayúsculas
-- Suelen tener "CUP", "MLC" o "USD" indicando el tipo de moneda
-- Fecha de vencimiento formato MM/AA en la parte inferior
+TARJETAS CUBANAS: BPA (azul/verde), Bandec (rojo/naranja, a veces playa), Metropolitano, Clásica Tarjeta de Incentivos (azul oscuro geométrico, cursiva dorada→banco:"clasica_incentivos"). 16 dígitos sin espacios. Titular abajo en mayúsculas. NO: Visa/Master/Elo/Nubank/documentos/billetes/reverso.
 
-EXTRACCIÓN:
-- Extrae SOLO los 16 dígitos, sin espacios ni guiones → string de exactamente 16 caracteres
-- Si la imagen está girada, borrosa, tiene reflejo o es un reenvío → intenta igualmente
-- Si ves al menos 12 dígitos claramente → extráelos y pon valida:false
-- Si el número tiene espacios entre grupos (ej: "9205 1299 7635 2031") → únelos: "9205129976352031"
-- NO confundas con números de teléfono (empiezan con 55 + 11 dígitos en Brasil)
-- NO confundas con DNI, RG, CPF u otros documentos
-
-FALSOS POSITIVOS A EVITAR — MUY IMPORTANTE:
-- Capturas de pantalla de conversaciones de WhatsApp → tipo:"otro"
-- Fotos de billetes o efectivo → tipo:"otro"
-- Tarjetas de crédito brasileñas (Visa, Master, Elo, Hipercard, Nubank) → tipo:"otro"
-- Documentos de identidad (RG, CPF, pasaporte) → tipo:"otro"
-- El reverso de cualquier tarjeta (sin número visible al frente) → tipo:"otro"
-
-TARJETAS CUBANAS VÁLIDAS — RECONOCER ESTAS:
-1. BPA (Banco Popular de Ahorro): logo azul/verde, texto "banco popular de ahorro"
-2. Bandec (Banco de Crédito y Comercio): logo rojo/naranja, a veces "PREPAID CARD"
-3. Metropolitano: logo azul
-4. "Clásica Tarjeta de Incentivos": fondo azul oscuro con diseño geométrico turquesa/dorado, texto "Clásica" en cursiva dorada + "TARJETA DE INCENTIVOS" — SIN logo de banco pero ES cubana → banco:"clasica_incentivos"
-5. Bandec Prepaid Card: fondo con playa tropical, logo Bandec, "PREPAID CARD / Only POS/ATM use" → banco:"bandec"
-
-Cualquier tarjeta con 16 dígitos que tenga diseño cubano (colores, texto en español, vence MM/AA) → intentar extraer
-
-═══════════════════════════
-REGLAS PARA COMPROBANTE PIX
-═══════════════════════════
-IDENTIFICACIÓN — MÚLTIPLES FORMATOS:
-El comprobante PIX puede aparecer en varios formatos:
-
-FORMATO 1 — Comprobante estándar:
-- Texto: "Pix enviado", "Transferência realizada", "Comprovante", "Pix efetuado"
-- Tiene valor en R$, fecha, hora, destinatario
-
-FORMATO 2 — Detalle de transacción bancaria (Banco do Brasil, Nubank, etc.):
-- Tiene campos como: "Chave Pix", "Pagador", "Instituição", "Conta", "Agência"
-- Tiene ID de transação (formato: E + números largos)
-- Puede NO tener el valor visible pero tiene la chave PIX
-- Este formato es igualmente válido como comprobante
-
-FORMATO 3 — Recibo de app bancario:
-- Puede tener "Comprovante de transferência", "Dados da transação"
-- Campos: "Valor", "Data do débito", "Número de controle"
-
-EXTRACCIÓN:
-- valor: número puro sin símbolo (200.50, no "R$200,50") — si no está visible, null
-- fecha: DD/MM/AAAA — buscar en "Data do débito", "Data", fecha de la transacción
-- hora: HH:MM — buscar en la fecha o campo de hora
-- banco: banco del PAGADOR (quien envió) — campo "Instituição" del pagador
-- destinatario: buscar en campo "Recebedor", "Destinatário", "Nome" del recibidor — si no está, null
-- destino_correcto: true si aparece la chave PIX: ${key || "(no configurada)"}
-  O si el destinatario coincide con: ${aliases}
-  O si la "Instituição" del recibidor contiene "NU PAGAMENTOS" o "NUBANK"
-- valido: true si el documento parece auténtico
-
-IMPORTANTE: Si ves "Chave Pix: ${key || ""}" en la imagen → destino_correcto: true automáticamente
-- datos faltantes o ilegibles → null
-
-SEÑALES DE COMPROBANTE FALSO:
-- Fuentes inconsistentes o diferentes en el mismo documento
-- Valores editados visiblemente
-- Fechas imposibles o incoherentes
-- Si sospechas que es falso → valido:false
-
-Sin texto extra fuera del JSON.`;
+COMPROBANTE PIX (3 formatos): (1)"Pix enviado"/"Transferência realizada" con valor+fecha; (2)detalle bancario con "Chave Pix"/"Pagador"/"Instituição"/ID "E+números"; (3)recibo con "Dados da transação"/"Data do débito". valor=número puro, destino_correcto=true si chave="${key}" O destinatario="${aliases}" O instituição="NU PAGAMENTOS".`;
 }
+
 
 // ─────────────────────────────────────────
 // PROMPT OCR — PDF
@@ -167,18 +141,28 @@ Sin texto extra fuera del JSON.`;
 }
 
 // ─────────────────────────────────────────
-// OCR — Imagen
+// OCR — Imagen (prompt adaptado al contexto)
 // ─────────────────────────────────────────
 
-async function detectarImagenUnificada(imageUrl) {
+async function detectarImagenUnificada(imageUrl, contexto = "auto") {
     try {
+        // Elegir prompt según contexto — menos tokens = menos costo y latencia
+        let promptTexto;
+        if (contexto === "comprobante") {
+            promptTexto = promptPIX(getPIXKey(), getPIXAliases().join("|"));
+        } else if (contexto === "tarjeta") {
+            promptTexto = promptTarjeta();
+        } else {
+            promptTexto = promptImagen(); // unificado cuando no sabemos
+        }
+
         const r = await conReintento(() => openai.chat.completions.create({
             model: "gpt-4o",
             messages: [{ role: "user", content: [
-                { type: "text",      text: promptImagen() },
+                { type: "text",      text: promptTexto },
                 { type: "image_url", image_url: { url: imageUrl, detail: "high" } }
             ]}],
-            max_tokens: 300
+            max_tokens: 200  // reducido de 300 — la respuesta JSON es corta
         }));
         return parseGPT(r.choices?.[0]?.message?.content);
     } catch (e) {
