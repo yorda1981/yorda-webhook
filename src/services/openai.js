@@ -665,7 +665,13 @@ async function manejarImagen(phone, pushName, cliente, imageUrl, lang, esEs) {
         else await enviarSeguro(phone, esEs ? "No pude leer el PDF 📄\n\nAsegúrate de que sea un comprobante válido." : "Não consegui ler o PDF 📄\n\nVerifique se é um comprovante válido.");
         return "";
     }
-    const det = await detectarImagenUnificada(imageUrl);
+    // Elegir contexto OCR según estado del cliente — menos tokens
+    // Si está esperando comprobante intentar primero como PIX, luego como auto
+    const contextoOCR = cliente?.estado === "seleccionando_tarjeta" ? "tarjeta" : "auto";
+    let det = await detectarImagenUnificada(imageUrl, contextoOCR);
+
+    // Si devuelve "otro" y estaba esperando comprobante → puede ser tarjeta nueva
+    // El prompt unificado ya cubre ambos casos, no necesita reintento
     if (det.tipo === "tarjeta") {
         const num   = String(det.tarjeta || "").replace(/\D/g, "");
         const banco = String(det.banco || "").toLowerCase();
