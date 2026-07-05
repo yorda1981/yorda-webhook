@@ -167,10 +167,13 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                 /a esa (que|tarjeta)|esa (que|tarjeta) (te |le )?(envie|envié|mande|mandé|pasé|pase)|usa(r)? (esa|la misma)|con (esa|la misma)|envia(me)? (el|o) pix|manda(me)? (el|o) pix/i.test(txt);
             const esNo = /^(no|nao|não|otra|outra|cambiar|mudar|nueva|nova|otra tarjeta|outra tarjeta)$/i.test(txt.trim());
 
-            if (esSi && cliente?.tarjeta_frecuente && !tarjetas.length) {
-                // Confirma usar la tarjeta frecuente
-                await guardarCliente({ phone, tarjeta: cliente.tarjeta_frecuente, estado: "aguardando_comprovante", fechaEstado: new Date().toISOString(), fechaPix: new Date().toISOString() });
-                return await _enviarPIXFinal(phone, await obtenerCliente(phone), esEs);
+            if (esSi) {
+                // Usar tarjeta recién escaneada o la frecuente histórica
+                const tarjetaUsar = cliente?.tarjeta || cliente?.tarjeta_frecuente;
+                if (tarjetaUsar && !tarjetas.length) {
+                    await guardarCliente({ phone, tarjeta: tarjetaUsar, estado: "aguardando_comprovante", fechaEstado: new Date().toISOString(), fechaPix: new Date().toISOString() });
+                    return await _enviarPIXFinal(phone, await obtenerCliente(phone), esEs);
+                }
             }
             if (esNo && !tarjetas.length) {
                 // Quiere usar otra tarjeta
