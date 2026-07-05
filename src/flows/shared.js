@@ -1,4 +1,3 @@
-
 "use strict";
 
 const { enviarConDelay }  = require("../services/zapi");
@@ -96,10 +95,10 @@ const CONFIRMA_TARJETA_SIN_MONTO_PT = [
 ];
 
 const ESPERA_COMPROBANTE_ES = [
-    "Perfecto, mándame el comprobante cuando puedas 📎",
-    "¡Genial! En cuanto me llegue el comprobante lo proceso 📎",
-    "Listo, cuando hagas el pago mándame la foto o PDF 📎",
-    "Cuando transfieras mándame el comprobante y lo reviso enseguida 📎"
+    "Perfecto, cuando hagas el pago escríbeme \"ya pagué\" o mándame el comprobante 📎",
+    "¡Listo! Cuando transfieras dime \"ya pagué\" y lo revisamos 😊",
+    "Cuando hagas el pago avísame y lo proceso enseguida 📎",
+    "Cuando transfieras mándame el comprobante o escríbeme que ya pagaste 📎"
 ];
 
 const ESPERA_COMPROBANTE_PT = [
