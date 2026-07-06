@@ -60,6 +60,34 @@
             <div class="stat-card"><span>Ops. Confirmadas</span><h2 id="stat-ops">—</h2></div>
             <div class="stat-card"><span>Volumen Total</span><h2 id="stat-vol">—</h2></div>
             <div class="stat-card"><span>Pendientes</span><h2 id="stat-pend" style="color: var(--yellow);">—</h2></div>
+            <div class="stat-card"><span>Cotizados Hoy</span><h2 id="stat-cotizados" style="color:#38bdf8;">—</h2></div>
+            <div class="stat-card"><span>Cierres Hoy</span><h2 id="stat-cierres" style="color:var(--green);">—</h2></div>
+            <div class="stat-card"><span>Conversión</span><h2 id="stat-conversion" style="color:#a78bfa;">—%</h2></div>
+            <div class="stat-card"><span>Abandonos</span><h2 id="stat-abandonos" style="color:var(--red);">—</h2></div>
+        </div>
+
+        <!-- EMBUDO CRM -->
+        <div class="config-section" style="border-left: 5px solid #a78bfa; margin-bottom: 30px;">
+            <h3 style="color:#a78bfa;">📊 Embudo de Conversión</h3>
+            <div id="embudo" style="display:flex; flex-direction:column; gap:10px;"></div>
+            <div style="margin-top:20px; display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px;" id="crm-mini-stats">
+                <div style="background:#0b0e1a;border-radius:12px;padding:16px;border:1px solid #2d355a;">
+                    <div style="font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:1px;">Frecuentes</div>
+                    <div style="font-size:24px;font-weight:700;color:#fbbf24;margin-top:6px;" id="stat-frecuentes">—</div>
+                </div>
+                <div style="background:#0b0e1a;border-radius:12px;padding:16px;border:1px solid #2d355a;">
+                    <div style="font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:1px;">Esp. PIX</div>
+                    <div style="font-size:24px;font-weight:700;color:#38bdf8;margin-top:6px;" id="stat-esp-pix">—</div>
+                </div>
+                <div style="background:#0b0e1a;border-radius:12px;padding:16px;border:1px solid #2d355a;">
+                    <div style="font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:1px;">Esp. Comprobante</div>
+                    <div style="font-size:24px;font-weight:700;color:#f59e0b;margin-top:6px;" id="stat-esp-comp">—</div>
+                </div>
+                <div style="background:#0b0e1a;border-radius:12px;padding:16px;border:1px solid #2d355a;">
+                    <div style="font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:1px;">Nuevos Hoy</div>
+                    <div style="font-size:24px;font-weight:700;color:#4ade80;margin-top:6px;" id="stat-nuevos-hoy">—</div>
+                </div>
+            </div>
         </div>
 
         <div class="config-section" style="border-left: 5px solid var(--yellow);">
@@ -140,6 +168,17 @@
                     <label for="oferta_activa" style="cursor:pointer;">Oferta activa</label>
                 </div>
                 <button class="btn-save" id="btnOferta" onclick="guardarOferta()" style="margin-top:10px;">Guardar Oferta</button>
+            </div>
+        </div>
+
+        <!-- PLANTILLAS DE MENSAJES -->
+        <div class="config-section" style="border-left: 5px solid #10b981;">
+            <h3 style="color:#10b981;">✏️ Plantillas de Mensajes</h3>
+            <p style="color:#8b949e;font-size:13px;margin-top:-10px;margin-bottom:20px;">
+                Edita los mensajes automáticos del bot. Usa <code style="background:#0b0e1a;padding:2px 6px;border-radius:4px;color:#a78bfa;">{nombre}</code> y <code style="background:#0b0e1a;padding:2px 6px;border-radius:4px;color:#a78bfa;">{monto}</code> como variables.
+            </p>
+            <div id="plantillasContainer" style="display:flex;flex-direction:column;gap:20px;">
+                <p style="color:#8b949e;text-align:center;">Conecta para ver las plantillas</p>
             </div>
         </div>
 
@@ -249,11 +288,12 @@
         async function refreshData() {
             if (!token) return;
             try {
-                const [resTasas, resClientes, resStats, resOps] = await Promise.all([
+                const [resTasas, resClientes, resStats, resOps, resCrm] = await Promise.all([
                     fetch("/admin/tasas",       { headers: authH() }),
                     fetch("/admin/clientes",    { headers: authH() }),
                     fetch("/admin/stats",       { headers: authH() }),
-                    fetch("/admin/operaciones", { headers: authH() })
+                    fetch("/admin/operaciones", { headers: authH() }),
+                    fetch("/admin/crm/stats",   { headers: authH() })
                 ]);
 
                 if (resTasas.status === 401) {
@@ -267,11 +307,16 @@
                 document.getElementById("statusBadge").style.color = "#4ade80";
                 cargarOferta();
                 cargarRecargas();
+                cargarPlantillas();
 
                 const tasas      = await resTasas.json();
                 const clientes   = await resClientes.json();
                 const stats      = await resStats.json();
                 const operaciones = await resOps.json();
+
+                // CRM Métricas
+                const crmData = resCrm.ok ? await resCrm.json() : {};
+                renderCRMStats(crmData);
 
                 // Tasas
                 Object.keys(tasas).forEach(key => {
@@ -345,6 +390,136 @@
             } finally {
                 btn.innerText = "Guardar Cambios de Tasas";
             }
+        }
+
+        // ── PLANTILLAS ──────────────────────────────
+        const LABELS_PLANTILLAS = {
+            "recuperar_30m_es":        "⏰ Recordatorio 30 min · Español",
+            "recuperar_30m_pt":        "⏰ Recordatorio 30 min · Portugués",
+            "recuperar_24h_es":        "📅 Recordatorio 24h · Español",
+            "recuperar_24h_pt":        "📅 Recordatorio 24h · Portugués",
+            "recuperar_7d_es":         "🗓️ Reactivación 7 días · Español",
+            "recuperar_7d_pt":         "🗓️ Reactivación 7 días · Portugués",
+            "completado_frecuente_es": "⭐ Cliente frecuente · Español",
+            "completado_frecuente_pt": "⭐ Cliente frecuente · Portugués"
+        };
+
+        async function cargarPlantillas() {
+            if (!token) return;
+            try {
+                const r = await fetch("/admin/plantillas", { headers: authH() });
+                const lista = await r.json();
+                const container = document.getElementById("plantillasContainer");
+                if (!lista.length) return;
+
+                container.innerHTML = lista.map(p => `
+                    <div style="background:#0b0e1a;border:1px solid #2d355a;border-radius:12px;padding:20px;">
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px;">
+                            <label style="font-size:13px;font-weight:700;color:#10b981;">
+                                ${LABELS_PLANTILLAS[p.id] || p.id}
+                            </label>
+                            <span style="font-size:11px;color:#8b949e;">${p.updated_at ? "Editado: " + new Date(p.updated_at).toLocaleString("pt-BR") : ""}</span>
+                        </div>
+                        <textarea id="ptxt_${p.id}"
+                            style="width:100%;background:#161b33;border:1px solid #2d355a;border-radius:8px;color:white;padding:12px;font-size:13px;font-family:Inter,sans-serif;resize:vertical;min-height:80px;outline:none;box-sizing:border-box;"
+                            onfocus="this.style.borderColor='#10b981'" onblur="this.style.borderColor='#2d355a'"
+                        >${p.texto}</textarea>
+                        <div style="display:flex;justify-content:flex-end;margin-top:10px;">
+                            <button onclick="guardarPlantilla('${p.id}')"
+                                style="background:#10b981;color:#0b0e1a;border:none;padding:8px 20px;border-radius:8px;font-weight:700;cursor:pointer;font-size:13px;"
+                                id="btn_${p.id}">
+                                Guardar
+                            </button>
+                        </div>
+                    </div>`).join("");
+            } catch(e) { console.error("Error cargando plantillas:", e); }
+        }
+
+        async function guardarPlantilla(id) {
+            const texto = document.getElementById("ptxt_" + id)?.value?.trim();
+            if (!texto) return alert("El mensaje no puede estar vacío");
+            const btn = document.getElementById("btn_" + id);
+            if (btn) { btn.innerText = "Guardando..."; btn.disabled = true; }
+            try {
+                const res = await fetch("/admin/plantillas/" + id, {
+                    method: "POST",
+                    headers: authH(),
+                    body: JSON.stringify({ texto })
+                });
+                const d = await res.json();
+                if (d.success) {
+                    if (btn) { btn.innerText = "✅ Guardado"; btn.style.background = "#4ade80"; }
+                    setTimeout(() => {
+                        if (btn) { btn.innerText = "Guardar"; btn.style.background = "#10b981"; btn.disabled = false; }
+                    }, 2000);
+                } else {
+                    alert("❌ Error guardando plantilla");
+                    if (btn) { btn.innerText = "Guardar"; btn.disabled = false; }
+                }
+            } catch(e) {
+                alert("❌ Error de conexión");
+                if (btn) { btn.innerText = "Guardar"; btn.disabled = false; }
+            }
+        }
+
+        // ── CRM MÉTRICAS ──────────────────────────
+        function renderCRMStats(d) {
+            if (!d || !Object.keys(d).length) return;
+
+            // Cards nuevas
+            const cotizados = Number(d.cotizados || 0);
+            const cierresHoy = Number(d.cierres_hoy || 0);
+            const conv = d.conversion_pct != null ? d.conversion_pct + "%" : "—%";
+            const abandonos = Number(d.abandonos || 0);
+
+            const sc = document.getElementById("stat-cotizados");
+            const sh = document.getElementById("stat-cierres");
+            const scv = document.getElementById("stat-conversion");
+            const sa = document.getElementById("stat-abandonos");
+            if (sc) sc.innerText = cotizados;
+            if (sh) sh.innerText = cierresHoy;
+            if (scv) scv.innerText = conv;
+            if (sa) sa.innerText = abandonos;
+
+            // Mini stats
+            const sf = document.getElementById("stat-frecuentes");
+            const sp = document.getElementById("stat-esp-pix");
+            const sec = document.getElementById("stat-esp-comp");
+            const snh = document.getElementById("stat-nuevos-hoy");
+            if (sf) sf.innerText = d.frecuentes || 0;
+            if (sp) sp.innerText = d.esperando_pix || 0;
+            if (sec) sec.innerText = d.esperando_comprobante || 0;
+            // nuevos_hoy no viene del endpoint aún — mostrar nuevos totales
+            if (snh) snh.innerText = d.nuevos || 0;
+
+            // Embudo visual
+            const embudo = document.getElementById("embudo");
+            if (!embudo) return;
+
+            const etapas = [
+                { label: "🆕 Nuevos",               val: Number(d.nuevos || 0),                color: "#8b949e" },
+                { label: "💬 Cotizados",             val: Number(d.cotizados || 0),             color: "#38bdf8" },
+                { label: "💸 Esperando PIX",         val: Number(d.esperando_pix || 0),         color: "#a78bfa" },
+                { label: "📎 Esperando Comprobante", val: Number(d.esperando_comprobante || 0), color: "#f59e0b" },
+                { label: "✅ Completados",           val: Number(d.completados || 0),           color: "#4ade80" },
+                { label: "❌ Abandonos",             val: Number(d.abandonos || 0),             color: "#ef4444" },
+            ];
+
+            const maxVal = Math.max(...etapas.map(e => e.val), 1);
+
+            embudo.innerHTML = etapas.map(e => {
+                const pct = Math.round((e.val / maxVal) * 100);
+                return `
+                <div style="display:flex;align-items:center;gap:12px;">
+                    <div style="width:200px;font-size:13px;color:#94a3b8;flex-shrink:0;">${e.label}</div>
+                    <div style="flex:1;background:#0b0e1a;border-radius:8px;overflow:hidden;height:28px;border:1px solid #2d355a;">
+                        <div style="width:${pct}%;background:${e.color};height:100%;border-radius:8px;transition:width 0.6s ease;display:flex;align-items:center;padding-left:10px;">
+                            <span style="font-size:12px;font-weight:700;color:#0b0e1a;white-space:nowrap;">${e.val > 0 ? e.val : ""}</span>
+                        </div>
+                    </div>
+                    <div style="width:36px;text-align:right;font-size:13px;font-weight:700;color:${e.color};">${e.val}</div>
+                </div>`;
+            }).join("");
         }
 
         const POR_PAGINA = 10;
