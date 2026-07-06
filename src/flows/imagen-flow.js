@@ -41,27 +41,26 @@ async function conReintento(fn, intentos = 3, delayMs = 2000) {
 // ─────────────────────────────────────────
 
 function promptTarjeta() {
-    return `Analiza esta imagen. ¿Es una tarjeta bancaria cubana con 16 dígitos?
-Responde SOLO en JSON, sin texto extra ni markdown.
+    return `Eres un experto en OCR de tarjetas bancarias cubanas. Analiza la imagen con máxima atención.
 
-SI es tarjeta cubana:
+RESPONDE SOLO JSON sin markdown, sin texto extra.
+
+SI ves una tarjeta cubana (BPA, Bandec, Metropolitano o Clásica Tarjeta de Incentivos):
 {"tipo":"tarjeta","tarjeta":"16DIGITOS","titular":"NOMBRE","banco":"bpa|bandec|metropolitano|clasica_incentivos|otro","valida":true}
 
 SI NO es tarjeta cubana: {"tipo":"otro"}
 
-TARJETAS CUBANAS VÁLIDAS:
+INSTRUCCIONES CRÍTICAS:
+- Los dígitos pueden estar en grupos "9205 1299 7635 2031" → únelos "9205129976352031"
+- Si la imagen está girada, oscura o borrosa → IGUAL intenta extraer los dígitos
+- Si ves PARCIALMENTE los números (al menos 8 dígitos) → extráelos y pon valida:false
+- El titular está en la parte inferior en MAYÚSCULAS
+- Bandec: logo rojo/naranja, a veces tiene playa de fondo
 - BPA: logo azul/verde, "banco popular de ahorro"
-- Bandec: logo rojo/naranja, a veces "PREPAID CARD" con playa
-- Metropolitano: logo azul
-- Clásica Tarjeta de Incentivos: fondo azul oscuro geométrico, texto "Clásica" cursiva dorada → banco:"clasica_incentivos"
+- Clásica Tarjeta de Incentivos: fondo azul oscuro con diseño geométrico dorado/turquesa
 
-EXTRACCIÓN:
-- 16 dígitos sin espacios → "9205129976352031"
-- Si borrosa/girada → intenta igual; 12+ dígitos visibles → valida:false
-- Titular en mayúsculas en la parte inferior
-
-NO es tarjeta cubana → {"tipo":"otro"}:
-- Tarjetas brasileñas (Visa/Master/Elo/Nubank), documentos, billetes, reverso`;
+NUNCA respondas con JSON vacío si ves dígitos en la imagen.
+Si ves números en la tarjeta, SIEMPRE intenta extraerlos aunque sea parcialmente.`;
 }
 
 function promptUnificado(key, aliases) {
@@ -72,7 +71,7 @@ TARJETA CUBANA: {"tipo":"tarjeta","tarjeta":"16DIGITOS","titular":"NOMBRE","banc
 COMPROBANTE PIX: {"tipo":"comprovante_pix","valor":200,"fecha":"DD/MM/AAAA","hora":"HH:MM","banco":"banco pagador","destinatario":"nombre","destino_correcto":true,"valido":true}
 OTRO: {"tipo":"otro"}
 
-TARJETAS CUBANAS: BPA (azul/verde), Bandec (rojo/naranja, a veces playa), Metropolitano, Clásica Tarjeta de Incentivos (azul oscuro geométrico, cursiva dorada→"clasica_incentivos"). 16 dígitos sin espacios. Titular abajo en mayúsculas. NO: Visa/Master/Elo/documentos/billetes/reverso.
+TARJETAS CUBANAS: BPA (azul/verde), Bandec (rojo/naranja, a veces playa), Metropolitano, Clásica Tarjeta de Incentivos (azul oscuro geométrico, cursiva dorada→"clasica_incentivos"). 16 dígitos sin espacios (grupos "9205 1299"→"92051299"). Titular abajo mayúsculas. Si borrosa→igualmente extraer. NUNCA JSON vacío si hay dígitos visibles. NO: Visa/Master/Elo/documentos/billetes/reverso.
 
 COMPROBANTE PIX (3 formatos): (1)"Pix enviado"/"Transferência" con valor+fecha; (2)detalle con "Chave Pix"/"Pagador"/"Instituição"/ID "E+números"; (3)recibo con "Dados da transação"/"Data do débito". valor=número puro. destino_correcto=true si chave="${key}" O destinatario="${aliases}" O instituição="NU PAGAMENTOS".`;
 }
