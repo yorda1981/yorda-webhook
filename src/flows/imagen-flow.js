@@ -6,7 +6,9 @@ const env       = require("../config/env");
 const { parseGPT, getPIXKey, getPIXAliases } = require("./shared");
 
 const anthropic = new Anthropic({
-    apiKey: env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY
+    apiKey:     env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY,
+    timeout:    60000,   // 60 segundos — imágenes base64 necesitan más tiempo
+    maxRetries: 0        // reintentos los manejamos nosotros
 });
 
 const MODEL_VISION = "claude-opus-4-6";   // OCR imágenes — modelo actual
