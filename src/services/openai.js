@@ -298,13 +298,20 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             /\b(quiero|voy a) (hacer|enviar|mandar)( el)? pix\b/.test(txt) ||
             /\bvoy a pagar\b/.test(txt) ||
             /\b(llave|chave|clave)\b.{0,15}\bpix\b/.test(txt) ||
-            /\b(quiero|quero|vou)\s+pagar\b/.test(txt);
+            /\b(quiero|quero|vou)\s+pagar\b/.test(txt) ||
+            // Buffer con "pix" + monto en líneas separadas
+            /pix/i.test(txt) && montoValido;
 
         if (quierePagar) {
             const ref = cliente?.fecha_cotizacion || cliente?.updated_at;
             if (ref && Date.now() - new Date(ref).getTime() > DOS_HORAS) {
                 await enviarSeguro(phone, esEs ? "La cotización venció ⏰\n\nDime el monto de nuevo y te actualizo la tasa." : "A cotação expirou ⏰\n\nMe diz o valor de novo.");
                 return "";
+            }
+            // Si tiene monto en el mensaje actual (buffer "pix + 100 reales") → usarlo
+            if (montoValido && (!cliente?.ultimo_monto || Number(cliente.ultimo_monto) <= 0)) {
+                await guardarCliente({ phone, nombre: pushName, monto: valorFinal, tipo: "brl_cup", estado: "aguardando_comprovante", fechaEstado: new Date().toISOString(), fechaPix: new Date().toISOString(), fechaCotizacion: new Date().toISOString() });
+                return await enviarPIX(phone, await obtenerCliente(phone), esEs);
             }
             if (!cliente?.ultimo_monto || Number(cliente.ultimo_monto) <= 0) {
                 const m2 = txt.match(/\b(\d{2,5})\b/);
