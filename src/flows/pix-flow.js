@@ -103,13 +103,16 @@ async function _enviarPIXFinal(phone, cliente, esEs) {
     const key = getPIXKey(); const holder = getPIXHolder();
     const bank = getPIXBank(); const img = getPIXImage();
 
-    if (img)    await enviarImagen(phone, img, "📲 Escanea el QR para pagar.");
-    if (key)    await enviarSeguro(phone, key);
-    if (holder) await enviarSeguro(phone, `Titular: ${holder}${bank ? `\n🏦 ${bank}` : ""}`);
-    await enviarSeguro(phone, esEs
-        ? "Después del pago envíame el comprobante 📎 y proceso tu envío enseguida 🚀"
-        : "Após o pagamento envie o comprovante 📎 e processo imediatamente 🚀"
-    );
+    // QR image
+    if (img) await enviarImagen(phone, img, "📲 Escanea el QR para pagar.");
+    // Clave PIX sola — para copiar fácilmente
+    if (key) await enviarSeguro(phone, key);
+    // Titular + instrucción en un mensaje
+    const msgPIX = [
+        holder ? `👤 ${holder}${bank ? ` · ${bank}` : ""}` : null,
+        esEs ? "Cuando pagues mándame el comprobante 📎" : "Quando pagar me manda o comprovante 📎"
+    ].filter(Boolean).join("\n");
+    await enviarSeguro(phone, msgPIX);
     await crm.onPIXEnviado(phone, esEs ? "es" : "pt");
     return key;
 }
@@ -212,12 +215,16 @@ async function intentarCompletarOperacion(phone, pushName, cliente, esEs) {
         ? tarjeta.replace(/(.{4})/g, "$1 ").trim()
         : "-";
 
-    const msgOperacion = `📥 *OPERACIÓN ${opId}PENDIENTE*\n\n👤 Cliente: ${pushName || cliente.nombre}\n\n📱 Teléfono: ${phone}\n\n💵 Enviado: R$${monto}\n\n🇨🇺 Recibe: ${fmt(resultado?.cup || 0)} CUP\n\n🏦 Banco: ${cliente.banco_detectado || "-"}\n\n💳 Tarjeta:\n${tarjetaFmt}\n\n👤 Titular:\n${cliente.titular || cliente.titular_frecuente || "-"}\n\n⏳ Estado:\nPendiente de validación`;
+    // Mensaje corto al cliente
+    const msgCliente = esEs
+        ? `✅ ¡Listo! Tu operación está en proceso.\n\nR$${monto} → ${fmt(resultado?.cup || 0)} CUP 🇨🇺\n\nTe avisamos cuando se complete 😊`
+        : `✅ Pronto! Sua operação está em processamento.\n\nR$${monto} → ${fmt(resultado?.cup || 0)} CUP 🇨🇺\n\nAvisamos quando concluir 😊`;
+    await enviarSeguro(phone, msgCliente);
 
-    await enviarSeguro(phone, msgOperacion);
-
+    // Mensaje detallado al admin
+    const msgAdmin = `📥 *OP ${opId}PENDIENTE*\n👤 ${pushName || cliente.nombre} · ${phone.replace("@s.whatsapp.net","").replace("@c.us","")}\n💵 R$${monto} → ${fmt(resultado?.cup || 0)} CUP\n🏦 ${cliente.banco_detectado || "-"}\n💳 ${tarjetaFmt}\n👤 ${cliente.titular || cliente.titular_frecuente || "-"}`;
     const adminPhone = getAdminPhone();
-    if (adminPhone) await enviarSeguro(adminPhone, msgOperacion);
+    if (adminPhone) await enviarSeguro(adminPhone, msgAdmin);
     else console.warn("⚠️ ADMIN_PHONE no configurado");
 
     await etiquetarNuevoPedido(phone);
@@ -252,29 +259,36 @@ async function procesarComprobante(phone, pushName, cliente, datos, esEs) {
         return "";
     }
 
-    // Validar duplicado
-    if (datos.valor && datos.fecha && datos.hora) {
+    // Validar duplicado — buscar en comprobantes ya procesados
+    if (datos.valor && datos.fecha) {
         try {
-            const dupCheck = await pool.query(`
+            // Buscar en tabla comprobantes (historial completo)
+            const dupComp = await pool.query(`
+                SELECT id FROM comprobantes
+                WHERE phone = $1
+                AND valor = $2
+                AND fecha_pix = $3
+                LIMIT 1
+            `, [phone, Number(datos.valor), datos.fecha]);
+
+            if (dupComp.rows.length > 0) {
+                await enviarSeguro(phone, "⚠️ Este comprobante ya fue procesado anteriormente.\n\nSi tienes alguna duda escríbeme a Yordanys. 😊");
+                return "";
+            }
+
+            // También buscar en operaciones recientes (últimas 72h)
+            const dupOp = await pool.query(`
                 SELECT id FROM operations
-                WHERE monto = $1
-                AND created_at > NOW() - INTERVAL '24 hours'
+                WHERE phone = $1
+                AND monto = $2
+                AND created_at > NOW() - INTERVAL '72 hours'
                 AND status != 'rechazada'
                 LIMIT 1
-            `, [Number(datos.valor)]);
+            `, [phone, Number(datos.valor)]);
 
-            if (dupCheck.rows.length > 0) {
-                const dupCliente = await pool.query(`
-                    SELECT id FROM operations
-                    WHERE phone = $1 AND monto = $2
-                    AND created_at > NOW() - INTERVAL '2 hours'
-                    LIMIT 1
-                `, [phone, Number(datos.valor)]);
-
-                if (dupCliente.rows.length > 0) {
-                    await enviarSeguro(phone, "⚠️ Este comprobante ya fue procesado anteriormente.\n\nSi tienes alguna duda contacta a Yordanys. 😊");
-                    return "";
-                }
+            if (dupOp.rows.length > 0) {
+                await enviarSeguro(phone, "⚠️ Ya tenemos una operación registrada con ese monto.\n\nSi tienes alguna duda contacta a Yordanys. 😊");
+                return "";
             }
         } catch (e) {
             console.error("❌ Error validando duplicado:", e.message);
@@ -314,19 +328,13 @@ async function procesarComprobante(phone, pushName, cliente, datos, esEs) {
     }
 
     const clienteActualizado = await obtenerCliente(phone);
-    // MEJORA 3: Progreso paso a paso — reduce ansiedad del cliente
-    const msgPaso1 = esEs
-        ? "📄 *Paso 1/3* — Comprobante recibido ✅\n\nVerificando el pago..."
-        : "📄 *Passo 1/3* — Comprovante recebido ✅\n\nVerificando o pagamento...";
-    await enviarSeguro(phone, msgPaso1);
-
     const completado = await intentarCompletarOperacion(phone, pushName, clienteActualizado, esEs);
 
     if (!completado) {
-        const msgPaso2 = esEs
-            ? "📋 *Paso 2/3* — Pago localizado ✅\n\nEsperando confirmación del operador. Te avisamos enseguida 😊"
-            : "📋 *Passo 2/3* — Pagamento localizado ✅\n\nAguardando confirmação do operador. Avisamos em breve 😊";
-        await enviarSeguro(phone, msgPaso2);
+        const msgRecibido = esEs
+            ? "✅ Comprobante recibido. Te avisamos cuando confirmemos 😊"
+            : "✅ Comprovante recebido. Avisamos quando confirmarmos 😊";
+        await enviarSeguro(phone, msgRecibido);
     }
 
     return "";
