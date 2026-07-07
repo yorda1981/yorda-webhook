@@ -73,7 +73,7 @@ async function cotizarUSD(phone, pushName, valorFinal, tipo, lang, esEs) {
 
     const oferta    = await leerOferta();
     const ofertaMsg = oferta ? `\n\n🔥 *OFERTA:* ${oferta}` : "";
-    const res = `💵 ${valorFinal} USD = ${fmt(r.cup)} CUP 🇨🇺${ofertaMsg}\n\n${pickL(CIERRES_COT, CIERRES_COT_PT, lang)}`;
+    const res = `💵 ${valorFinal} USD = R$${fmt(r.cup)} 🇧🇷${ofertaMsg}\n\n${pickL(CIERRES_COT, CIERRES_COT_PT, lang)}`;
     await enviarSeguro(phone, res);
     return res;
 }
@@ -110,8 +110,8 @@ async function cotizarMLC(phone, pushName, valorFinal, lang) {
     const oferta    = await leerOferta();
     const ofertaMsg = oferta ? `\n\n🔥 *OFERTA:* ${oferta}` : "";
     const res = lang === "pt"
-        ? `💳 ${valorFinal} MLC = ${fmt(r.cup)} CUP 🇨🇺${ofertaMsg}\n\n${pickL(CIERRES_COT, CIERRES_COT_PT, lang)}`
-        : `💳 ${valorFinal} MLC = ${fmt(r.cup)} CUP 🇨🇺${ofertaMsg}\n\n${pickL(CIERRES_COT, CIERRES_COT_PT, lang)}`;
+        ? `💳 ${valorFinal} MLC = R$${fmt(r.cup)} 🇧🇷${ofertaMsg}\n\n${pickL(CIERRES_COT, CIERRES_COT_PT, lang)}`
+        : `💳 ${valorFinal} MLC = R$${fmt(r.cup)} 🇧🇷${ofertaMsg}\n\n${pickL(CIERRES_COT, CIERRES_COT_PT, lang)}`;
     await guardarCliente({
         phone, nombre: pushName, monto: valorFinal, tipo: "mlc",
         estado: "cotizacion_realizada",
@@ -129,8 +129,8 @@ async function tasaMLC(phone, lang) {
     const tasaMlc = Number(t?.mlc || 0);
     if (tasaMlc > 0) {
         const msg = lang === "pt"
-            ? `💳 MLC hoje: *${tasaMlc} CUP* por MLC\n\nQual o valor que quer enviar? 😊`
-            : `💳 MLC hoy: *${tasaMlc} CUP* por MLC\n\n¿Cuánto quieres enviar? 😊`;
+            ? `💳 MLC hoje: *R$${tasaMlc}* por MLC\n\nQual o valor que quer enviar? 😊`
+            : `💳 MLC hoy: *R$${tasaMlc}* por MLC\n\n¿Cuánto quieres enviar? 😊`;
         await enviarSeguro(phone, msg);
         return msg;
     }
@@ -235,7 +235,7 @@ async function cotizarCUPInverso(phone, pushName, montoCUP, lang) {
 async function consultarTasas(phone) {
     const t = await leerTasas();
     if (!t) return null;
-    const msg = `Tasas de hoy 💱\n\n🇧🇷 Reales → CUP\nHasta R$99: ${t.brl_0} CUP\nR$100–499: ${t.brl_100} CUP\nR$500–999: ${t.brl_500} CUP\nR$1000+: ${t.brl_1000} CUP\n\n💵 USD Clásica/Prepago: ${t.usd1} CUP${t.mlc ? `\n💳 MLC: ${t.mlc} CUP` : ""}\n\n¿Cuánto quieres enviar? 😊`;
+    const msg = `Tasas de hoy 💱\n\n🇧🇷 Reales → CUP\nHasta R$99: ${t.brl_0} CUP\nR$100–499: ${t.brl_100} CUP\nR$500–999: ${t.brl_500} CUP\nR$1000+: ${t.brl_1000} CUP\n\n💵 USD Clásica/Prepago: R$${t.usd1}${t.mlc ? `\n💳 MLC: R$${t.mlc}` : ""}\n\n¿Cuánto quieres enviar? 😊`;
     await enviarSeguro(phone, msg);
     return msg;
 }
