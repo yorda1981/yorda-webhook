@@ -38,7 +38,8 @@ async function calcularOperacion({ tipo, valor }) {
     }
 
     if (tipo === "usd_efectivo") {
-        return { valor: monto, tasa: Number(tasas.usd1), brl: Math.floor(monto * Number(tasas.usd1)) };
+        const tasaEf = Number(tasas.efectivo || 0) > 0 ? Number(tasas.efectivo) : Number(tasas.usd1);
+        return { valor: monto, tasa: tasaEf, brl: Math.floor(monto * tasaEf) };
     }
 
     if (tipo === "mlc") {
