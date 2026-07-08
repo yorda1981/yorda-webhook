@@ -78,7 +78,7 @@ async function detectarComprobantePDF(pdfUrl) {
     try {
         const resp     = await fetch(pdfUrl);
         const buf      = Buffer.from(await resp.arrayBuffer());
-        const { text } = await pdfParse(buf);
+        const { text } = await pdfParse(buf, { version: "v2.0.550" });
         const r = await openai.chat.completions.create({
             model: "gpt-4o-mini",
             messages: [{ role: "user", content: promptPDF() + `\n\nTexto:\n${text}` }],
