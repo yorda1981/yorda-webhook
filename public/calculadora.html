@@ -237,69 +237,22 @@ fetch("/api/tasas").then(r=>r.json()).then(d=>{
   pintarEscalera(); calcular(); renderTicker();
 }).catch(()=>{ $("estado").textContent = t().sinCon; });
 
-// ── ticker de mercado ──
-let mercado = [], prevFx = {}, horaMercado = "";
-
-function dirDe(lbl, val, cambio24h){
-  if(cambio24h != null) return cambio24h > 0.05 ? "up" : cambio24h < -0.05 ? "down" : "eq";
-  const prev = prevFx[lbl];
-  const dir = prev == null ? "eq" : val > prev ? "up" : val < prev ? "down" : "eq";
-  prevFx[lbl] = val;
-  return dir;
-}
-function nf(v, dec){ return Number(v).toLocaleString("pt-BR",{minimumFractionDigits:dec,maximumFractionDigits:dec}); }
-
-async function cargarMercado(){
-  try{
-    const [fx, cg] = await Promise.all([
-      fetch("https://open.er-api.com/v6/latest/USD").then(r=>r.json()).catch(()=>null),
-      fetch("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,tether&vs_currencies=usd,brl&include_24hr_change=true").then(r=>r.json()).catch(()=>null)
-    ]);
-    const items = [];
-    const rt = fx?.rates;
-    if(rt?.BRL){
-      const brl = rt.BRL;
-      items.push({lbl:"USD", txt:nf(brl,2),        dir:dirDe("USD", brl)});
-      if(rt.EUR) items.push({lbl:"EUR", txt:nf(brl/rt.EUR,2), dir:dirDe("EUR", brl/rt.EUR)});
-      if(rt.GBP) items.push({lbl:"GBP", txt:nf(brl/rt.GBP,2), dir:dirDe("GBP", brl/rt.GBP)});
-    }
-    if(cg?.tether?.brl)  items.push({lbl:"USDT", txt:nf(cg.tether.brl,2),  dir:dirDe("USDT", cg.tether.brl, cg.tether.brl_24h_change)});
-    if(cg?.bitcoin?.usd) items.push({lbl:"BTC",  txt:nf(cg.bitcoin.usd,0)+" USD", dir:dirDe("BTC", cg.bitcoin.usd, cg.bitcoin.usd_24h_change)});
-    if(cg?.ethereum?.usd)items.push({lbl:"ETH",  txt:nf(cg.ethereum.usd,0)+" USD", dir:dirDe("ETH", cg.ethereum.usd, cg.ethereum.usd_24h_change)});
-    mercado = items;
-    horaMercado = new Date().toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"});
-  }catch{ /* sin mercado, el ticker mostrará solo tasas Yorda */ }
-  renderTicker();
-}
-
+// ── ticker de tasas Yorda ──
 function renderTicker(){
+  if(!tasas) return;
   const seg = [];
-  if(mercado.length){
-    seg.push(`<span class="tk-cap">📈 Mercado</span>`);
-    mercado.forEach(i=>{
-      const f = i.dir==="up" ? "▲" : i.dir==="down" ? "▼" : "=";
-      seg.push(`<span class="tk-item">${i.lbl} <b>${i.txt}</b> <i class="${i.dir}">${f}</i></span>`);
-    });
-    if(horaMercado) seg.push(`<span class="tk-item">🕒 ${horaMercado}</span>`);
-  }
-  if(tasas){
-    seg.push(`<span class="tk-cap">🔥 Tasas Yorda</span>`);
-    if(tasas.brl_100)  seg.push(`<span class="tk-item">R$100+ <b>${Number(tasas.brl_100)} CUP</b></span>`);
-    if(tasas.brl_500)  seg.push(`<span class="tk-item">R$500+ <b>${Number(tasas.brl_500)} CUP</b></span>`);
-    if(tasas.brl_1000) seg.push(`<span class="tk-item">R$1000+ <b>${Number(tasas.brl_1000)} CUP</b></span>`);
-    if(Number(tasas.usd1)>0)     seg.push(`<span class="tk-item">USD tarjeta <b>R$${Number(tasas.usd1)}</b></span>`);
-    if(Number(tasas.efectivo)>0) seg.push(`<span class="tk-item">USD efectivo <b>R$${Number(tasas.efectivo)}</b></span>`);
-    if(Number(tasas.mlc)>0)      seg.push(`<span class="tk-item">MLC <b>R$${Number(tasas.mlc)}</b></span>`);
-    seg.push(`<span class="tk-item">⚡ <b>${lang==="pt"?"Entrega hoje":"Entrega hoy"}</b></span>`);
-  }
-  if(!seg.length) return;
+  seg.push(`<span class="tk-cap">🔥 Tasas Yorda</span>`);
+  if(tasas.brl_100)  seg.push(`<span class="tk-item">R$100+ <b>${Number(tasas.brl_100)} CUP</b></span>`);
+  if(tasas.brl_500)  seg.push(`<span class="tk-item">R$500+ <b>${Number(tasas.brl_500)} CUP</b></span>`);
+  if(tasas.brl_1000) seg.push(`<span class="tk-item">R$1000+ <b>${Number(tasas.brl_1000)} CUP</b></span>`);
+  if(Number(tasas.usd1)>0)     seg.push(`<span class="tk-item">USD tarjeta <b>R$${Number(tasas.usd1)}</b></span>`);
+  if(Number(tasas.efectivo)>0) seg.push(`<span class="tk-item">USD efectivo <b>R$${Number(tasas.efectivo)}</b></span>`);
+  if(Number(tasas.mlc)>0)      seg.push(`<span class="tk-item">MLC <b>R$${Number(tasas.mlc)}</b></span>`);
+  seg.push(`<span class="tk-item">⚡ <b>${lang==="pt"?"Entrega hoje":"Entrega hoy"}</b></span>`);
   const half = `<span class="tk-half">${seg.join("")}</span>`;
   $("tkTrack").innerHTML = half + half;
   $("ticker").style.display = "block";
 }
-
-cargarMercado();
-setInterval(cargarMercado, 60000);
 
 // ── idioma ──
 $("btnEs").onclick = ()=>setLang("es");
