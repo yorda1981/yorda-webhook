@@ -122,6 +122,25 @@ input#monto::placeholder{color:#3d5a4b}
   font-family:inherit;font-size:.92rem;font-weight:500;
 }
 .compartir:active{transform:scale(.98)}
+
+.zonas{
+  margin-top:18px;background:var(--card);border:1px solid var(--line);
+  border-radius:16px;overflow:hidden;
+}
+.zonas-head{
+  width:100%;display:flex;align-items:center;justify-content:space-between;
+  background:none;border:none;color:var(--text);font-family:inherit;
+  font-size:.9rem;font-weight:700;padding:14px 16px;cursor:pointer;text-align:left;
+}
+.zonas-head .flecha{color:var(--muted);transition:transform .2s}
+.zonas.abierto .flecha{transform:rotate(180deg)}
+.zonas-body{display:none;padding:0 16px 14px}
+.zonas.abierto .zonas-body{display:block}
+.zonas-nota{font-size:.78rem;color:var(--muted);margin-bottom:10px}
+.prov{font-size:.72rem;color:var(--gold);font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin:10px 0 6px}
+.muni{display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--line);font-size:.85rem}
+.muni:last-child{border-bottom:none}
+.muni .fee{color:var(--green);font-weight:700}
 .nota{text-align:center;font-size:.72rem;color:var(--muted);margin-top:14px}
 </style>
 </head>
@@ -173,12 +192,38 @@ input#monto::placeholder{color:#3d5a4b}
 
   <a class="cta" id="btnWa" href="#" target="_blank" rel="noopener">💬 Enviar por WhatsApp</a>
   <button class="compartir" id="btnShare">🔗 Compartir calculadora</button>
+
+  <div class="zonas" id="zonas">
+    <button class="zonas-head" id="zonasHead">
+      <span id="zonasTitulo">📍 Zonas de entrega en efectivo</span>
+      <span class="flecha">▼</span>
+    </button>
+    <div class="zonas-body">
+      <div class="zonas-nota" id="zonasNota">Entregamos solo en La Habana y municipios seleccionados de Granma. Consulta la tarifa de entrega por WhatsApp.</div>
+      <div id="zonasLista"></div>
+    </div>
+  </div>
+
   <div class="nota" id="nota">Tasas actualizadas en tiempo real · Sin comisiones ocultas</div>
 </div>
 
 <script>
 // ⚙️ Número de WhatsApp del bot (solo dígitos, con código de país)
 const WHATSAPP = "5533999719702";
+
+// ⚙️ EDITAR: zonas de entrega en efectivo.
+// fee: texto libre — "Consultar", "Gratis", "+500 CUP", lo que uses.
+const ZONAS = [
+  { prov: "La Habana", items: [
+    { m: "Todos los municipios (excepto Habana campo)", fee: "Consultar" },
+  ]},
+  { prov: "Granma", items: [
+    { m: "Manzanillo",  fee: "Consultar" },
+    { m: "Media Luna",  fee: "Consultar" },
+    { m: "Campechuela", fee: "Consultar" },
+    { m: "Niquero",     fee: "Consultar" },
+  ]},
+];
 
 const T = {
   es: {
@@ -274,6 +319,10 @@ function setLang(l){
   $("pillBrl").textContent   = t().pillBrl;
   $("pillEfe").textContent   = t().pillEfe;
   if(tasas){ $("estado").textContent = t().tasasHoy; }
+  $("zonasTitulo").textContent = lang==="pt" ? "📍 Zonas de entrega em dinheiro" : "📍 Zonas de entrega en efectivo";
+  $("zonasNota").textContent = lang==="pt"
+    ? "Entregamos apenas em Havana e municípios selecionados de Granma. Consulte a tarifa de entrega pelo WhatsApp."
+    : "Entregamos solo en La Habana y municipios seleccionados de Granma. Consulta la tarifa de entrega por WhatsApp.";
   actualizarLabels(); calcular(); renderTicker();
 }
 
@@ -359,6 +408,13 @@ function actualizarWa(msg){
   const base = "https://wa.me/"+WHATSAPP;
   $("btnWa").href = msg ? base+"?text="+encodeURIComponent(msg) : base;
 }
+
+// ── zonas de entrega ──
+$("zonasLista").innerHTML = ZONAS.map(z =>
+  `<div class="prov">${z.prov}</div>` +
+  z.items.map(i => `<div class="muni"><span>${i.m}</span><span class="fee">${i.fee}</span></div>`).join("")
+).join("");
+$("zonasHead").addEventListener("click", ()=> $("zonas").classList.toggle("abierto"));
 
 // ── compartir ──
 $("btnShare").addEventListener("click", async ()=>{
