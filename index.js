@@ -39,6 +39,13 @@ const mensajesProcesados = new Set();
 
 const MINUTOS_PAUSA = 10;
 
+// Migración segura: columna de tasa para envío de efectivo
+(async () => {
+    try {
+        await pool.query("ALTER TABLE rates ADD COLUMN IF NOT EXISTS efectivo NUMERIC DEFAULT 0");
+    } catch (e) { console.error("⚠️ Migración efectivo:", e.message); }
+})();
+
 // ─────────────────────────────────────────
 // PAUSA HUMANA — persistida en PostgreSQL
 // Sobrevive reinicios de Railway.
@@ -218,7 +225,7 @@ app.get("/admin/tasas", adminLimiter, verificarToken, async (req, res) => {
 
 app.post("/admin/tasas", adminLimiter, verificarToken, async (req, res) => {
     try {
-        const { brl_0, brl_100, brl_500, brl_1000, usd1, usd2, mlc } = req.body;
+        const { brl_0, brl_100, brl_500, brl_1000, usd1, usd2, mlc, efectivo } = req.body;
         await pool.query(`
             UPDATE rates SET
                 brl_0    = COALESCE($1, brl_0),
@@ -228,9 +235,10 @@ app.post("/admin/tasas", adminLimiter, verificarToken, async (req, res) => {
                 usd1     = COALESCE($5, usd1),
                 usd2     = COALESCE($6, usd2),
                 mlc      = COALESCE($7, mlc),
+                efectivo = COALESCE($8, efectivo),
                 updated_at = NOW()
             WHERE id = 1
-        `, [brl_0, brl_100, brl_500, brl_1000, usd1, usd2, mlc]);
+        `, [brl_0, brl_100, brl_500, brl_1000, usd1, usd2, mlc, efectivo]);
         res.json({ success: true });
     } catch (e) {
         console.error("❌ ERROR TASAS:", e);
@@ -325,8 +333,13 @@ app.post("/admin/oferta", adminLimiter, verificarToken, async (req, res) => {
 
 app.get("/api/tasas", async (req, res) => {
     try {
-        const r = await pool.query("SELECT brl_0, brl_100, brl_500, brl_1000, usd1, mlc FROM rates LIMIT 1");
-        res.json(r.rows[0] || {});
+        const r = await pool.query("SELECT brl_0, brl_100, brl_500, brl_1000, usd1, mlc, efectivo FROM rates LIMIT 1");
+        let oferta = null;
+        try {
+            const o = await pool.query("SELECT texto FROM ofertas WHERE activa = true AND (vence_at IS NULL OR vence_at > NOW()) LIMIT 1");
+            oferta = o.rows[0]?.texto || null;
+        } catch {}
+        res.json({ ...(r.rows[0] || {}), oferta });
     } catch (e) { res.status(500).json({}); }
 });
 
