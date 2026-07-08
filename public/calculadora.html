@@ -4,6 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>Calculadora — Yorda Envíos 🇧🇷→🇨🇺</title>
+<meta property="og:title" content="Yorda Envíos 🇧🇷→🇨🇺">
+<meta property="og:description" content="Calcula tu envío a Cuba al instante · Tasas de hoy · Entrega hoy · Sin comisiones ocultas">
+<meta property="og:image" content="https://yorda-webhook-production.up.railway.app/og.png">
+<meta property="og:url" content="https://yorda-webhook-production.up.railway.app/calculadora.html">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="description" content="Calcula tu envío a Cuba al instante. Reales, USD, MLC y efectivo con tasas actualizadas en tiempo real.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
@@ -37,7 +44,7 @@ h1 span{color:var(--gold)}
   -webkit-mask-image:linear-gradient(90deg,transparent,#000 6%,#000 94%,transparent);
           mask-image:linear-gradient(90deg,transparent,#000 6%,#000 94%,transparent);
 }
-.tk-track{display:inline-flex;white-space:nowrap;padding:9px 0;animation:tkscroll 38s linear infinite;will-change:transform}
+.tk-track{display:inline-flex;white-space:nowrap;padding:9px 0;animation:tkscroll 22s linear infinite;will-change:transform}
 .ticker:hover .tk-track{animation-play-state:paused}
 @keyframes tkscroll{from{transform:translateX(0)}to{transform:translateX(-50%)}}
 .tk-half{display:inline-flex;align-items:center;gap:26px;padding-right:26px}
@@ -176,7 +183,7 @@ const WHATSAPP = "5533999719702";
 const T = {
   es: {
     cuanto:"¿Cuánto envías?", cuantoTarjeta:"¿Cuánto quieres en la tarjeta?",
-    cuantoEfe:"¿Cuántos USD en efectivo?",
+    cuantoEfe:"¿Cuánto envías en efectivo?",
     recibe:"Recibe en Cuba", pagas:"Pagas en Brasil",
     escribe:"Escribe un monto para calcular",
     escTitulo:"Tasa según el monto (CUP por real)",
@@ -187,17 +194,17 @@ const T = {
     noDisp:"No disponible", consulta:"Consulta por WhatsApp 😊",
     subBrl:(v,t)=>`Envías <b>R$${v}</b> · tasa ${t} CUP por real`,
     subUsd:(v,m,t)=>`Recibe <b>${v} ${m}</b> en la tarjeta · R$${t} por ${m}`,
-    subEfe:(v,t)=>`Recibe <b>${v} USD en efectivo</b> 💵 · R$${t} por USD`,
+    subEfe:(v,t)=>`Envías <b>R$${v}</b> · entrega en efectivo 💵 · tasa ${t} CUP por real`,
     hint:(f,t,e)=>`💡 Con R$${f} más subes a tasa ${t} y ganas +${e} CUP`,
     waBrl:v=>`Hola! Quiero enviar R$${v} a Cuba 🇨🇺`,
     waUsd:(v,m)=>`Hola! Quiero ${v} ${m} para la tarjeta`,
-    waEfe:v=>`Hola! Quiero enviar ${v} USD en efectivo`,
+    waEfe:v=>`Hola! Quiero enviar R$${v} para entrega en efectivo`,
     waInfo:m=>`Hola! Quiero información sobre ${m}`,
     copiado:"Link copiado ✅ Pégalo donde quieras"
   },
   pt: {
     cuanto:"Quanto você envia?", cuantoTarjeta:"Quanto quer no cartão?",
-    cuantoEfe:"Quantos USD em dinheiro?",
+    cuantoEfe:"Quanto envia em dinheiro?",
     recibe:"Recebe em Cuba", pagas:"Paga no Brasil",
     escribe:"Digite um valor para calcular",
     escTitulo:"Taxa conforme o valor (CUP por real)",
@@ -208,11 +215,11 @@ const T = {
     noDisp:"Não disponível", consulta:"Consulte pelo WhatsApp 😊",
     subBrl:(v,t)=>`Você envia <b>R$${v}</b> · taxa ${t} CUP por real`,
     subUsd:(v,m,t)=>`Recebe <b>${v} ${m}</b> no cartão · R$${t} por ${m}`,
-    subEfe:(v,t)=>`Recebe <b>${v} USD em dinheiro</b> 💵 · R$${t} por USD`,
+    subEfe:(v,t)=>`Você envia <b>R$${v}</b> · entrega em dinheiro 💵 · taxa ${t} CUP por real`,
     hint:(f,t,e)=>`💡 Com R$${f} a mais sobe para taxa ${t} e ganha +${e} CUP`,
     waBrl:v=>`Olá! Quero enviar R$${v} para Cuba 🇨🇺`,
     waUsd:(v,m)=>`Olá! Quero ${v} ${m} para o cartão`,
-    waEfe:v=>`Olá! Quero enviar ${v} USD em dinheiro`,
+    waEfe:v=>`Olá! Quero enviar R$${v} para entrega em dinheiro`,
     waInfo:m=>`Olá! Quero informações sobre ${m}`,
     copiado:"Link copiado ✅ Cole onde quiser"
   }
@@ -246,7 +253,7 @@ function renderTicker(){
   if(tasas.brl_500)  seg.push(`<span class="tk-item">R$500+ <b>${Number(tasas.brl_500)} CUP</b></span>`);
   if(tasas.brl_1000) seg.push(`<span class="tk-item">R$1000+ <b>${Number(tasas.brl_1000)} CUP</b></span>`);
   if(Number(tasas.usd1)>0)     seg.push(`<span class="tk-item">USD tarjeta <b>R$${Number(tasas.usd1)}</b></span>`);
-  if(Number(tasas.efectivo)>0) seg.push(`<span class="tk-item">USD efectivo <b>R$${Number(tasas.efectivo)}</b></span>`);
+  if(Number(tasas.efectivo)>0) seg.push(`<span class="tk-item">Efectivo <b>${Number(tasas.efectivo)} CUP</b></span>`);
   if(Number(tasas.mlc)>0)      seg.push(`<span class="tk-item">MLC <b>R$${Number(tasas.mlc)}</b></span>`);
   seg.push(`<span class="tk-item">⚡ <b>${lang==="pt"?"Entrega hoje":"Entrega hoy"}</b></span>`);
   const half = `<span class="tk-half">${seg.join("")}</span>`;
@@ -283,7 +290,7 @@ document.querySelectorAll(".pill").forEach(p=>{
 
 function actualizarLabels(){
   if(modo==="brl"){ $("lblMonto").textContent = t().cuanto; $("prefijo").textContent = "R$"; }
-  else if(modo==="efe"){ $("lblMonto").textContent = t().cuantoEfe; $("prefijo").textContent = "USD"; }
+  else if(modo==="efe"){ $("lblMonto").textContent = t().cuantoEfe; $("prefijo").textContent = "R$"; }
   else { $("lblMonto").textContent = t().cuantoTarjeta; $("prefijo").textContent = modo.toUpperCase(); }
 }
 
@@ -307,7 +314,7 @@ function calcular(){
 
   if(!tasas || !v || v<=0){
     num.textContent="—"; sub.textContent=t().escribe;
-    eti.textContent = modo==="brl" ? t().recibe : t().pagas;
+    eti.textContent = (modo==="brl"||modo==="efe") ? t().recibe : t().pagas;
     actualizarWa(null); return;
   }
 
@@ -329,10 +336,10 @@ function calcular(){
 
   } else if(modo==="efe"){
     const tasa = Number(tasas.efectivo)||0;
-    if(tasa<=0){ num.textContent=t().noDisp; sub.textContent=t().consulta; eti.textContent=t().pagas; actualizarWa(t().waInfo("efectivo")); return; }
-    const brl = Math.floor(v*tasa);
-    eti.textContent = t().pagas;
-    num.textContent = "R$"+fmt(brl);
+    if(tasa<=0){ num.textContent=t().noDisp; sub.textContent=t().consulta; eti.textContent=t().recibe; actualizarWa(t().waInfo("efectivo")); return; }
+    const cup = Math.floor(v*tasa);
+    eti.textContent = t().recibe;
+    num.textContent = fmt(cup)+" CUP";
     sub.innerHTML = t().subEfe(fmt(v), tasa);
     actualizarWa(t().waEfe(v));
 
