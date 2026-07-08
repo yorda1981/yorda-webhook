@@ -1,52 +1,368 @@
-const pool = require("../../db");
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Calculadora — Yorda Envíos 🇧🇷→🇨🇺</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0C1E16; --card:#143024; --line:#1F4433;
+  --gold:#F2C24B; --text:#F4F1E4; --muted:#93AF9F; --green:#6FD08C;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{
+  font-family:'Space Grotesk',system-ui,sans-serif;
+  background:var(--bg); color:var(--text);
+  min-height:100vh; display:flex; justify-content:center;
+  background-image:radial-gradient(ellipse 80% 50% at 50% -10%, #1a3a2b 0%, transparent 60%);
+}
+.app{width:100%;max-width:430px;padding:22px 18px 40px}
 
-async function leerTasas() {
-    try {
-        const result = await pool.query("SELECT * FROM rates LIMIT 1");
-        if (result.rows.length === 0) {
-            console.error("❌ No hay tasas en PostgreSQL");
-            return null;
-        }
-        return result.rows[0];
-    } catch (err) {
-        console.error("❌ Error leyendo tasas PostgreSQL:", err.message);
-        return null;
-    }
+header{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;gap:8px}
+h1{font-size:1.1rem;font-weight:700;letter-spacing:.02em;white-space:nowrap}
+h1 span{color:var(--gold)}
+.hdr-der{display:flex;align-items:center;gap:10px}
+.estado{font-size:.68rem;color:var(--muted);text-align:right}
+.estado.on::before{content:"●";color:var(--green);margin-right:4px}
+.lang{display:flex;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.lang button{background:var(--card);border:none;color:var(--muted);font-family:inherit;font-size:.72rem;font-weight:700;padding:5px 9px;cursor:pointer}
+.lang button.act{background:var(--gold);color:#1c1607}
+
+.ticker{
+  width:100%;overflow:hidden;position:relative;
+  border:1px solid var(--line);border-radius:12px;background:#0f2a1e;
+  margin-bottom:14px;
+  -webkit-mask-image:linear-gradient(90deg,transparent,#000 6%,#000 94%,transparent);
+          mask-image:linear-gradient(90deg,transparent,#000 6%,#000 94%,transparent);
+}
+.tk-track{display:inline-flex;white-space:nowrap;padding:9px 0;animation:tkscroll 38s linear infinite;will-change:transform}
+.ticker:hover .tk-track{animation-play-state:paused}
+@keyframes tkscroll{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+.tk-half{display:inline-flex;align-items:center;gap:26px;padding-right:26px}
+.tk-item{font-size:.8rem;color:var(--muted)}
+.tk-item b{color:var(--text);font-weight:700}
+.tk-item i{font-style:normal;font-size:.72rem;margin-left:2px}
+i.up{color:#4ade80} i.down{color:#f87171} i.eq{color:#8b949e}
+.tk-cap{font-size:.72rem;color:var(--gold);font-weight:700;letter-spacing:.06em;text-transform:uppercase}
+@media (prefers-reduced-motion: reduce){ .tk-track{animation:none} .ticker{overflow-x:auto;mask-image:none;-webkit-mask-image:none} }
+
+.oferta{
+  display:none;background:linear-gradient(120deg,#3a2c0d,#2b2410);
+  border:1px solid var(--gold);border-radius:14px;
+  padding:10px 14px;margin-bottom:14px;font-size:.88rem;color:var(--gold);
+}
+.oferta.vis{display:block}
+
+.pills{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:14px}
+.pill{
+  padding:11px 0;border-radius:14px;border:1px solid var(--line);
+  background:var(--card);color:var(--muted);font-family:inherit;
+  font-size:.82rem;font-weight:500;cursor:pointer;transition:all .15s;
+}
+.pill.act{background:var(--gold);border-color:var(--gold);color:#1c1607;font-weight:700}
+.pill:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+
+.campo{
+  background:var(--card);border:1px solid var(--line);border-radius:18px;
+  padding:16px 18px;margin-bottom:14px;
+}
+.campo label{display:block;font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px}
+.fila-input{display:flex;align-items:center;gap:10px}
+.prefijo{font-size:1.3rem;font-weight:700;color:var(--gold);min-width:52px}
+input#monto{
+  flex:1;background:none;border:none;color:var(--text);
+  font-family:inherit;font-size:2.1rem;font-weight:700;width:100%;outline:none;
+}
+input#monto::placeholder{color:#3d5a4b}
+
+.resultado{
+  background:linear-gradient(160deg,#17382a,#122a1f);
+  border:1px solid var(--line);border-radius:18px;
+  padding:18px;text-align:center;margin-bottom:14px;
+}
+.resultado .eti{font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+.resultado .num{font-size:2.3rem;font-weight:700;color:var(--green);margin:6px 0 2px;line-height:1.1;word-break:break-word}
+.resultado .sub{font-size:.85rem;color:var(--muted)}
+.resultado .sub b{color:var(--gold)}
+
+.escalera{margin:0 0 14px;display:none}
+.escalera.vis{display:block}
+.esc-titulo{font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin:0 4px 8px}
+.tramos{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.tramo{
+  border:1px solid var(--line);border-radius:12px;background:var(--card);
+  padding:8px 4px;text-align:center;transition:all .15s;
+}
+.tramo .r{font-size:.68rem;color:var(--muted)}
+.tramo .t{font-size:.95rem;font-weight:700;margin-top:2px}
+.tramo.act{border-color:var(--gold);background:#2b2410}
+.tramo.act .t{color:var(--gold)}
+.hint{font-size:.78rem;color:var(--gold);margin:8px 4px 0;min-height:1em}
+
+.cta{
+  display:flex;align-items:center;justify-content:center;gap:8px;
+  width:100%;padding:16px;border-radius:16px;border:none;cursor:pointer;
+  background:#25D366;color:#06130b;font-family:inherit;
+  font-size:1.05rem;font-weight:700;text-decoration:none;
+}
+.cta:active{transform:scale(.98)}
+.compartir{
+  display:flex;align-items:center;justify-content:center;gap:8px;
+  width:100%;padding:13px;border-radius:16px;cursor:pointer;margin-top:10px;
+  background:none;border:1px solid var(--line);color:var(--muted);
+  font-family:inherit;font-size:.92rem;font-weight:500;
+}
+.compartir:active{transform:scale(.98)}
+.nota{text-align:center;font-size:.72rem;color:var(--muted);margin-top:14px}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>Yorda <span>Envíos</span> 🇧🇷→🇨🇺</h1>
+    <div class="hdr-der">
+      <div class="lang">
+        <button id="btnEs" class="act">ES</button>
+        <button id="btnPt">PT</button>
+      </div>
+      <div class="estado" id="estado">…</div>
+    </div>
+  </header>
+
+  <div class="ticker" id="ticker" style="display:none">
+    <div class="tk-track" id="tkTrack"></div>
+  </div>
+
+  <div class="oferta" id="oferta"></div>
+
+  <div class="pills" role="tablist">
+    <button class="pill act" data-m="brl" role="tab" id="pillBrl">Reales</button>
+    <button class="pill" data-m="usd" role="tab">USD</button>
+    <button class="pill" data-m="mlc" role="tab">MLC</button>
+    <button class="pill" data-m="efe" role="tab" id="pillEfe">Efectivo</button>
+  </div>
+
+  <div class="campo">
+    <label id="lblMonto">¿Cuánto envías?</label>
+    <div class="fila-input">
+      <span class="prefijo" id="prefijo">R$</span>
+      <input id="monto" type="number" inputmode="decimal" placeholder="0" min="0">
+    </div>
+  </div>
+
+  <div class="resultado">
+    <div class="eti" id="etiRes">Recibe en Cuba</div>
+    <div class="num" id="numRes">—</div>
+    <div class="sub" id="subRes">Escribe un monto para calcular</div>
+  </div>
+
+  <div class="escalera vis" id="escalera">
+    <div class="esc-titulo" id="escTitulo">Tasa según el monto (CUP por real)</div>
+    <div class="tramos" id="tramos"></div>
+    <div class="hint" id="hint"></div>
+  </div>
+
+  <a class="cta" id="btnWa" href="#" target="_blank" rel="noopener">💬 Enviar por WhatsApp</a>
+  <button class="compartir" id="btnShare">🔗 Compartir calculadora</button>
+  <div class="nota" id="nota">Tasas actualizadas en tiempo real · Sin comisiones ocultas</div>
+</div>
+
+<script>
+// ⚙️ Número de WhatsApp del bot (solo dígitos, con código de país)
+const WHATSAPP = "5533999719702";
+
+const T = {
+  es: {
+    cuanto:"¿Cuánto envías?", cuantoTarjeta:"¿Cuánto quieres en la tarjeta?",
+    cuantoEfe:"¿Cuántos USD en efectivo?",
+    recibe:"Recibe en Cuba", pagas:"Pagas en Brasil",
+    escribe:"Escribe un monto para calcular",
+    escTitulo:"Tasa según el monto (CUP por real)",
+    share:"🔗 Compartir calculadora",
+    nota:"Tasas actualizadas en tiempo real · Sin comisiones ocultas",
+    tasasHoy:"tasas de hoy", sinCon:"sin conexión — intenta luego",
+    pillBrl:"Reales", pillEfe:"Efectivo",
+    noDisp:"No disponible", consulta:"Consulta por WhatsApp 😊",
+    subBrl:(v,t)=>`Envías <b>R$${v}</b> · tasa ${t} CUP por real`,
+    subUsd:(v,m,t)=>`Recibe <b>${v} ${m}</b> en la tarjeta · R$${t} por ${m}`,
+    subEfe:(v,t)=>`Recibe <b>${v} USD en efectivo</b> 💵 · R$${t} por USD`,
+    hint:(f,t,e)=>`💡 Con R$${f} más subes a tasa ${t} y ganas +${e} CUP`,
+    waBrl:v=>`Hola! Quiero enviar R$${v} a Cuba 🇨🇺`,
+    waUsd:(v,m)=>`Hola! Quiero ${v} ${m} para la tarjeta`,
+    waEfe:v=>`Hola! Quiero enviar ${v} USD en efectivo`,
+    waInfo:m=>`Hola! Quiero información sobre ${m}`,
+    copiado:"Link copiado ✅ Pégalo donde quieras"
+  },
+  pt: {
+    cuanto:"Quanto você envia?", cuantoTarjeta:"Quanto quer no cartão?",
+    cuantoEfe:"Quantos USD em dinheiro?",
+    recibe:"Recebe em Cuba", pagas:"Paga no Brasil",
+    escribe:"Digite um valor para calcular",
+    escTitulo:"Taxa conforme o valor (CUP por real)",
+    share:"🔗 Compartilhar calculadora",
+    nota:"Taxas atualizadas em tempo real · Sem taxas ocultas",
+    tasasHoy:"taxas de hoje", sinCon:"sem conexão — tente depois",
+    pillBrl:"Reais", pillEfe:"Dinheiro",
+    noDisp:"Não disponível", consulta:"Consulte pelo WhatsApp 😊",
+    subBrl:(v,t)=>`Você envia <b>R$${v}</b> · taxa ${t} CUP por real`,
+    subUsd:(v,m,t)=>`Recebe <b>${v} ${m}</b> no cartão · R$${t} por ${m}`,
+    subEfe:(v,t)=>`Recebe <b>${v} USD em dinheiro</b> 💵 · R$${t} por USD`,
+    hint:(f,t,e)=>`💡 Com R$${f} a mais sobe para taxa ${t} e ganha +${e} CUP`,
+    waBrl:v=>`Olá! Quero enviar R$${v} para Cuba 🇨🇺`,
+    waUsd:(v,m)=>`Olá! Quero ${v} ${m} para o cartão`,
+    waEfe:v=>`Olá! Quero enviar ${v} USD em dinheiro`,
+    waInfo:m=>`Olá! Quero informações sobre ${m}`,
+    copiado:"Link copiado ✅ Cole onde quiser"
+  }
+};
+
+let tasas = null, modo = "brl", lang = "es";
+const $ = id => document.getElementById(id);
+const t = () => T[lang];
+
+const TRAMOS = [
+  { min:0,    max:99,  eti:"R$1–99",  key:"brl_0"    },
+  { min:100,  max:499, eti:"R$100+",  key:"brl_100"  },
+  { min:500,  max:999, eti:"R$500+",  key:"brl_500"  },
+  { min:1000, max:1e9, eti:"R$1000+", key:"brl_1000" },
+];
+
+fetch("/api/tasas").then(r=>r.json()).then(d=>{
+  tasas = d;
+  $("estado").textContent = t().tasasHoy;
+  $("estado").classList.add("on");
+  if(d.oferta){ $("oferta").textContent = "🔥 " + d.oferta; $("oferta").classList.add("vis"); }
+  pintarEscalera(); calcular(); renderTicker();
+}).catch(()=>{ $("estado").textContent = t().sinCon; });
+
+// ── ticker de tasas Yorda ──
+function renderTicker(){
+  if(!tasas) return;
+  const seg = [];
+  seg.push(`<span class="tk-cap">🔥 Tasas Yorda</span>`);
+  if(tasas.brl_100)  seg.push(`<span class="tk-item">R$100+ <b>${Number(tasas.brl_100)} CUP</b></span>`);
+  if(tasas.brl_500)  seg.push(`<span class="tk-item">R$500+ <b>${Number(tasas.brl_500)} CUP</b></span>`);
+  if(tasas.brl_1000) seg.push(`<span class="tk-item">R$1000+ <b>${Number(tasas.brl_1000)} CUP</b></span>`);
+  if(Number(tasas.usd1)>0)     seg.push(`<span class="tk-item">USD tarjeta <b>R$${Number(tasas.usd1)}</b></span>`);
+  if(Number(tasas.efectivo)>0) seg.push(`<span class="tk-item">USD efectivo <b>R$${Number(tasas.efectivo)}</b></span>`);
+  if(Number(tasas.mlc)>0)      seg.push(`<span class="tk-item">MLC <b>R$${Number(tasas.mlc)}</b></span>`);
+  seg.push(`<span class="tk-item">⚡ <b>${lang==="pt"?"Entrega hoje":"Entrega hoy"}</b></span>`);
+  const half = `<span class="tk-half">${seg.join("")}</span>`;
+  $("tkTrack").innerHTML = half + half;
+  $("ticker").style.display = "block";
 }
 
-async function calcularOperacion({ tipo, valor }) {
-    const tasas = await leerTasas();
-    if (!tasas) return null;
-
-    const monto = Number(valor);
-
-    if (tipo === "brl_cup") {
-        let tasa = 0;
-        if (monto < 100)       tasa = Number(tasas.brl_0);
-        else if (monto < 500)  tasa = Number(tasas.brl_100);
-        else if (monto < 1000) tasa = Number(tasas.brl_500);
-        else                   tasa = Number(tasas.brl_1000);
-        return { valor: monto, tasa, cup: Math.floor(monto * tasa) };
-    }
-
-    if (tipo === "usd_clasica") {
-        return { valor: monto, tasa: Number(tasas.usd1), cup: Math.floor(monto * Number(tasas.usd1)) };
-    }
-
-    if (tipo === "usd_prepago" || tipo === "usd_pendiente_tipo") {
-        return { valor: monto, tasa: Number(tasas.usd2), cup: Math.floor(monto * Number(tasas.usd2)) };
-    }
-
-    if (tipo === "usd_efectivo") {
-        const tasaEf = Number(tasas.efectivo || 0) > 0 ? Number(tasas.efectivo) : Number(tasas.usd1);
-        return { valor: monto, tasa: tasaEf, brl: Math.floor(monto * tasaEf) };
-    }
-
-    if (tipo === "mlc") {
-        return { valor: monto, tasa: Number(tasas.mlc || 0), cup: Math.floor(monto * Number(tasas.mlc || 0)) };
-    }
-
-    return null;
+// ── idioma ──
+$("btnEs").onclick = ()=>setLang("es");
+$("btnPt").onclick = ()=>setLang("pt");
+function setLang(l){
+  lang = l;
+  $("btnEs").classList.toggle("act", l==="es");
+  $("btnPt").classList.toggle("act", l==="pt");
+  $("escTitulo").textContent = t().escTitulo;
+  $("btnShare").textContent  = t().share;
+  $("nota").textContent      = t().nota;
+  $("pillBrl").textContent   = t().pillBrl;
+  $("pillEfe").textContent   = t().pillEfe;
+  if(tasas){ $("estado").textContent = t().tasasHoy; }
+  actualizarLabels(); calcular(); renderTicker();
 }
 
-module.exports = { calcularOperacion };
+// ── pestañas moneda ──
+document.querySelectorAll(".pill").forEach(p=>{
+  p.addEventListener("click", ()=>{
+    document.querySelectorAll(".pill").forEach(x=>x.classList.remove("act"));
+    p.classList.add("act");
+    modo = p.dataset.m;
+    $("escalera").classList.toggle("vis", modo==="brl");
+    actualizarLabels(); calcular();
+  });
+});
+
+function actualizarLabels(){
+  if(modo==="brl"){ $("lblMonto").textContent = t().cuanto; $("prefijo").textContent = "R$"; }
+  else if(modo==="efe"){ $("lblMonto").textContent = t().cuantoEfe; $("prefijo").textContent = "USD"; }
+  else { $("lblMonto").textContent = t().cuantoTarjeta; $("prefijo").textContent = modo.toUpperCase(); }
+}
+
+$("monto").addEventListener("input", calcular);
+
+function fmt(n){ return Number(n).toLocaleString("es-CU"); }
+function tramoDe(m){ return TRAMOS.find(x=>m>=x.min && m<=x.max) || TRAMOS[3]; }
+
+function pintarEscalera(){
+  if(!tasas) return;
+  $("tramos").innerHTML = TRAMOS.map(x=>
+    `<div class="tramo" data-k="${x.key}"><div class="r">${x.eti}</div><div class="t">${Number(tasas[x.key]||0)}</div></div>`
+  ).join("");
+}
+
+function calcular(){
+  const v = Number($("monto").value);
+  const num=$("numRes"), sub=$("subRes"), eti=$("etiRes"), hint=$("hint");
+  document.querySelectorAll(".tramo").forEach(x=>x.classList.remove("act"));
+  hint.textContent = "";
+
+  if(!tasas || !v || v<=0){
+    num.textContent="—"; sub.textContent=t().escribe;
+    eti.textContent = modo==="brl" ? t().recibe : t().pagas;
+    actualizarWa(null); return;
+  }
+
+  if(modo==="brl"){
+    const tr = tramoDe(v), tasa = Number(tasas[tr.key]||0);
+    const cup = Math.floor(v*tasa);
+    eti.textContent = t().recibe;
+    num.textContent = fmt(cup)+" CUP";
+    sub.innerHTML = t().subBrl(fmt(v), tasa);
+    const el = document.querySelector(`.tramo[data-k="${tr.key}"]`);
+    if(el) el.classList.add("act");
+    const idx = TRAMOS.indexOf(tr);
+    if(idx < 3){
+      const sig = TRAMOS[idx+1], falta = sig.min - v;
+      const extra = Math.floor(sig.min*Number(tasas[sig.key]||0)) - Math.floor(sig.min*tasa);
+      if(falta>0 && extra>0) hint.textContent = t().hint(falta, tasas[sig.key], fmt(extra));
+    }
+    actualizarWa(t().waBrl(v));
+
+  } else if(modo==="efe"){
+    const tasa = Number(tasas.efectivo)||0;
+    if(tasa<=0){ num.textContent=t().noDisp; sub.textContent=t().consulta; eti.textContent=t().pagas; actualizarWa(t().waInfo("efectivo")); return; }
+    const brl = Math.floor(v*tasa);
+    eti.textContent = t().pagas;
+    num.textContent = "R$"+fmt(brl);
+    sub.innerHTML = t().subEfe(fmt(v), tasa);
+    actualizarWa(t().waEfe(v));
+
+  } else {
+    const m = modo.toUpperCase();
+    const tasa = Number(modo==="usd" ? tasas.usd1 : tasas.mlc) || 0;
+    if(tasa<=0){ num.textContent=t().noDisp; sub.textContent=t().consulta; eti.textContent=t().pagas; actualizarWa(t().waInfo(m)); return; }
+    const brl = Math.floor(v*tasa);
+    eti.textContent = t().pagas;
+    num.textContent = "R$"+fmt(brl);
+    sub.innerHTML = t().subUsd(fmt(v), m, tasa);
+    actualizarWa(t().waUsd(v, m));
+  }
+}
+
+function actualizarWa(msg){
+  const base = "https://wa.me/"+WHATSAPP;
+  $("btnWa").href = msg ? base+"?text="+encodeURIComponent(msg) : base;
+}
+
+// ── compartir ──
+$("btnShare").addEventListener("click", async ()=>{
+  const url = location.href;
+  const data = { title:"Yorda Envíos 🇧🇷→🇨🇺", text: lang==="pt" ? "Calcule seu envio para Cuba na hora:" : "Calcula tu envío a Cuba al instante:", url };
+  if(navigator.share){ try{ await navigator.share(data); }catch{} }
+  else {
+    try{ await navigator.clipboard.writeText(url); alert(t().copiado); }
+    catch{ prompt("Link:", url); }
+  }
+});
+</script>
+</body>
+</html>
