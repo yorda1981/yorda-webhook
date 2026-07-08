@@ -248,7 +248,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             const esEfectivo = /efectivo|cash|vender|cambiar|comprar/.test(txt);
             const esPrepago  = /prepago|nauta|internacional/.test(txt);
             const esClasica  = /clasica|clásica|bpa|bandec|metropolitano/.test(txt);
-            if (!esEfectivo && !esPrepago && !esClasica) return await preguntarTipoUSD(phone, pushName, valorFinal, lang, esEs) || "";
+            if (!esEfectivo && !esPrepago && !esClasica) return await cotizarUSD(phone, pushName, valorFinal, "usd_clasica", lang, esEs) || "";
             return await cotizarUSD(phone, pushName, valorFinal, esEfectivo ? "usd_efectivo" : esPrepago ? "usd_prepago" : "usd_clasica", lang, esEs) || "";
         }
 
