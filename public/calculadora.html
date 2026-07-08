@@ -30,6 +30,24 @@ h1 span{color:var(--gold)}
 .lang button{background:var(--card);border:none;color:var(--muted);font-family:inherit;font-size:.72rem;font-weight:700;padding:5px 9px;cursor:pointer}
 .lang button.act{background:var(--gold);color:#1c1607}
 
+.ticker{
+  width:100%;overflow:hidden;position:relative;
+  border:1px solid var(--line);border-radius:12px;background:#0f2a1e;
+  margin-bottom:14px;
+  -webkit-mask-image:linear-gradient(90deg,transparent,#000 6%,#000 94%,transparent);
+          mask-image:linear-gradient(90deg,transparent,#000 6%,#000 94%,transparent);
+}
+.tk-track{display:inline-flex;white-space:nowrap;padding:9px 0;animation:tkscroll 38s linear infinite;will-change:transform}
+.ticker:hover .tk-track{animation-play-state:paused}
+@keyframes tkscroll{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+.tk-half{display:inline-flex;align-items:center;gap:26px;padding-right:26px}
+.tk-item{font-size:.8rem;color:var(--muted)}
+.tk-item b{color:var(--text);font-weight:700}
+.tk-item i{font-style:normal;font-size:.72rem;margin-left:2px}
+i.up{color:#4ade80} i.down{color:#f87171} i.eq{color:#8b949e}
+.tk-cap{font-size:.72rem;color:var(--gold);font-weight:700;letter-spacing:.06em;text-transform:uppercase}
+@media (prefers-reduced-motion: reduce){ .tk-track{animation:none} .ticker{overflow-x:auto;mask-image:none;-webkit-mask-image:none} }
+
 .oferta{
   display:none;background:linear-gradient(120deg,#3a2c0d,#2b2410);
   border:1px solid var(--gold);border-radius:14px;
@@ -112,6 +130,10 @@ input#monto::placeholder{color:#3d5a4b}
       <div class="estado" id="estado">…</div>
     </div>
   </header>
+
+  <div class="ticker" id="ticker" style="display:none">
+    <div class="tk-track" id="tkTrack"></div>
+  </div>
 
   <div class="oferta" id="oferta"></div>
 
@@ -212,8 +234,72 @@ fetch("/api/tasas").then(r=>r.json()).then(d=>{
   $("estado").textContent = t().tasasHoy;
   $("estado").classList.add("on");
   if(d.oferta){ $("oferta").textContent = "🔥 " + d.oferta; $("oferta").classList.add("vis"); }
-  pintarEscalera(); calcular();
+  pintarEscalera(); calcular(); renderTicker();
 }).catch(()=>{ $("estado").textContent = t().sinCon; });
+
+// ── ticker de mercado ──
+let mercado = [], prevFx = {}, horaMercado = "";
+
+function dirDe(lbl, val, cambio24h){
+  if(cambio24h != null) return cambio24h > 0.05 ? "up" : cambio24h < -0.05 ? "down" : "eq";
+  const prev = prevFx[lbl];
+  const dir = prev == null ? "eq" : val > prev ? "up" : val < prev ? "down" : "eq";
+  prevFx[lbl] = val;
+  return dir;
+}
+function nf(v, dec){ return Number(v).toLocaleString("pt-BR",{minimumFractionDigits:dec,maximumFractionDigits:dec}); }
+
+async function cargarMercado(){
+  try{
+    const [fx, cg] = await Promise.all([
+      fetch("https://open.er-api.com/v6/latest/USD").then(r=>r.json()).catch(()=>null),
+      fetch("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,tether&vs_currencies=usd,brl&include_24hr_change=true").then(r=>r.json()).catch(()=>null)
+    ]);
+    const items = [];
+    const rt = fx?.rates;
+    if(rt?.BRL){
+      const brl = rt.BRL;
+      items.push({lbl:"USD", txt:nf(brl,2),        dir:dirDe("USD", brl)});
+      if(rt.EUR) items.push({lbl:"EUR", txt:nf(brl/rt.EUR,2), dir:dirDe("EUR", brl/rt.EUR)});
+      if(rt.GBP) items.push({lbl:"GBP", txt:nf(brl/rt.GBP,2), dir:dirDe("GBP", brl/rt.GBP)});
+    }
+    if(cg?.tether?.brl)  items.push({lbl:"USDT", txt:nf(cg.tether.brl,2),  dir:dirDe("USDT", cg.tether.brl, cg.tether.brl_24h_change)});
+    if(cg?.bitcoin?.usd) items.push({lbl:"BTC",  txt:nf(cg.bitcoin.usd,0)+" USD", dir:dirDe("BTC", cg.bitcoin.usd, cg.bitcoin.usd_24h_change)});
+    if(cg?.ethereum?.usd)items.push({lbl:"ETH",  txt:nf(cg.ethereum.usd,0)+" USD", dir:dirDe("ETH", cg.ethereum.usd, cg.ethereum.usd_24h_change)});
+    mercado = items;
+    horaMercado = new Date().toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"});
+  }catch{ /* sin mercado, el ticker mostrará solo tasas Yorda */ }
+  renderTicker();
+}
+
+function renderTicker(){
+  const seg = [];
+  if(mercado.length){
+    seg.push(`<span class="tk-cap">📈 Mercado</span>`);
+    mercado.forEach(i=>{
+      const f = i.dir==="up" ? "▲" : i.dir==="down" ? "▼" : "=";
+      seg.push(`<span class="tk-item">${i.lbl} <b>${i.txt}</b> <i class="${i.dir}">${f}</i></span>`);
+    });
+    if(horaMercado) seg.push(`<span class="tk-item">🕒 ${horaMercado}</span>`);
+  }
+  if(tasas){
+    seg.push(`<span class="tk-cap">🔥 Tasas Yorda</span>`);
+    if(tasas.brl_100)  seg.push(`<span class="tk-item">R$100+ <b>${Number(tasas.brl_100)} CUP</b></span>`);
+    if(tasas.brl_500)  seg.push(`<span class="tk-item">R$500+ <b>${Number(tasas.brl_500)} CUP</b></span>`);
+    if(tasas.brl_1000) seg.push(`<span class="tk-item">R$1000+ <b>${Number(tasas.brl_1000)} CUP</b></span>`);
+    if(Number(tasas.usd1)>0)     seg.push(`<span class="tk-item">USD tarjeta <b>R$${Number(tasas.usd1)}</b></span>`);
+    if(Number(tasas.efectivo)>0) seg.push(`<span class="tk-item">USD efectivo <b>R$${Number(tasas.efectivo)}</b></span>`);
+    if(Number(tasas.mlc)>0)      seg.push(`<span class="tk-item">MLC <b>R$${Number(tasas.mlc)}</b></span>`);
+    seg.push(`<span class="tk-item">⚡ <b>${lang==="pt"?"Entrega hoje":"Entrega hoy"}</b></span>`);
+  }
+  if(!seg.length) return;
+  const half = `<span class="tk-half">${seg.join("")}</span>`;
+  $("tkTrack").innerHTML = half + half;
+  $("ticker").style.display = "block";
+}
+
+cargarMercado();
+setInterval(cargarMercado, 60000);
 
 // ── idioma ──
 $("btnEs").onclick = ()=>setLang("es");
@@ -228,7 +314,7 @@ function setLang(l){
   $("pillBrl").textContent   = t().pillBrl;
   $("pillEfe").textContent   = t().pillEfe;
   if(tasas){ $("estado").textContent = t().tasasHoy; }
-  actualizarLabels(); calcular();
+  actualizarLabels(); calcular(); renderTicker();
 }
 
 // ── pestañas moneda ──
