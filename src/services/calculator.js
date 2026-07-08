@@ -33,7 +33,7 @@ async function calcularOperacion({ tipo, valor }) {
         return { valor: monto, tasa: Number(tasas.usd1), cup: Math.floor(monto * Number(tasas.usd1)) };
     }
 
-    if (tipo === "usd_prepago") {
+    if (tipo === "usd_prepago" || tipo === "usd_pendiente_tipo") {
         return { valor: monto, tasa: Number(tasas.usd2), cup: Math.floor(monto * Number(tasas.usd2)) };
     }
 
