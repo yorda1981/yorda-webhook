@@ -157,15 +157,24 @@ async function intentarCompletarOperacion(phone, pushName, cliente, esEs) {
     const tarjetaRaw = cliente.tarjeta || cliente.tarjeta_frecuente || "-";
     const tarjetaFmt = tarjetaRaw !== "-" ? tarjetaRaw.replace(/(.{4})/g, "$1 ").trim() : "-";
 
+    const tipoOp   = cliente.tipo_favorito || "brl_cup";
+    const totalBrl = resultado?.cup ?? resultado?.brl ?? 0;
+    let lineasMonto;
+    if (tipoOp.startsWith("usd")) {
+        lineasMonto = `🇨🇺 Recibe: ${cliente.ultimo_monto} USD\n\n💵 Paga: R$${fmt(totalBrl)}`;
+    } else if (tipoOp === "mlc") {
+        lineasMonto = `🇨🇺 Recibe: ${cliente.ultimo_monto} MLC\n\n💵 Paga: R$${fmt(totalBrl)}`;
+    } else {
+        lineasMonto = `💵 Enviado: R$${cliente.ultimo_monto}\n\n🇨🇺 Recibe: ${fmt(resultado?.cup || 0)} CUP`;
+    }
+
     const msgOperacion = `📥 *OPERACIÓN ${opId}PENDIENTE*
 
 👤 Cliente: ${pushName || cliente.nombre}
 
 📱 Teléfono: ${phone}
 
-💵 Enviado: R$${cliente.ultimo_monto}
-
-🇨🇺 Recibe: ${fmt(resultado?.cup || 0)} CUP
+${lineasMonto}
 
 🏦 Banco: ${cliente.banco_detectado || "-"}
 
