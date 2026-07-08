@@ -1,0 +1,623 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Calculadora — Yorda Envíos 🇧🇷→🇨🇺</title>
+<meta property="og:title" content="Yorda Envíos 🇧🇷→🇨🇺">
+<meta property="og:description" content="Calcula tu envío a Cuba al instante · Tasas de hoy · Entrega hoy · Sin comisiones ocultas">
+<meta property="og:image" content="https://yorda-webhook-production.up.railway.app/og.png">
+<meta property="og:url" content="https://yorda-webhook-production.up.railway.app/calculadora.html">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="description" content="Calcula tu envío a Cuba al instante. Reales, USD, MLC y efectivo con tasas actualizadas en tiempo real.">
+<link rel="icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCIgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0Ij4KICA8ZGVmcz4KICAgIDxsaW5lYXJHcmFkaWVudCBpZD0iZyIgeDE9IjAiIHkxPSIwIiB4Mj0iMSIgeTI9IjEiPgogICAgICA8c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiM4QjZDRkYiLz4KICAgICAgPHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjNUIzREY1Ii8+CiAgICA8L2xpbmVhckdyYWRpZW50PgogIDwvZGVmcz4KICA8Y2lyY2xlIGN4PSIzMiIgY3k9IjMyIiByPSIzMCIgZmlsbD0idXJsKCNnKSIvPgogIDxwYXRoIGQ9Ik0xNCAzMiBMNTAgMTggTDQwIDQ4IEwzMiAzOCBMMjYgNDQgTDI2IDM1IFoiIGZpbGw9IiNGRkZGRkYiLz4KICA8cGF0aCBkPSJNMzIgMzggTDUwIDE4IEwyNiAzNSBMMjYgNDQgWiIgZmlsbD0iI0Q5Q0VGRiIvPgo8L3N2Zz4K" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&display=swap" rel="stylesheet">
+<style>
+/* ═══════════════════════════════════════════
+   Calculadora Yorda v2.0 — estilos
+   ═══════════════════════════════════════════ */
+
+:root{
+  --bg:#0A0B14;
+  --card:#12141F;
+  --card2:#171A2A;
+  --line:#242844;
+  --accent:#7C5CFF;
+  --accent2:#9F7DFF;
+  --text:#F2F3F8;
+  --muted:#8B90A8;
+  --green:#34D399;
+  --gold:#F2C24B;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{
+  font-family:'Manrope',system-ui,sans-serif;
+  background:var(--bg);color:var(--text);min-height:100vh;
+  background-image:
+    radial-gradient(ellipse 60% 40% at 20% -10%, #1c1440 0%, transparent 60%),
+    radial-gradient(ellipse 50% 35% at 90% 0%, #10203a 0%, transparent 55%);
+}
+.page{max-width:1080px;margin:0 auto;padding:20px 16px 48px}
+
+/* ── header ── */
+.hdr{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px;flex-wrap:wrap}
+.marca{display:flex;align-items:center;gap:12px}
+.logo{width:44px;height:44px}
+.nombre{font-size:1.25rem;font-weight:800}
+.nombre span{color:var(--accent2)}
+.ruta{font-size:.72rem;color:var(--muted);font-weight:700;letter-spacing:.04em}
+.hdr-der{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.estado{display:flex;align-items:center;gap:6px;font-size:.78rem;color:var(--muted)}
+.dot{width:8px;height:8px;border-radius:50%;background:#555;display:inline-block}
+.estado.on .dot{background:var(--green);box-shadow:0 0 8px var(--green)}
+.reloj{font-size:.82rem;color:var(--muted);font-variant-numeric:tabular-nums}
+.lang{display:flex;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.lang button{background:var(--card);border:none;color:var(--muted);font-family:inherit;font-size:.78rem;font-weight:800;padding:7px 13px;cursor:pointer}
+.lang button.act{background:var(--accent);color:#fff}
+
+/* ── paneles ── */
+.panel{
+  background:var(--card);border:1px solid var(--line);border-radius:20px;
+  padding:20px;margin-bottom:16px;
+}
+.panel-titulo{display:flex;align-items:center;gap:8px;font-size:.95rem;font-weight:800;margin-bottom:14px}
+.panel-titulo em{color:var(--accent2);font-style:normal;font-weight:700}
+.panel-titulo .ico{font-size:1rem}
+
+/* ── panel de tasas ── */
+.tasas-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.tasa-card{
+  background:var(--card2);border:1px solid var(--line);border-radius:14px;
+  padding:12px 14px;
+}
+.tasa-card .te{font-size:.72rem;color:var(--muted);font-weight:700;display:flex;align-items:center;gap:6px}
+.tasa-card .te .mini-ico{
+  width:22px;height:22px;border-radius:7px;background:var(--accent);
+  display:inline-flex;align-items:center;justify-content:center;font-size:.7rem;flex:none;
+}
+.tasa-card .tv{font-size:1.25rem;font-weight:800;margin-top:6px}
+
+/* ── grid principal ── */
+.grid{display:grid;grid-template-columns:1fr;gap:16px}
+
+/* ── pestañas ── */
+.pills{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:18px}
+.pill{
+  padding:12px 0;border-radius:14px;border:1px solid var(--line);
+  background:var(--card2);color:var(--muted);font-family:inherit;
+  font-size:.88rem;font-weight:700;cursor:pointer;transition:all .15s;
+}
+.pill.act{background:var(--accent);border-color:var(--accent);color:#fff}
+.pill:focus-visible{outline:2px solid var(--accent2);outline-offset:2px}
+
+/* ── campo ── */
+.campo-label{display:block;font-size:.82rem;color:var(--muted);font-weight:700;margin-bottom:8px}
+.campo{
+  display:flex;align-items:center;gap:12px;
+  background:var(--card2);border:1px solid var(--line);border-radius:16px;
+  padding:14px 16px;
+}
+.prefijo{font-size:1.2rem;font-weight:800;color:var(--accent2);min-width:48px}
+#monto{
+  flex:1;min-width:0;background:none;border:none;color:var(--text);
+  font-family:inherit;font-size:2rem;font-weight:800;outline:none;
+}
+#monto::placeholder{color:#3a3f5c}
+.limpiar{
+  background:none;border:none;color:var(--muted);font-family:inherit;
+  font-size:.78rem;font-weight:700;cursor:pointer;white-space:nowrap;
+}
+
+/* ── chips de montos rápidos ── */
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0 16px}
+.chip{
+  padding:9px 16px;border-radius:12px;border:1px solid var(--line);
+  background:var(--card2);color:var(--muted);font-family:inherit;
+  font-size:.85rem;font-weight:700;cursor:pointer;transition:all .15s;
+}
+.chip.act{background:var(--accent);border-color:var(--accent);color:#fff}
+
+/* ── resultado ── */
+.resultado{
+  display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:8px;
+  background:linear-gradient(160deg,#181430,#131627);
+  border:1px solid var(--line);border-radius:18px;
+  padding:18px 16px 14px;margin-bottom:14px;text-align:center;
+  animation:aparecer .25s ease;
+}
+@keyframes aparecer{from{opacity:.4;transform:translateY(4px)}to{opacity:1;transform:none}}
+.res-eti{font-size:.7rem;color:var(--muted);font-weight:800;text-transform:uppercase;letter-spacing:.06em}
+.res-num{font-size:1.5rem;font-weight:800;margin-top:4px;word-break:break-word}
+.res-num.destaque{color:var(--accent2)}
+.res-flecha{
+  width:38px;height:38px;border-radius:50%;background:var(--card2);border:1px solid var(--line);
+  display:flex;align-items:center;justify-content:center;color:var(--muted);font-weight:800;margin:0 auto;
+}
+.res-tasa{grid-column:1/-1;font-size:.78rem;color:var(--muted);margin-top:8px;min-height:1em}
+.res-tasa b{color:var(--gold)}
+
+/* ── beneficios ── */
+.beneficios{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px}
+.ben{
+  display:flex;align-items:center;gap:8px;background:var(--card2);
+  border:1px solid var(--line);border-radius:12px;padding:10px;
+}
+.ben span{font-size:1rem}
+.ben b{display:block;font-size:.72rem}
+.ben i{font-style:normal;font-size:.72rem;color:var(--green);font-weight:700}
+
+/* ── CTA WhatsApp ── */
+.cta{
+  display:flex;align-items:center;justify-content:center;gap:12px;
+  width:100%;padding:15px;border-radius:16px;text-decoration:none;
+  background:linear-gradient(135deg,var(--accent),#5B3DF5);color:#fff;
+  transition:transform .1s;
+}
+.cta:active{transform:scale(.98)}
+.cta-ico{font-size:1.3rem}
+.cta b{display:block;font-size:1rem}
+.cta i{font-style:normal;font-size:.75rem;opacity:.85}
+
+.acciones{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
+.accion{
+  padding:12px;border-radius:14px;border:1px solid var(--line);cursor:pointer;
+  background:var(--card2);color:var(--muted);font-family:inherit;font-size:.85rem;font-weight:700;
+}
+.accion:active{transform:scale(.98)}
+
+/* ── historial ── */
+.hist-item{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:10px 0;border-bottom:1px solid var(--line);font-size:.88rem;
+}
+.hist-item:last-child{border-bottom:none}
+.hist-item .cuando{color:var(--muted);font-size:.75rem}
+
+/* ── lateral ── */
+.check{font-size:.85rem;color:var(--text);padding:6px 0}
+.lado-nota{font-size:.75rem;color:var(--muted);margin-top:10px}
+.zona-prov{font-size:.72rem;color:var(--accent2);font-weight:800;text-transform:uppercase;letter-spacing:.05em;margin:10px 0 4px}
+.zona-prov:first-child{margin-top:0}
+.zona-item{display:flex;align-items:center;gap:8px;font-size:.85rem;padding:5px 0}
+.zona-item .ok{color:var(--green)}
+
+/* ── promo ── */
+.promo{
+  background:linear-gradient(120deg,#6D28D9,#C026D3,#F97316);
+  border-radius:20px;padding:20px;margin-bottom:16px;
+}
+.promo-eti{font-size:.8rem;font-weight:800;margin-bottom:6px}
+.promo-txt{font-size:1.05rem;font-weight:800;line-height:1.35}
+
+.pie{text-align:center;font-size:.75rem;color:var(--muted);margin-top:8px}
+
+/* ── responsive ── */
+@media (min-width:700px){
+  .tasas-grid{grid-template-columns:repeat(4,1fr)}
+}
+@media (min-width:920px){
+  .grid{grid-template-columns:1fr 330px;align-items:start}
+  .res-num{font-size:1.9rem}
+}
+@media (prefers-reduced-motion:reduce){
+  .resultado{animation:none}
+}
+
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <!-- ═══════ HEADER ═══════ -->
+  <header class="hdr">
+    <div class="marca">
+      <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCIgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0Ij4KICA8ZGVmcz4KICAgIDxsaW5lYXJHcmFkaWVudCBpZD0iZyIgeDE9IjAiIHkxPSIwIiB4Mj0iMSIgeTI9IjEiPgogICAgICA8c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiM4QjZDRkYiLz4KICAgICAgPHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjNUIzREY1Ii8+CiAgICA8L2xpbmVhckdyYWRpZW50PgogIDwvZGVmcz4KICA8Y2lyY2xlIGN4PSIzMiIgY3k9IjMyIiByPSIzMCIgZmlsbD0idXJsKCNnKSIvPgogIDxwYXRoIGQ9Ik0xNCAzMiBMNTAgMTggTDQwIDQ4IEwzMiAzOCBMMjYgNDQgTDI2IDM1IFoiIGZpbGw9IiNGRkZGRkYiLz4KICA8cGF0aCBkPSJNMzIgMzggTDUwIDE4IEwyNiAzNSBMMjYgNDQgWiIgZmlsbD0iI0Q5Q0VGRiIvPgo8L3N2Zz4K" alt="Yorda Envíos" class="logo">
+      <div>
+        <div class="nombre">Yorda <span>Envíos</span></div>
+        <div class="ruta">🇧🇷 BR → CU 🇨🇺</div>
+      </div>
+    </div>
+    <div class="hdr-der">
+      <div class="estado" id="estado"><span class="dot"></span><span id="estadoTxt">…</span></div>
+      <div class="reloj" id="reloj">--:--:--</div>
+      <div class="lang">
+        <button id="btnEs" class="act">ES</button>
+        <button id="btnPt">PT</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ═══════ TASAS DE YORDA ═══════ -->
+  <section class="panel tasas-panel">
+    <div class="panel-titulo"><span class="ico">💰</span> <span data-i="tasasTitulo">Tasas de Yorda</span> <em data-i="hoy">(Hoy)</em></div>
+    <div class="tasas-grid" id="tasasGrid"></div>
+  </section>
+
+  <!-- ═══════ GRID PRINCIPAL ═══════ -->
+  <div class="grid">
+
+    <!-- ── Columna calculadora ── -->
+    <main class="col-calc">
+      <section class="panel">
+        <div class="pills" role="tablist">
+          <button class="pill act" data-m="brl" id="pillBrl">Reales</button>
+          <button class="pill" data-m="usd">USD</button>
+          <button class="pill" data-m="mlc">MLC</button>
+          <button class="pill" data-m="efe" id="pillEfe">Efectivo</button>
+        </div>
+
+        <label class="campo-label" id="lblMonto" data-i="cuanto">¿Cuánto quieres enviar?</label>
+        <div class="campo">
+          <span class="prefijo" id="prefijo">R$</span>
+          <input id="monto" type="number" inputmode="decimal" placeholder="0" min="0" autocomplete="off">
+          <button class="limpiar" id="btnLimpiar"><span data-i="limpiar">Limpiar</span> ✕</button>
+        </div>
+
+        <div class="chips" id="chips"></div>
+
+        <div class="resultado" id="resultado">
+          <div class="res-lado">
+            <div class="res-eti" data-i="pagas">Tú pagas en Brasil</div>
+            <div class="res-num" id="resPaga">—</div>
+          </div>
+          <div class="res-flecha">→</div>
+          <div class="res-lado">
+            <div class="res-eti" data-i="recibe">Recibe en Cuba</div>
+            <div class="res-num destaque" id="resRecibe">—</div>
+          </div>
+          <div class="res-tasa" id="resTasa"></div>
+        </div>
+
+        <div class="beneficios">
+          <div class="ben"><span>🕒</span><div><b data-i="benEntrega">Entrega estimada</b><i data-i="benHoy">Hoy</i></div></div>
+          <div class="ben"><span>🛡️</span><div><b data-i="benSin">Sin comisiones</b><i data-i="benOcultas">ocultas</i></div></div>
+          <div class="ben"><span>⚡</span><div><b data-i="benPagos">Pagos seguros</b><i data-i="benRapidos">y rápidos</i></div></div>
+        </div>
+
+        <a class="cta" id="btnWa" href="#" target="_blank" rel="noopener">
+          <span class="cta-ico">💬</span>
+          <span><b data-i="ctaTitulo">Quiero hacer este envío</b><i data-i="ctaSub">Te atendemos por WhatsApp</i></span>
+        </a>
+
+        <div class="acciones">
+          <button class="accion" id="btnShare">🔗 <span data-i="compartir">Compartir resultado</span></button>
+          <button class="accion" id="btnCopiar">📋 <span data-i="copiar">Copiar resultado</span></button>
+        </div>
+      </section>
+
+      <!-- historial del cliente (local, en su teléfono) -->
+      <section class="panel" id="histPanel" style="display:none">
+        <div class="panel-titulo"><span class="ico">🕘</span> <span data-i="historial">Historial reciente</span></div>
+        <div id="histLista"></div>
+      </section>
+    </main>
+
+    <!-- ── Columna lateral ── -->
+    <aside class="col-lado">
+
+      <section class="panel">
+        <div class="panel-titulo"><span class="ico">🚚</span> <span data-i="zonasTitulo">Entregas disponibles</span></div>
+        <div id="zonasLista"></div>
+        <div class="lado-nota" data-i="zonasNota">Consulta la tarifa de entrega por WhatsApp.</div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-titulo"><span class="ico">⭐</span> <span data-i="porqueTitulo">¿Por qué elegir Yorda?</span></div>
+        <div class="check" data-i="pq1">✔ Tasas actualizadas todos los días</div>
+        <div class="check" data-i="pq2">✔ Entrega el mismo día</div>
+        <div class="check" data-i="pq3">✔ Atención personalizada por WhatsApp</div>
+        <div class="check" data-i="pq4">✔ Confirmación de cada operación</div>
+      </section>
+
+      <section class="promo" id="promo" style="display:none">
+        <div class="promo-eti" data-i="promoTitulo">🔥 Promoción del día</div>
+        <div class="promo-txt" id="promoTxt"></div>
+      </section>
+
+    </aside>
+  </div>
+
+  <footer class="pie">
+    🔒 <span data-i="pie">Tasas actualizadas en tiempo real · Sin comisiones ocultas</span>
+  </footer>
+</div>
+
+<script>
+/* ═══════════════════════════════════════════
+   Calculadora Yorda v2.0 — lógica
+   ═══════════════════════════════════════════ */
+"use strict";
+
+/* ⚙️ CONFIGURACIÓN — edita aquí */
+const WHATSAPP = "5533999719702"; // solo dígitos, con código de país
+
+// Zonas de entrega en efectivo (reales)
+const ZONAS = [
+  { prov: "La Habana", items: ["Todos los municipios (excepto Habana campo)"] },
+  { prov: "Granma",    items: ["Manzanillo", "Media Luna", "Campechuela", "Niquero"] },
+];
+
+/* ── textos ES / PT ── */
+const T = {
+  es: {
+    tasasTitulo:"Tasas de Yorda", hoy:"(Hoy)",
+    cuanto:"¿Cuánto quieres enviar?", cuantoTarjeta:"¿Cuánto quieres en la tarjeta?",
+    cuantoEfe:"¿Cuánto envías en efectivo?",
+    limpiar:"Limpiar",
+    pagas:"Tú pagas en Brasil", recibe:"Recibe en Cuba",
+    benEntrega:"Entrega estimada", benHoy:"Hoy",
+    benSin:"Sin comisiones", benOcultas:"ocultas",
+    benPagos:"Pagos seguros", benRapidos:"y rápidos",
+    ctaTitulo:"Quiero hacer este envío", ctaSub:"Te atendemos por WhatsApp",
+    compartir:"Compartir resultado", copiar:"Copiar resultado",
+    historial:"Historial reciente",
+    zonasTitulo:"Entregas disponibles",
+    zonasNota:"Entrega en efectivo solo en estas zonas. Consulta la tarifa por WhatsApp.",
+    porqueTitulo:"¿Por qué elegir Yorda?",
+    pq1:"✔ Tasas actualizadas todos los días",
+    pq2:"✔ Entrega el mismo día",
+    pq3:"✔ Atención personalizada por WhatsApp",
+    pq4:"✔ Confirmación de cada operación",
+    promoTitulo:"🔥 Promoción del día",
+    pie:"Tasas actualizadas en tiempo real · Sin comisiones ocultas",
+    pillBrl:"Reales", pillEfe:"Efectivo",
+    actualizado:s=>`Actualizado hace ${s}s`, sinCon:"sin conexión",
+    tasaAplicada:(t,u)=>`Tasa aplicada: <b>${t}</b> ${u}`,
+    noDisp:"No disponible — consulta por WhatsApp 😊",
+    efectivoTag:"(efectivo)",
+    tEnv:["Menos de R$100","R$100 – 499","R$500 – 999","R$1000+"],
+    tUsd:"USD tarjeta (R$ por USD)", tMlc:"MLC (R$ por MLC)", tEfe:"Efectivo (CUP por real)",
+    waBrl:v=>`Hola! Quiero enviar R$${v} a Cuba 🇨🇺`,
+    waUsd:(v,m)=>`Hola! Quiero ${v} ${m} para la tarjeta`,
+    waEfe:v=>`Hola! Quiero enviar R$${v} para entrega en efectivo`,
+    waGen:"Hola! Quiero hacer un envío a Cuba 🇨🇺",
+    copiado:"Copiado ✅",
+    hace:m=>m<1?"Hace un momento":m<60?`Hace ${Math.floor(m)} min`:`Hace ${Math.floor(m/60)} h`,
+  },
+  pt: {
+    tasasTitulo:"Taxas da Yorda", hoy:"(Hoje)",
+    cuanto:"Quanto você quer enviar?", cuantoTarjeta:"Quanto quer no cartão?",
+    cuantoEfe:"Quanto envia em dinheiro?",
+    limpiar:"Limpar",
+    pagas:"Você paga no Brasil", recibe:"Recebe em Cuba",
+    benEntrega:"Entrega estimada", benHoy:"Hoje",
+    benSin:"Sem taxas", benOcultas:"ocultas",
+    benPagos:"Pagamentos seguros", benRapidos:"e rápidos",
+    ctaTitulo:"Quero fazer este envio", ctaSub:"Atendemos pelo WhatsApp",
+    compartir:"Compartilhar resultado", copiar:"Copiar resultado",
+    historial:"Histórico recente",
+    zonasTitulo:"Entregas disponíveis",
+    zonasNota:"Entrega em dinheiro apenas nestas zonas. Consulte a tarifa pelo WhatsApp.",
+    porqueTitulo:"Por que escolher a Yorda?",
+    pq1:"✔ Taxas atualizadas todos os dias",
+    pq2:"✔ Entrega no mesmo dia",
+    pq3:"✔ Atendimento personalizado pelo WhatsApp",
+    pq4:"✔ Confirmação de cada operação",
+    promoTitulo:"🔥 Promoção do dia",
+    pie:"Taxas atualizadas em tempo real · Sem taxas ocultas",
+    pillBrl:"Reais", pillEfe:"Dinheiro",
+    actualizado:s=>`Atualizado há ${s}s`, sinCon:"sem conexão",
+    tasaAplicada:(t,u)=>`Taxa aplicada: <b>${t}</b> ${u}`,
+    noDisp:"Não disponível — consulte pelo WhatsApp 😊",
+    efectivoTag:"(dinheiro)",
+    tEnv:["Menos de R$100","R$100 – 499","R$500 – 999","R$1000+"],
+    tUsd:"USD cartão (R$ por USD)", tMlc:"MLC (R$ por MLC)", tEfe:"Dinheiro (CUP por real)",
+    waBrl:v=>`Olá! Quero enviar R$${v} para Cuba 🇨🇺`,
+    waUsd:(v,m)=>`Olá! Quero ${v} ${m} para o cartão`,
+    waEfe:v=>`Olá! Quero enviar R$${v} para entrega em dinheiro`,
+    waGen:"Olá! Quero fazer um envio para Cuba 🇨🇺",
+    copiado:"Copiado ✅",
+    hace:m=>m<1?"Agora mesmo":m<60?`Há ${Math.floor(m)} min`:`Há ${Math.floor(m/60)} h`,
+  }
+};
+
+/* ── estado ── */
+let tasas = null, modo = "brl", lang = "es", ultFetch = 0;
+const $ = id => document.getElementById(id);
+const t = () => T[lang];
+
+const TRAMOS = [
+  { min:0,    max:99,  key:"brl_0"    },
+  { min:100,  max:499, key:"brl_100"  },
+  { min:500,  max:999, key:"brl_500"  },
+  { min:1000, max:1e9, key:"brl_1000" },
+];
+const CHIPS = {
+  brl:[100,200,500,1000,2000],
+  efe:[100,200,500,1000,2000],
+  usd:[50,100,200,500,1000],
+  mlc:[50,100,200,500,1000],
+};
+
+/* ── carga de tasas (cada 60s) ── */
+async function cargarTasas(){
+  try{
+    const r = await fetch("/api/tasas");
+    tasas = await r.json();
+    ultFetch = Date.now();
+    $("estado").classList.add("on");
+    if(tasas.oferta){ $("promoTxt").textContent = tasas.oferta; $("promo").style.display = "block"; }
+    else $("promo").style.display = "none";
+    pintarTasas(); calcular();
+  }catch{
+    $("estado").classList.remove("on");
+    $("estadoTxt").textContent = t().sinCon;
+  }
+}
+cargarTasas();
+setInterval(cargarTasas, 60000);
+
+/* ── reloj + "actualizado hace Xs" ── */
+setInterval(()=>{
+  $("reloj").textContent = new Date().toLocaleTimeString("pt-BR");
+  if(ultFetch) $("estadoTxt").textContent = t().actualizado(Math.floor((Date.now()-ultFetch)/1000));
+}, 1000);
+
+/* ── panel de tasas ── */
+function pintarTasas(){
+  if(!tasas) return;
+  const c = [];
+  TRAMOS.forEach((tr,i)=> c.push({ico:"💸", eti:t().tEnv[i], val:`${Number(tasas[tr.key]||0)} CUP`}));
+  if(Number(tasas.usd1)>0)     c.push({ico:"💳", eti:t().tUsd, val:`R$${Number(tasas.usd1)}`});
+  if(Number(tasas.mlc)>0)      c.push({ico:"🪪", eti:t().tMlc, val:`R$${Number(tasas.mlc)}`});
+  if(Number(tasas.efectivo)>0) c.push({ico:"💵", eti:t().tEfe, val:`${Number(tasas.efectivo)} CUP`});
+  $("tasasGrid").innerHTML = c.map(x=>
+    `<div class="tasa-card"><div class="te"><span class="mini-ico">${x.ico}</span>${x.eti}</div><div class="tv">${x.val}</div></div>`
+  ).join("");
+}
+
+/* ── zonas de entrega ── */
+function pintarZonas(){
+  $("zonasLista").innerHTML = ZONAS.map(z =>
+    `<div class="zona-prov">${z.prov}</div>` +
+    z.items.map(m => `<div class="zona-item"><span class="ok">✔</span>${m}</div>`).join("")
+  ).join("");
+}
+pintarZonas();
+
+/* ── idioma ── */
+$("btnEs").onclick = ()=>setLang("es");
+$("btnPt").onclick = ()=>setLang("pt");
+function setLang(l){
+  lang = l;
+  $("btnEs").classList.toggle("act", l==="es");
+  $("btnPt").classList.toggle("act", l==="pt");
+  document.querySelectorAll("[data-i]").forEach(el=>{
+    const k = el.dataset.i;
+    if(typeof T[l][k] === "string") el.textContent = T[l][k];
+  });
+  $("pillBrl").textContent = t().pillBrl;
+  $("pillEfe").textContent = t().pillEfe;
+  actualizarLabels(); pintarTasas(); calcular(); pintarHist();
+}
+
+/* ── pestañas ── */
+document.querySelectorAll(".pill").forEach(p=>{
+  p.addEventListener("click", ()=>{
+    document.querySelectorAll(".pill").forEach(x=>x.classList.remove("act"));
+    p.classList.add("act");
+    modo = p.dataset.m;
+    actualizarLabels(); pintarChips(); calcular();
+  });
+});
+
+function actualizarLabels(){
+  if(modo==="brl"){ $("lblMonto").textContent = t().cuanto; $("prefijo").textContent = "R$"; }
+  else if(modo==="efe"){ $("lblMonto").textContent = t().cuantoEfe; $("prefijo").textContent = "R$"; }
+  else { $("lblMonto").textContent = t().cuantoTarjeta; $("prefijo").textContent = modo.toUpperCase(); }
+}
+
+/* ── chips de montos rápidos ── */
+function pintarChips(){
+  $("chips").innerHTML = CHIPS[modo].map(v=>`<button class="chip" data-v="${v}">${v.toLocaleString("pt-BR")}</button>`).join("");
+  document.querySelectorAll(".chip").forEach(ch=>{
+    ch.addEventListener("click", ()=>{
+      $("monto").value = ch.dataset.v;
+      calcular();
+    });
+  });
+}
+pintarChips();
+
+$("monto").addEventListener("input", calcular);
+$("btnLimpiar").addEventListener("click", ()=>{ $("monto").value=""; calcular(); $("monto").focus(); });
+
+/* ── cálculo ── */
+function fmt(n){ return Number(n).toLocaleString("es-CU"); }
+function tramoDe(m){ return TRAMOS.find(x=>m>=x.min && m<=x.max) || TRAMOS[3]; }
+
+let resumen = null; // {paga, recibe, tasaTxt, waMsg}
+
+function calcular(){
+  const v = Number($("monto").value);
+  document.querySelectorAll(".chip").forEach(ch=>ch.classList.toggle("act", Number(ch.dataset.v)===v));
+  resumen = null;
+
+  if(!tasas || !v || v<=0){
+    $("resPaga").textContent = "—"; $("resRecibe").textContent = "—"; $("resTasa").textContent = "";
+    setWa(t().waGen); return;
+  }
+
+  if(modo==="brl"){
+    const tr = tramoDe(v), tasa = Number(tasas[tr.key]||0);
+    const cup = Math.floor(v*tasa);
+    resumen = { paga:`R$ ${fmt(v)}`, recibe:`${fmt(cup)} CUP`, tasaTxt:t().tasaAplicada(tasa,"CUP/BRL"), waMsg:t().waBrl(v) };
+  } else if(modo==="efe"){
+    const tasa = Number(tasas.efectivo)||0;
+    if(tasa<=0){ mostrarNoDisp(); return; }
+    const cup = Math.floor(v*tasa);
+    resumen = { paga:`R$ ${fmt(v)}`, recibe:`${fmt(cup)} CUP ${t().efectivoTag}`, tasaTxt:t().tasaAplicada(tasa,"CUP/BRL"), waMsg:t().waEfe(v) };
+  } else {
+    const m = modo.toUpperCase();
+    const tasa = Number(modo==="usd" ? tasas.usd1 : tasas.mlc) || 0;
+    if(tasa<=0){ mostrarNoDisp(); return; }
+    const brl = Math.floor(v*tasa);
+    resumen = { paga:`R$ ${fmt(brl)}`, recibe:`${fmt(v)} ${m}`, tasaTxt:t().tasaAplicada(tasa,`BRL/${m}`), waMsg:t().waUsd(v,m) };
+  }
+
+  $("resPaga").textContent   = resumen.paga;
+  $("resRecibe").textContent = resumen.recibe;
+  $("resTasa").innerHTML     = resumen.tasaTxt;
+  setWa(resumen.waMsg);
+  guardarHist();
+}
+
+function mostrarNoDisp(){
+  $("resPaga").textContent = "—";
+  $("resRecibe").textContent = "—";
+  $("resTasa").textContent = t().noDisp;
+  setWa(t().waGen);
+}
+
+function setWa(msg){
+  $("btnWa").href = "https://wa.me/" + WHATSAPP + "?text=" + encodeURIComponent(msg);
+}
+
+/* ── historial (local, en el navegador del cliente) ── */
+let histTimer = null;
+function guardarHist(){
+  clearTimeout(histTimer);
+  histTimer = setTimeout(()=>{
+    if(!resumen) return;
+    let h = [];
+    try{ h = JSON.parse(localStorage.getItem("yorda_hist")||"[]"); }catch{}
+    const txt = `${resumen.paga} → ${resumen.recibe}`;
+    if(h[0]?.txt === txt) return;
+    h.unshift({ txt, ts: Date.now() });
+    h = h.slice(0,5);
+    try{ localStorage.setItem("yorda_hist", JSON.stringify(h)); }catch{}
+    pintarHist();
+  }, 1600);
+}
+function pintarHist(){
+  let h = [];
+  try{ h = JSON.parse(localStorage.getItem("yorda_hist")||"[]"); }catch{}
+  if(!h.length){ $("histPanel").style.display="none"; return; }
+  $("histPanel").style.display="block";
+  $("histLista").innerHTML = h.map(x=>
+    `<div class="hist-item"><span>${x.txt}</span><span class="cuando">${t().hace((Date.now()-x.ts)/60000)}</span></div>`
+  ).join("");
+}
+pintarHist();
+
+/* ── copiar y compartir ── */
+function textoResultado(){
+  const base = resumen ? `${resumen.paga} → ${resumen.recibe} · Yorda Envíos 🇧🇷→🇨🇺` : "Yorda Envíos 🇧🇷→🇨🇺";
+  return base + "\n" + location.href;
+}
+$("btnCopiar").addEventListener("click", async ()=>{
+  try{ await navigator.clipboard.writeText(textoResultado()); alert(t().copiado); }
+  catch{ prompt("Copiar:", textoResultado()); }
+});
+$("btnShare").addEventListener("click", async ()=>{
+  const data = { title:"Yorda Envíos 🇧🇷→🇨🇺", text:textoResultado(), url:location.href };
+  if(navigator.share){ try{ await navigator.share(data); }catch{} }
+  else { try{ await navigator.clipboard.writeText(location.href); alert(t().copiado); }catch{ prompt("Link:", location.href); } }
+});
+
+</script>
+</body>
+</html>

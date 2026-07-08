@@ -1,0 +1,121 @@
+<script>
+        const token = new URLSearchParams(window.location.search).get("token");
+        const labelsTipo = {
+            brl_cup: "🇧🇷 BRL → 🇨🇺 CUP",
+            usd_clasica: "💵 USD Clássica",
+            usd_prepago: "💳 USD Prepago",
+            mlc: "💳 MLC"
+        };
+
+        // 🟢 Mejora 1: Control de concurrencia
+        let actualizando = false;
+
+        async function refresh() {
+            if (!token || actualizando) return;
+            actualizando = true;
+
+            try {
+                const [rStats, rTasas, rOps, rClis] = await Promise.all([
+                    fetch(`/admin/stats?token=${token}`),
+                    fetch(`/admin/tasas?token=${token}`),
+                    fetch(`/admin/operaciones?token=${token}`),
+                    fetch(`/admin/clientes?token=${token}`)
+                ]);
+
+                const stats = await rStats.json();
+                const tasas = await rTasas.json();
+                const operaciones = await rOps.json();
+                const clientesData = await rClis.json();
+                const listaTodosClientes = Array.isArray(clientesData) ? clientesData : Object.values(clientesData);
+
+                // 1. Stats Cards
+                document.getElementById("stat-clientes").innerText = listaTodosClientes.length;
+                document.getElementById("stat-ops").innerText = stats.totalOperaciones || 0;
+                document.getElementById("stat-total").innerText = Number(stats.volumenTotal || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+                document.getElementById("stat-pend").innerText = stats.pendientes || 0;
+
+                // 2. Taxas
+                Object.keys(tasas).forEach(id => { if(document.getElementById(id)) document.getElementById(id).value = tasas[id] });
+
+                // 3. Tabela Pendentes (🟢 Mejora 2: Ordenado por fecha descendente)
+                const tPend = document.getElementById("tablaPendientes");
+                const pendientes = operaciones
+                    .filter(o => o.status === "pendiente")
+                    .sort((a, b) => new Date(b.fecha || b.id) - new Date(a.fecha || a.id));
+
+                tPend.innerHTML = pendientes.length ? "" : '<tr><td colspan="5" style="text-align:center; color:#94a3b8; padding:20px;">Sem operações pendentes</td></tr>';
+                
+                pendientes.forEach(op => {
+                    const dataFormat = op.fecha ? new Date(op.fecha).toLocaleString('pt-BR') : new Date(op.id).toLocaleString('pt-BR');
+                    const tipoFormat = labelsTipo[op.tipo] || op.tipo;
+
+                    tPend.innerHTML += `
+                        <tr>
+                            <td>${dataFormat}</td>
+                            <td><strong>${op.nombre || "Sem nome"}</strong></td>
+                            <td style="color:var(--yellow); font-weight:700">R$ ${Number(op.monto).toLocaleString('pt-BR')}</td>
+                            <td><small>${tipoFormat}</small></td>
+                            <td><button class="btn-confirm" onclick="confirmar('${op.id}')">CONFIRMAR ✅</button></td>
+                        </tr>`;
+                });
+
+                // 4. Ranking
+                const tCli = document.getElementById("clientesTable");
+                const confirmadas = operaciones.filter(o => o.status === "confirmada");
+                
+                const ranking = listaTodosClientes
+                    .map(c => {
+                        const totalReal = confirmadas.filter(o => o.phone === c.phone).reduce((acc, curr) => acc + Number(curr.monto), 0);
+                        return { ...c, totalReal: totalReal };
+                    })
+                    .filter(c => c.totalReal > 0)
+                    .sort((a, b) => b.totalReal - a.totalReal);
+
+                tCli.innerHTML = ranking.length ? "" : '<tr><td colspan="4" style="text-align:center; color:#94a3b8; padding:20px;">Nenhuma confirmação ainda</td></tr>';
+
+                ranking.forEach(c => {
+                    const phoneClean = (c.phone || "").replace("@s.whatsapp.net", "");
+                    const isVip = c.totalReal >= 5000;
+                    tCli.innerHTML += `
+                        <tr>
+                            <td>${c.nombre || "Sem nome"}</td>
+                            <td style="color:#94a3b8">${phoneClean}</td>
+                            <td style="font-weight:700; color:var(--green)">R$ ${c.totalReal.toLocaleString('pt-BR')}</td>
+                            <td>${isVip ? '<span class="badge badge-vip">VIP ⭐</span>' : '<span class="badge" style="background:#334155">CLIENTE</span>'}</td>
+                        </tr>`;
+                });
+
+            } catch (e) { 
+                console.error("Refresh error:", e); 
+            } finally {
+                actualizando = false; // 🟢 Libera el bloqueo siempre, incluso si falla
+            }
+        }
+
+        async function confirmar(id) {
+            if(!confirm("¿Confirmas que el dinero ya está en la cuenta?")) return;
+            const res = await fetch(`/admin/confirmar-operacion/${id}?token=${token}`, { method: 'POST' });
+            if((await res.json()).success) refresh();
+        }
+
+        async function guardarTasas() {
+            const btn = document.getElementById("btnSave");
+            btn.innerText = "Guardando...";
+            const data = {};
+            document.querySelectorAll('#tasasForm input').forEach(i => data[i.id] = Number(i.value));
+            try {
+                await fetch(`/admin/tasas?token=${token}`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(data)
+                });
+                alert("✅ Tasas actualizadas!");
+                refresh();
+            } catch (e) { alert("Error al guardar."); }
+            finally { btn.innerText = "Sincronizar Taxas Globais"; }
+        }
+
+        // Ejecución inicial y ciclo de 10s
+        refresh();
+        setInterval(refresh, 10000); 
+    </script>
