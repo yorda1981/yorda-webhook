@@ -12,7 +12,7 @@ const { enviarPIX, _enviarPIXFinal, intentarCompletarOperacion, procesarComproba
 const { cotizarBRL, cotizarUSD, preguntarTipoUSD, cotizarMLC, tasaMLC, detectarCUPInverso, cotizarCUPInverso, consultarTasas } = require("../flows/cotizacion-flow");
 const { mostrarMenuRecargas, seleccionarRecarga, procesarNumeroRecarga } = require("../flows/recarga-flow");
 const {
-    enviarSeguro, limpiarSesion,
+    enviarSeguro, limpiarSesion, getAdminPhone,
     norm, esPDF, pick, pickL,
     DOS_HORAS,
     gatilhos, palabrasNegocio, triggersCubaBrasil, confirmaOperacion,
@@ -388,7 +388,14 @@ async function manejarImagen(phone, pushName, cliente, imageUrl, lang, esEs) {
         }
         const datos = await detectarComprobantePDF(imageUrl);
         if (datos.valido || datos.tipo === "comprovante_pdf") await procesarComprobante(phone, pushName, cliente, datos, esEs);
-        else await enviarSeguro(phone, esEs ? "No pude leer el PDF 📄\n\nAsegúrate de que sea un comprobante válido." : "Não consegui ler o PDF 📄\n\nVerifique se é um comprovante válido.");
+        else {
+            await enviarSeguro(phone, esEs
+                ? "Recibido ✅\n\nTu comprobante será revisado manualmente en unos minutos."
+                : "Recebido ✅\n\nSeu comprovante será revisado manualmente em alguns minutos.");
+            const adminPhone = getAdminPhone();
+            if (adminPhone) await enviarSeguro(adminPhone,
+                `⚠️ *COMPROBANTE PDF NO LEGIBLE*\n\n👤 Cliente: ${pushName || cliente?.nombre || "-"}\n📱 Teléfono: ${phone}\n\nRevisar manualmente el PDF en el chat del cliente.`);
+        }
         return "";
     }
     const det = await detectarImagenUnificada(imageUrl);
