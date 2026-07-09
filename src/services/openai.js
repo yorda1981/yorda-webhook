@@ -141,12 +141,26 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             if (montoG > 0) return await cotizarUSD(phone, pushName, montoG, tipoUSD, lang, esEs) || "";
         }
 
+        // ── FIX LOOP (parte 2): comprobante + tarjeta ya recibidos, solo faltaba el monto ──
+        // El cliente responde el monto → cerrar la operación directamente (NO cotizar de nuevo).
+        const esSoloMonto = /^\s*r?\$?\s*\d{1,6}([.,]\d{1,2})?\s*(reales|reais|brl|r\$)?\s*$/i.test(text || "");
+        if (cliente?.comprobante_pendiente && (cliente.tarjeta || cliente.tarjeta_frecuente) && montoValido && esSoloMonto) {
+            await guardarCliente({ phone, monto: valorFinal, tipo: cliente.tipo_favorito || "brl_cup" });
+            await intentarCompletarOperacion(phone, pushName, await obtenerCliente(phone), esEs);
+            return "";
+        }
+
         // ── Tarjeta por texto ──
         const esTarjeta = detectarTarjetaTexto(text);
         if (esTarjeta) {
             await guardarTarjeta(phone, esTarjeta, null, null, cliente);
             const cli2 = await obtenerCliente(phone);
-            if (cli2.comprobante_pendiente && await intentarCompletarOperacion(phone, pushName, cli2, esEs)) return "";
+            if (cli2.comprobante_pendiente) {
+                // FIX LOOP: si no se puede completar (falta el monto), intentarCompletarOperacion
+                // ya pidió el dato que falta. NO seguir al reenvío de PIX.
+                await intentarCompletarOperacion(phone, pushName, cli2, esEs);
+                return "";
+            }
             if (cli2.ultimo_monto && Number(cli2.ultimo_monto) > 0) {
                 await guardarCliente({ phone, estado: "aguardando_comprovante", fechaEstado: new Date().toISOString(), fechaPix: new Date().toISOString() });
                 const m = lang === "pt" ? `Cartão salvo! 💳\n\nVou te mandar o PIX para pagar R$${cli2.ultimo_monto} 👇` : `¡Tarjeta guardada! 💳\n\nTe envío el PIX para pagar R$${cli2.ultimo_monto} 👇`;
@@ -406,7 +420,11 @@ async function manejarImagen(phone, pushName, cliente, imageUrl, lang, esEs) {
         if (det.valida && /^\d{15,16}$/.test(num)) {
             await guardarTarjeta(phone, num, det.titular, det.banco, cliente);
             const cli2 = await obtenerCliente(phone);
-            if (cli2.comprobante_pendiente && await intentarCompletarOperacion(phone, pushName, cli2, esEs)) return "";
+            if (cli2.comprobante_pendiente) {
+                // FIX LOOP: mismo caso que tarjeta por texto — no relanzar PIX.
+                await intentarCompletarOperacion(phone, pushName, cli2, esEs);
+                return "";
+            }
             if (cli2.ultimo_monto && Number(cli2.ultimo_monto) > 0) {
                 await guardarCliente({ phone, estado: "aguardando_comprovante", fechaEstado: new Date().toISOString(), fechaPix: new Date().toISOString() });
                 const m = lang === "pt" ? `Cartão salvo! 💳\n\nVou te mandar o PIX para pagar R$${cli2.ultimo_monto} 👇` : `¡Tarjeta guardada! 💳\n\nTe envío el PIX para pagar R$${cli2.ultimo_monto} 👇`;
