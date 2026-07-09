@@ -11,6 +11,8 @@ const openaiService = require("./src/services/openai");
 const { obtenerTodos, obtenerCliente } = require("./src/services/customer-memory");
 const { obtenerTodas, confirmarOperacion, obtenerEstadisticas } = require("./src/services/operations");
 const crm = require("./src/services/crm");
+const { leerTasas } = require("./src/flows/cotizacion-flow");
+const { enviarSeguro, getAdminPhone } = require("./src/flows/shared");
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -364,6 +366,55 @@ setInterval(() => {
         console.error("❌ CRM recordatorios:", e.message)
     );
 }, 15 * 60 * 1000);
+
+// ══════════════════════════════════════
+// MENSAJE DIARIO DE TASAS (10:15 hora de Bahía = 13:15 UTC)
+// El bot lo envía al ADMIN para que lo reenvíe a los grupos.
+// ══════════════════════════════════════
+const LINK_CALCULADORA = "https://yorda-webhook-production.up.railway.app/calculadora.html";
+let ultimoEnvioTasas = ""; // evita reenvíos duplicados el mismo día
+
+async function armarMensajeTasas() {
+    const t = await leerTasas();
+    if (!t) return null;
+    const l = [];
+    l.push("🔥 *TASAS YORDA — HOY* 🇧🇷→🇨🇺");
+    l.push("");
+    l.push("💵 *Reales → CUP*");
+    if (t.brl_100)  l.push(`R$100+: *${Number(t.brl_100)} CUP*`);
+    if (t.brl_500)  l.push(`R$500+: *${Number(t.brl_500)} CUP*`);
+    if (t.brl_1000) l.push(`R$1000+: *${Number(t.brl_1000)} CUP*`);
+    l.push("");
+    if (Number(t.usd1) > 0)     l.push(`💳 USD tarjeta: *R$${Number(t.usd1)}*`);
+    if (Number(t.mlc) > 0)      l.push(`🪪 MLC: *R$${Number(t.mlc)}*`);
+    if (Number(t.efectivo) > 0) l.push(`💵 Efectivo: *${Number(t.efectivo)} CUP por real*`);
+    l.push("");
+    l.push("⚡ *Entrega el mismo día*");
+    l.push("📍 La Habana y Granma");
+    l.push("");
+    l.push("🧮 Calcula tu envío aquí:");
+    l.push(LINK_CALCULADORA);
+    return l.join("\n");
+}
+
+async function enviarTasasDiarias() {
+    const admin = getAdminPhone();
+    if (!admin) { console.warn("⚠️ ADMIN_PHONE no configurado — no se envían tasas diarias"); return; }
+    const msg = await armarMensajeTasas();
+    if (!msg) { console.warn("⚠️ No hay tasas para el mensaje diario"); return; }
+    await enviarSeguro(admin, msg);
+    console.log("✅ Mensaje diario de tasas enviado al admin");
+}
+
+// Revisa cada minuto; dispara una sola vez cuando son las 13:15 UTC (10:15 Bahía)
+setInterval(() => {
+    const ahora = new Date();
+    const hoyKey = ahora.toISOString().slice(0, 10); // AAAA-MM-DD (UTC)
+    if (ahora.getUTCHours() === 13 && ahora.getUTCMinutes() === 15 && ultimoEnvioTasas !== hoyKey) {
+        ultimoEnvioTasas = hoyKey;
+        enviarTasasDiarias().catch(e => console.error("❌ Tasas diarias:", e.message));
+    }
+}, 60 * 1000);
 
 // ══════════════════════════════════════
 // NUEVO ENDPOINT CRM STATS
