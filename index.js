@@ -46,6 +46,9 @@ const MINUTOS_PAUSA = 10;
     try {
         await pool.query("ALTER TABLE rates ADD COLUMN IF NOT EXISTS efectivo NUMERIC DEFAULT 0");
     } catch (e) { console.error("⚠️ Migración efectivo:", e.message); }
+    try {
+        await pool.query("ALTER TABLE customers ADD COLUMN IF NOT EXISTS saludo_pendiente BOOLEAN DEFAULT false");
+    } catch (e) { console.error("⚠️ Migración saludo_pendiente:", e.message); }
 })();
 
 // ─────────────────────────────────────────
@@ -413,6 +416,35 @@ setInterval(() => {
     if (ahora.getUTCHours() === 13 && ahora.getUTCMinutes() === 15 && ultimoEnvioTasas !== hoyKey) {
         ultimoEnvioTasas = hoyKey;
         enviarTasasDiarias().catch(e => console.error("❌ Tasas diarias:", e.message));
+    }
+}, 60 * 1000);
+
+// ══════════════════════════════════════
+// SALUDO MATUTINO (8:00 hora de Bahía = 11:00 UTC)
+// A quien escribió fuera de horario se le envía un saludo al abrir.
+// ══════════════════════════════════════
+const { obtenerSaludosPendientes, limpiarSaludoPendiente } = require("./src/services/customer-memory");
+let ultimoSaludo = "";
+
+async function enviarSaludosMatutinos() {
+    const pendientes = await obtenerSaludosPendientes();
+    if (!pendientes.length) return;
+    for (const c of pendientes) {
+        const nombre = c.nombre ? ` ${String(c.nombre).split(" ")[0]}` : "";
+        const msg = `¡Buenos días${nombre}! 👋 Recibimos tu mensaje pero estábamos fuera de horario. Ya estamos activos y listos para atenderte 😊 ¿En qué te podemos ayudar?`;
+        await enviarSeguro(c.phone, msg);
+        await limpiarSaludoPendiente(c.phone);
+    }
+    console.log(`✅ Saludos matutinos enviados: ${pendientes.length}`);
+}
+
+// Revisa cada minuto; dispara una sola vez a las 11:00 UTC (8:00 Bahía)
+setInterval(() => {
+    const ahora = new Date();
+    const hoyKey = ahora.toISOString().slice(0, 10);
+    if (ahora.getUTCHours() === 11 && ahora.getUTCMinutes() === 0 && ultimoSaludo !== hoyKey) {
+        ultimoSaludo = hoyKey;
+        enviarSaludosMatutinos().catch(e => console.error("❌ Saludos matutinos:", e.message));
     }
 }, 60 * 1000);
 
