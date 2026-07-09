@@ -2,7 +2,7 @@
 
 require("dotenv").config();
 
-const { guardarCliente, obtenerCliente }          = require("./customer-memory");
+const { guardarCliente, obtenerCliente, marcarSaludoPendiente }          = require("./customer-memory");
 const { obtenerUltimaOperacion }                   = require("./operations");
 const crm                                          = require("./crm");
 
@@ -58,6 +58,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                     ? "Estamos fuera de horario 😊\n\nNuestro horario de atención es de 8am a 11pm (hora de Brasil).\n\nTe responderemos en cuanto estemos disponibles. 👌"
                     : "Estamos fora do horário 😊\n\nNosso horário de atendimento é das 8h às 23h (horário de Brasília).\n\nResponderemos assim que estivermos disponíveis. 👌";
                 await enviarSeguro(phone, msg);
+                marcarSaludoPendiente(phone).catch(() => {});
             }
             return "";
         }
