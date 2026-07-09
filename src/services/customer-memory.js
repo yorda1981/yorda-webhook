@@ -180,5 +180,26 @@ module.exports = {
     limpiarSesionDB,
     obtenerCliente,
     obtenerTodos,
-    eliminarCliente
+    eliminarCliente,
+    marcarSaludoPendiente,
+    obtenerSaludosPendientes,
+    limpiarSaludoPendiente
 };
+
+// ── Saludo matutino: marcar / listar / limpiar ──
+async function marcarSaludoPendiente(phone) {
+    try {
+        await pool.query("UPDATE customers SET saludo_pendiente = true WHERE phone = $1", [phone]);
+    } catch (err) { console.error("❌ marcarSaludoPendiente:", err.message); }
+}
+async function obtenerSaludosPendientes() {
+    try {
+        const r = await pool.query("SELECT phone, nombre FROM customers WHERE saludo_pendiente = true");
+        return r.rows || [];
+    } catch (err) { console.error("❌ obtenerSaludosPendientes:", err.message); return []; }
+}
+async function limpiarSaludoPendiente(phone) {
+    try {
+        await pool.query("UPDATE customers SET saludo_pendiente = false WHERE phone = $1", [phone]);
+    } catch (err) { console.error("❌ limpiarSaludoPendiente:", err.message); }
+}
