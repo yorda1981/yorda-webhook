@@ -9,7 +9,7 @@ const crm                                                                       
 const {
     enviarSeguro, limpiarSesion, fmt, pick, pickL,
     getPIXKey, getPIXHolder, getPIXBank, getPIXImage, getAdminPhone,
-    ESPERA_COMPROBANTE_ES, ESPERA_COMPROBANTE_PT
+    ESPERA_COMPROBANTE_ES, ESPERA_COMPROBANTE_PT, parseTarjetas
 } = require("./shared");
 
 // ─────────────────────────────────────────
@@ -63,7 +63,7 @@ async function enviarPIX(phone, cliente, esEs) {
     }
 
     // Múltiples tarjetas → elegir cuál
-    const tarjetas = Array.isArray(cliente?.tarjetas) ? cliente.tarjetas.filter(t => /^\d{15,16}$/.test(t)) : [];
+    const tarjetas = parseTarjetas(cliente?.tarjetas).filter(t => /^\d{15,16}$/.test(t));
     if (!esRecarga && tarjetas.length > 1) {
         const opciones = tarjetas.map((t, i) => {
             const ultimos = t.slice(-4);
@@ -269,7 +269,7 @@ async function procesarComprobante(phone, pushName, cliente, datos, esEs) {
 // ─────────────────────────────────────────
 
 async function guardarTarjeta(phone, num, titular, banco, cliente) {
-    const arr = Array.isArray(cliente?.tarjetas) ? [...cliente.tarjetas] : [];
+    const arr = parseTarjetas(cliente?.tarjetas);
     if (!arr.includes(num)) arr.push(num);
     await guardarCliente({
         phone, tarjeta: num, titular: titular || "",
