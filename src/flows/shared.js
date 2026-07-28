@@ -1,4 +1,3 @@
-
 "use strict";
 
 const { enviarConDelay }  = require("../services/zapi");
@@ -36,7 +35,17 @@ const gatilhos = [
     "mi familia en cuba","ayuda a mi familia","enviar para cuba","mandar para cuba",
     "hacer una remesa","necesito una remesa","quiero hacer un envio","quiero mandar dinero",
     "recargar","recarga etecsa","recarga cuba","quiero recargar","necesito recargar",
-    "recarga para cuba","recarga de telefono","recargar telefono","recarga movil"
+    "recarga para cuba","recarga de telefono","recargar telefono","recarga movil",
+
+    // Portugués — frases específicas de intención de negocio (no palabras sueltas,
+    // para no activar el bot con mensajes genéricos que no son de Yorda Envíos)
+    "quero enviar dinheiro","preciso enviar dinheiro","quero mandar dinheiro",
+    "preciso mandar dinheiro","enviar dinheiro para cuba","mandar dinheiro para cuba",
+    "dinheiro para cuba","minha familia em cuba","minha família em cuba",
+    "ajudar minha familia em cuba","quanto custa enviar","quanto custa mandar",
+    "qual a taxa de hoje","qual a taxa hoje","como faço para enviar",
+    "quero fazer uma remessa","preciso fazer uma remessa","quero cotizar",
+    "quanto fica o envio","quero recarregar","preciso recarregar","recarregar etecsa"
 ];
 
 const palabrasNegocio = [
@@ -143,6 +152,21 @@ function esPDF(url) {
     return u.includes(".pdf") || u.includes("mimetype=pdf") || u.includes("type=pdf");
 }
 
+// Lee cliente.tarjetas de forma segura, sea que la columna en PostgreSQL
+// devuelva un array ya parseado (json/jsonb) o un string JSON (text).
+// Antes esto se asumía siempre-array con Array.isArray(), y si la columna
+// era texto, la selección de tarjeta guardada fallaba silenciosamente.
+function parseTarjetas(raw) {
+    if (Array.isArray(raw)) return raw;
+    if (typeof raw === "string" && raw.trim()) {
+        try {
+            const p = JSON.parse(raw);
+            return Array.isArray(p) ? p : [];
+        } catch { return []; }
+    }
+    return [];
+}
+
 async function enviarSeguro(phone, msg, delay = null, jitter = true) {
     if (!msg || !phone) return;
     if (jitter) await new Promise(r => setTimeout(r, Math.random() * 400));
@@ -159,5 +183,5 @@ module.exports = {
     CONFIRMA_TARJETA_SIN_MONTO, CONFIRMA_TARJETA_SIN_MONTO_PT,
     ESPERA_COMPROBANTE_ES, ESPERA_COMPROBANTE_PT,
     TARJETA_ILEGIBLE,
-    pick, pickL, norm, fmt, parseGPT, esPDF, enviarSeguro, limpiarSesion
+    pick, pickL, norm, fmt, parseGPT, esPDF, parseTarjetas, enviarSeguro, limpiarSesion
 };
