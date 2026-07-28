@@ -29,12 +29,24 @@ REGLAS TARJETA:
 - Banco: identifica por logo o texto (BPA=banco popular de ahorro, Bandec=logo rojo/naranja, Metropolitano)
 - Si la imagen está borrosa, girada o es reenvío, igualmente intenta extraer los dígitos visibles
 - Si logras ver al menos 12 dígitos, extráelos y pon valida:false
+- Una tarjeta física NUNCA tiene fecha/hora de transacción, ni un monto de dinero
+  transferido, ni nombre de banco emisor de un pago (ej. "Nubank", "Itaú",
+  "Banco do Brasil" como origen de transferencia) — si ves esos elementos,
+  NO es una tarjeta, es un comprobante.
 
 REGLAS COMPROBANTE:
+- Un comprobante PIX es una captura de pantalla de una app bancaria brasileña:
+  tiene monto transferido, fecha, hora, y datos de origen/destino del pago.
+  NUNCA muestra 16 dígitos de una tarjeta física cubana.
 - valor: número puro sin símbolo (200, no "R$200,00")
 - destino_correcto=true si destinatario coincide con: ${aliases}
 ${key ? `- destino_correcto=true si aparece la clave PIX: ${key}` : ""}
 - datos faltantes → null
+
+DESAMBIGUACIÓN (importante):
+- Si la imagen tiene fecha+hora+monto de una transacción → es "comprovante_pix", nunca "tarjeta".
+- Si la imagen muestra 16 dígitos en relieve sobre un plástico de banco, sin fecha/hora/monto de transacción → es "tarjeta".
+- Ante la duda entre las dos, prioriza lo que tenga más evidencia: presencia de fecha/hora/monto = comprobante; presencia de 16 dígitos + logo bancario sin esos datos = tarjeta.
 
 Sin texto extra fuera del JSON.`;
 }
