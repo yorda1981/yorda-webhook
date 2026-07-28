@@ -56,27 +56,43 @@ const MINUTOS_PAUSA = 10;
 // Sobrevive reinicios de Railway.
 // Se activa cuando el operador escribe desde
 // el WhatsApp directamente (fromMe + !fromApi).
+//
+// Optimización (28/07/2026): antes esto hacía 2-3
+// queries por CADA mensaje manual (UPDATE + SELECT +
+// INSERT). Cuando el operador manda varios mensajes
+// seguidos al mismo cliente, o hace rondas de disparos
+// a varios clientes, esto multiplicaba las queries y
+// disparó el consumo de cómputo en Neon.
+// Ahora: 1) una sola query UPSERT, y 2) una caché en
+// memoria que evita volver a tocar la DB si ya se
+// extendió la pausa de ese número hace menos de 60s.
 // ─────────────────────────────────────────
+
+const ULTIMA_PAUSA_CACHE = new Map(); // phone -> timestamp (ms) de la última escritura real en DB
+const DEBOUNCE_PAUSA_MS = 60 * 1000;  // no reescribir la misma pausa antes de 60s
 
 async function activarPausaHumana(phone) {
     if (!phone) return;
     if (!String(phone).startsWith("55")) return;
+
+    const ahora = Date.now();
+    const ultima = ULTIMA_PAUSA_CACHE.get(phone);
+    if (ultima && (ahora - ultima) < DEBOUNCE_PAUSA_MS) {
+        // Ya se extendió la pausa hace poco (ráfaga de mensajes del operador
+        // al mismo cliente) — el cliente sigue silenciado igual, no hace
+        // falta volver a escribir en PostgreSQL.
+        return;
+    }
+
     try {
         await pool.query(`
-            UPDATE customers
-            SET pausa_hasta = NOW() + ($1 * INTERVAL '1 minute'),
+            INSERT INTO customers (phone, pausa_hasta, created_at, updated_at)
+            VALUES ($1, NOW() + ($2 * INTERVAL '1 minute'), NOW(), NOW())
+            ON CONFLICT (phone) DO UPDATE
+            SET pausa_hasta = NOW() + ($2 * INTERVAL '1 minute'),
                 updated_at  = NOW()
-            WHERE phone = $2
-        `, [MINUTOS_PAUSA, phone]);
-        // Si el cliente aún no existe en DB, insertar fila mínima
-        const r = await pool.query("SELECT phone FROM customers WHERE phone = $1", [phone]);
-        if (r.rows.length === 0) {
-            await pool.query(`
-                INSERT INTO customers (phone, pausa_hasta, created_at, updated_at)
-                VALUES ($1, NOW() + ($2 * INTERVAL '1 minute'), NOW(), NOW())
-                ON CONFLICT (phone) DO NOTHING
-            `, [phone, MINUTOS_PAUSA]);
-        }
+        `, [phone, MINUTOS_PAUSA]);
+        ULTIMA_PAUSA_CACHE.set(phone, ahora);
         console.log(`⏸️ Pausa humana (PG): ${MINUTOS_PAUSA} min → ${phone}`);
     } catch (e) {
         console.error("❌ activarPausaHumana:", e.message);
