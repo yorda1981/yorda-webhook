@@ -19,7 +19,7 @@ const {
     CONFIRMA_TARJETA_SIN_MONTO, CONFIRMA_TARJETA_SIN_MONTO_PT,
     ESPERA_COMPROBANTE_ES, ESPERA_COMPROBANTE_PT,
     TARJETA_ILEGIBLE,
-    getPIXKey
+    getPIXKey, parseTarjetas
 } = require("../flows/shared");
 
 // ─────────────────────────────────────────
@@ -119,7 +119,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
 
         // ── Selección de tarjeta ──
         if (cliente?.estado === "seleccionando_tarjeta" && /^[1-9]$/.test(txt.trim())) {
-            const tarjetas = Array.isArray(cliente?.tarjetas) ? cliente.tarjetas.filter(t => /^\d{15,16}$/.test(t)) : [];
+            const tarjetas = parseTarjetas(cliente?.tarjetas).filter(t => /^\d{15,16}$/.test(t));
             const idx = parseInt(txt.trim()) - 1;
             if (idx >= 0 && idx < tarjetas.length) {
                 await guardarCliente({ phone, tarjeta: tarjetas[idx], tarjeta_frecuente: tarjetas[idx], estado: "aguardando_comprovante", fechaEstado: new Date().toISOString(), fechaPix: new Date().toISOString() });
@@ -178,15 +178,20 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             await enviarSeguro(phone, m); return m;
         }
 
-        // FIX 4: Número solo con estado activo → cotizar en lugar de silencio
-        // Si el cliente manda solo "200" y tiene estado activo, tratar como monto
-        if (/^\d+$/.test(txt.trim()) && montoValido && cliente?.estado) {
-            const estadoActual = cliente.estado;
-            if (estadoActual === "cotizacion_realizada") {
-                // Ya cotizó, este número puede ser confirmación de monto diferente
-                return await cotizarBRL(phone, pushName, valorFinal, lang) || "";
-            }
-            if (!estadoActual || estadoActual === "nuevo_cliente") {
+        // FIX 4: Número solo → cotizar en lugar de silencio.
+        // Antes exigía cliente?.estado verdadero para entrar, lo que dejaba
+        // sin respuesta a quien no tiene estado previo (ej. justo después de
+        // consultar tasas, que no guarda estado, y responde solo "100").
+        // Ahora: cualquier número solo cotiza, salvo que el cliente esté en
+        // medio de un paso que espera otra cosa (comprobante, tarjeta, etc.)
+        if (/^\d+$/.test(txt.trim()) && montoValido) {
+            const estadosQueBloquean = [
+                "aguardando_comprovante",
+                "aguardando_numero_recarga",
+                "seleccionando_tarjeta",
+                "seleccionando_recarga"
+            ];
+            if (!estadosQueBloquean.includes(cliente?.estado)) {
                 return await cotizarBRL(phone, pushName, valorFinal, lang) || "";
             }
         }
@@ -333,10 +338,19 @@ function extraerMonto(txt, text) {
     const matchMonetario  = text.match(MONTO_MONETARIO);
     const valorMonetario  = matchMonetario ? Number(matchMonetario[1] || matchMonetario[2]) : null;
     let valorContextual = null;
-    if (!valorMonetario && /enviar|mandar|envio|cotiz|transfer|pagar|monto|quant|cuant|quanto|quiero/.test(txt)) {
-        const mc = /\b(\d{2,5})\b/g;
-        let m;
-        while ((m = mc.exec(txt)) !== null) { const n = Number(m[1]); if (n >= 10 && n <= 50000) { valorContextual = n; break; } }
+    if (!valorMonetario) {
+        // Mensaje que es ÚNICAMENTE un número (ej. cliente responde "100" a
+        // "¿Cuánto quieres enviar?"). No exige palabra de contexto porque el
+        // contexto ya lo dio la pregunta anterior del bot.
+        const soloNumero = /^\s*(\d{2,5})(?:[.,]\d{1,2})?\s*$/.exec(txt);
+        if (soloNumero) {
+            const n = Number(soloNumero[1]);
+            if (n >= 10 && n <= 50000) valorContextual = n;
+        } else if (/enviar|mandar|envio|cotiz|transfer|pagar|monto|quant|cuant|quanto|quiero/.test(txt)) {
+            const mc = /\b(\d{2,5})\b/g;
+            let m;
+            while ((m = mc.exec(txt)) !== null) { const n = Number(m[1]); if (n >= 10 && n <= 50000) { valorContextual = n; break; } }
+        }
     }
     const valorFinal  = valorMonetario || valorContextual || null;
     const montoValido = !!(valorFinal && valorFinal >= 10 && valorFinal <= 50000);
