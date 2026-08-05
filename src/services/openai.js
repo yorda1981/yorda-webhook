@@ -10,10 +10,11 @@ const crm                                          = require("./crm");
 const { detectarImagenUnificada, detectarComprobantePDF, llamarAsistente } = require("../flows/imagen-flow");
 const { enviarPIX, _enviarPIXFinal, intentarCompletarOperacion, procesarComprobante, guardarTarjeta } = require("../flows/pix-flow");
 const { cotizarBRL, cotizarUSD, preguntarTipoUSD, cotizarMLC, tasaMLC, detectarCUPInverso, cotizarCUPInverso, consultarTasas } = require("../flows/cotizacion-flow");
+const { calcularOperacion } = require("./calculator");
 const { mostrarMenuRecargas, seleccionarRecarga, procesarNumeroRecarga } = require("../flows/recarga-flow");
 const {
     enviarSeguro, limpiarSesion, getAdminPhone,
-    norm, esPDF, pick, pickL,
+    norm, esPDF, pick, pickL, fmt,
     DOS_HORAS,
     gatilhos, palabrasNegocio, triggersCubaBrasil, confirmaOperacion,
     CONFIRMA_TARJETA_SIN_MONTO, CONFIRMA_TARJETA_SIN_MONTO_PT,
@@ -167,7 +168,8 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                 // preguntar cuál usar en vez de mandar el PIX — no anunciar el PIX antes de saber eso.
                 const tarjetasCli2 = Array.isArray(cli2.tarjetas) ? cli2.tarjetas.filter(t => /^\d{15,16}$/.test(t)) : [];
                 if (tarjetasCli2.length > 1) return await enviarPIX(phone, cli2, esEs);
-                const m = lang === "pt" ? `Cartão salvo! 💳\n\nVou te mandar o PIX para pagar R$${cli2.ultimo_monto} 👇` : `¡Tarjeta guardada! 💳\n\nTe envío el PIX para pagar R$${cli2.ultimo_monto} 👇`;
+                const montoPago = await montoPagoEnReales(cli2);
+                const m = lang === "pt" ? `Cartão salvo! 💳\n\nVou te mandar o PIX para pagar R$${fmt(montoPago)} 👇` : `¡Tarjeta guardada! 💳\n\nTe envío el PIX para pagar R$${fmt(montoPago)} 👇`;
                 await enviarSeguro(phone, m);
                 return await enviarPIX(phone, cli2, esEs);
             }
@@ -332,6 +334,15 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
 // HELPERS
 // ─────────────────────────────────────────
 
+// FIX MONEDA: para operaciones USD/MLC, ultimo_monto está en la moneda original
+// (USD o MLC), NO en reales. Este helper recalcula el monto real a pagar en R$.
+async function montoPagoEnReales(cliente) {
+    const tipoOp = cliente.tipo_favorito || "brl_cup";
+    if (tipoOp === "brl_cup") return Number(cliente.ultimo_monto);
+    const r = await calcularOperacion({ tipo: tipoOp, valor: cliente.ultimo_monto });
+    return r ? r.cup : Number(cliente.ultimo_monto);
+}
+
 function extraerMonto(txt, text) {
     const MONTO_MONETARIO = /(?:r\$|reais|reales|real|brl|usd|d[oó]lar(?:es)?|cup|mlc|pesos?|plata|dinero)\s*(\d{2,5})|\b(\d{2,5})\s*(?:r\$|reais|reales|real|brl|usd|d[oó]lar(?:es)?|cup|mlc|pesos?)/i;
     const matchMonetario  = text.match(MONTO_MONETARIO);
@@ -434,7 +445,8 @@ async function manejarImagen(phone, pushName, cliente, imageUrl, lang, esEs) {
                 // FIX MULTI-TARJETA: mismo caso que tarjeta por texto.
                 const tarjetasCli2 = Array.isArray(cli2.tarjetas) ? cli2.tarjetas.filter(t => /^\d{15,16}$/.test(t)) : [];
                 if (tarjetasCli2.length > 1) return await enviarPIX(phone, cli2, esEs);
-                const m = lang === "pt" ? `Cartão salvo! 💳\n\nVou te mandar o PIX para pagar R$${cli2.ultimo_monto} 👇` : `¡Tarjeta guardada! 💳\n\nTe envío el PIX para pagar R$${cli2.ultimo_monto} 👇`;
+                const montoPago = await montoPagoEnReales(cli2);
+                const m = lang === "pt" ? `Cartão salvo! 💳\n\nVou te mandar o PIX para pagar R$${fmt(montoPago)} 👇` : `¡Tarjeta guardada! 💳\n\nTe envío el PIX para pagar R$${fmt(montoPago)} 👇`;
                 await enviarSeguro(phone, m);
                 return await enviarPIX(phone, cli2, esEs);
             }
