@@ -182,17 +182,17 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             await enviarSeguro(phone, m); return m;
         }
 
-        // FIX 4: Número solo con estado activo → cotizar en lugar de silencio
-        // Si el cliente manda solo "200" y tiene estado activo, tratar como monto
-        if (/^\d+$/.test(txt.trim()) && montoValido && cliente?.estado) {
-            const estadoActual = cliente.estado;
-            if (estadoActual === "cotizacion_realizada") {
-                // Ya cotizó, este número puede ser confirmación de monto diferente
-                return await cotizarBRL(phone, pushName, valorFinal, lang) || "";
-            }
-            if (!estadoActual || estadoActual === "nuevo_cliente") {
-                return await cotizarBRL(phone, pushName, valorFinal, lang) || "";
-            }
+        // FIX 4 (revisado): Número solo → tratar como monto y cotizar
+        // ANTES: exigía montoValido, pero un número aislado como "200" (sin "reales" ni
+        // "enviar" junto) nunca activa montoValido, así que el bloque nunca disparaba y
+        // el mensaje quedaba sin respuesta. Ahora se calcula el número directo del texto.
+        const soloNumeroTxt   = txt.trim();
+        const bareNumero      = /^\d{2,5}$/.test(soloNumeroTxt) ? Number(soloNumeroTxt) : null;
+        const bareMontoValido = bareNumero !== null && bareNumero >= 10 && bareNumero <= 50000;
+        if (bareMontoValido) {
+            const estadoActual     = cliente?.estado;
+            const estadoBloqueaFix4 = estadoActual === "aguardando_comprovante" || estadoActual === "aguardando_numero_recarga";
+            if (!estadoBloqueaFix4) return await cotizarBRL(phone, pushName, bareNumero, lang) || "";
         }
 
         // FIX 5: Confirmación — verificar que NO hay monto nuevo en el mensaje
