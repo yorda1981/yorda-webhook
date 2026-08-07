@@ -170,14 +170,12 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             }
             if (cli2.ultimo_monto && Number(cli2.ultimo_monto) > 0) {
                 await guardarCliente({ phone, estado: "aguardando_comprovante", fechaEstado: new Date().toISOString(), fechaPix: new Date().toISOString() });
-                // FIX MULTI-TARJETA: si hay más de una tarjeta guardada, enviarPIX() va a
-                // preguntar cuál usar en vez de mandar el PIX — no anunciar el PIX antes de saber eso.
-                const tarjetasCli2 = Array.isArray(cli2.tarjetas) ? cli2.tarjetas.filter(t => /^\d{15,16}$/.test(t)) : [];
-                if (tarjetasCli2.length > 1) return await enviarPIX(phone, cli2, esEs);
+                // FIX: el cliente ya indicó la tarjeta en ESTE mensaje (texto) — no hay que
+                // volver a preguntar cuál usar aunque tenga varias guardadas de antes.
                 const montoPago = await montoPagoEnReales(cli2);
                 const m = lang === "pt" ? `Cartão salvo! 💳\n\nVou te mandar o PIX para pagar R$${fmt(montoPago)} 👇` : `¡Tarjeta guardada! 💳\n\nTe envío el PIX para pagar R$${fmt(montoPago)} 👇`;
                 await enviarSeguro(phone, m);
-                return await enviarPIX(phone, cli2, esEs);
+                return await _enviarPIXFinal(phone, cli2, esEs);
             }
             const m = pickL(CONFIRMA_TARJETA_SIN_MONTO, CONFIRMA_TARJETA_SIN_MONTO_PT, lang);
             await enviarSeguro(phone, m); return m;
@@ -323,7 +321,12 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         const palabras = txt.trim().split(/\s+/);
         if (palabras.length < 4 || /^\d+$/.test(txt.trim())) return "";
         try {
-            const { texto, responseId } = await llamarAsistente(text, cliente?.last_response_id);
+            // FIX SESIÓN VIEJA: si la última interacción fue hace más de 2 horas, no
+            // encadenar el hilo de GPT anterior — si no, un cliente que vuelve días
+            // después arrastra el contexto de una consulta vieja aunque diga otro valor.
+            const hiloVencido = cliente?.ultima_interaccion &&
+                (Date.now() - new Date(cliente.ultima_interaccion).getTime()) > DOS_HORAS;
+            const { texto, responseId } = await llamarAsistente(text, hiloVencido ? null : cliente?.last_response_id);
             const esIgnorar = /^ignorar[.!]?$/i.test(texto.trim()) || /silencio total/i.test(texto) || texto.trim() === "";
             if (texto && !esIgnorar) {
                 await guardarCliente({ phone, lastResponseId: responseId });
@@ -448,13 +451,12 @@ async function manejarImagen(phone, pushName, cliente, imageUrl, lang, esEs) {
             }
             if (cli2.ultimo_monto && Number(cli2.ultimo_monto) > 0) {
                 await guardarCliente({ phone, estado: "aguardando_comprovante", fechaEstado: new Date().toISOString(), fechaPix: new Date().toISOString() });
-                // FIX MULTI-TARJETA: mismo caso que tarjeta por texto.
-                const tarjetasCli2 = Array.isArray(cli2.tarjetas) ? cli2.tarjetas.filter(t => /^\d{15,16}$/.test(t)) : [];
-                if (tarjetasCli2.length > 1) return await enviarPIX(phone, cli2, esEs);
+                // FIX: el cliente ya indicó la tarjeta en ESTE mensaje (foto) — no hay que
+                // volver a preguntar cuál usar aunque tenga varias guardadas de antes.
                 const montoPago = await montoPagoEnReales(cli2);
                 const m = lang === "pt" ? `Cartão salvo! 💳\n\nVou te mandar o PIX para pagar R$${fmt(montoPago)} 👇` : `¡Tarjeta guardada! 💳\n\nTe envío el PIX para pagar R$${fmt(montoPago)} 👇`;
                 await enviarSeguro(phone, m);
-                return await enviarPIX(phone, cli2, esEs);
+                return await _enviarPIXFinal(phone, cli2, esEs);
             }
             const m = pickL(CONFIRMA_TARJETA_SIN_MONTO, CONFIRMA_TARJETA_SIN_MONTO_PT, lang);
             await enviarSeguro(phone, m); return m;
