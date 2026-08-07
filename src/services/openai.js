@@ -85,12 +85,18 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         if (esSaludo) return await manejarSaludo(phone, pushName, cliente, yaSaludado, lang, esEs);
 
         // ── Filtro de gatillo ──
-        const esConfirma = confirmaOperacion.includes(txt.trim()) ||
+        const txtTrim = txt.trim();
+        const esConfirma = confirmaOperacion.includes(txtTrim) ||
+            // FIX: "si por favor", "dale entonces", etc. — antes solo matcheaba exacto
+            // contra la lista y quedaban sin respuesta pese a ser confirmaciones claras.
+            confirmaOperacion.some(c => txtTrim.startsWith(c + " ")) ||
             /\b(voy a|vou) (mandar|enviar|pagar|transferir)\b/.test(txt) ||
             /\b(te|le) (mando|envio|pago|transfiero)\b/.test(txt);
         const debeResponder = gatilhos.some(g => txt.includes(norm(g))) ||
             palabrasNegocio.some(p => txt.includes(p)) || !!cliente?.estado || !!imageUrl ||
-            /^\d+([.,]\d{1,2})?$/.test(txt.trim()) || txt.replace(/\D/g,"").length === 16 || esConfirma;
+            /^\d+([.,]\d{1,2})?$/.test(txt.trim()) || txt.replace(/\D/g,"").length === 16 || esConfirma ||
+            montoValido; // FIX: "400 reales" tras "¿Cuánto deseas enviar?" no tenía estado guardado
+                         // ni gatillo, y quedaba sin respuesta pese a ser un monto válido.
         if (!debeResponder) return "";
 
         // ── Derivación humano ──
