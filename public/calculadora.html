@@ -21,42 +21,52 @@
    ═══════════════════════════════════════════ */
 
 :root{
-  --bg:#0A0B14;
-  --card:#12141F;
-  --card2:#171A2A;
-  --line:#242844;
-  --accent:#7C5CFF;
-  --accent2:#9F7DFF;
-  --text:#F2F3F8;
-  --muted:#8B90A8;
-  --green:#34D399;
-  --gold:#F2C24B;
+  --bg:#F3F6FA;
+  --card:#FFFFFF;
+  --card2:#F1F4F8;
+  --line:#E1E7F0;
+  --accent:#0038A8;
+  --accent2:#185FA5;
+  --red:#CF142B;
+  --red-dark:#9E0F21;
+  --text:#0B1F45;
+  --muted:#5F6B7A;
+  --green:#16A34A;
+  --gold:#B45309;
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{
+  outline:2px solid var(--accent);outline-offset:2px;
+}
 body{
   font-family:'Manrope',system-ui,sans-serif;
   background:var(--bg);color:var(--text);min-height:100vh;
   background-image:
-    radial-gradient(ellipse 60% 40% at 20% -10%, #1c1440 0%, transparent 60%),
-    radial-gradient(ellipse 50% 35% at 90% 0%, #10203a 0%, transparent 55%);
+    radial-gradient(ellipse 60% 40% at 20% -10%, #E9F0FA 0%, transparent 60%),
+    radial-gradient(ellipse 50% 35% at 90% 0%, #FBEBEC 0%, transparent 55%);
 }
 .page{max-width:1080px;margin:0 auto;padding:20px 16px 48px}
 
 /* ── header ── */
-.hdr{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px;flex-wrap:wrap}
+.hdr{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  background:linear-gradient(135deg,var(--accent),#062B70);
+  border-radius:20px;padding:16px 20px;margin-bottom:16px;flex-wrap:wrap;
+}
 .marca{display:flex;align-items:center;gap:12px}
-.logo{width:44px;height:44px}
-.nombre{font-size:1.25rem;font-weight:800}
-.nombre span{color:var(--accent2)}
-.ruta{font-size:.72rem;color:var(--muted);font-weight:700;letter-spacing:.04em}
+.logo{width:44px;height:44px;flex:none}
+.nombre{font-size:1.25rem;font-weight:800;color:#fff}
+.nombre span{color:#CFE0FA}
+.tagline{font-size:.68rem;color:#B9CBEA;font-weight:700;letter-spacing:.04em;margin-top:1px}
+.ruta{font-size:.7rem;color:#B9CBEA;font-weight:700;letter-spacing:.04em}
 .hdr-der{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
-.estado{display:flex;align-items:center;gap:6px;font-size:.78rem;color:var(--muted)}
-.dot{width:8px;height:8px;border-radius:50%;background:#555;display:inline-block}
+.estado{display:flex;align-items:center;gap:6px;font-size:.78rem;color:#CFE0FA}
+.dot{width:8px;height:8px;border-radius:50%;background:#7C93C4;display:inline-block}
 .estado.on .dot{background:var(--green);box-shadow:0 0 8px var(--green)}
-.reloj{font-size:.82rem;color:var(--muted);font-variant-numeric:tabular-nums}
-.lang{display:flex;border:1px solid var(--line);border-radius:12px;overflow:hidden}
-.lang button{background:var(--card);border:none;color:var(--muted);font-family:inherit;font-size:.78rem;font-weight:800;padding:7px 13px;cursor:pointer}
-.lang button.act{background:var(--accent);color:#fff}
+.reloj{font-size:.82rem;color:#CFE0FA;font-variant-numeric:tabular-nums}
+.lang{display:flex;border:1px solid rgba(255,255,255,.35);border-radius:12px;overflow:hidden}
+.lang button{background:transparent;border:none;color:#CFE0FA;font-family:inherit;font-size:.78rem;font-weight:800;padding:7px 13px;cursor:pointer}
+.lang button.act{background:#fff;color:var(--accent)}
 
 /* ── paneles ── */
 .panel{
@@ -105,7 +115,7 @@ body{
   flex:1;min-width:0;background:none;border:none;color:var(--text);
   font-family:inherit;font-size:2rem;font-weight:800;outline:none;
 }
-#monto::placeholder{color:#3a3f5c}
+#monto::placeholder{color:#AEB9C8}
 .limpiar{
   background:none;border:none;color:var(--muted);font-family:inherit;
   font-size:.78rem;font-weight:700;cursor:pointer;white-space:nowrap;
@@ -122,22 +132,27 @@ body{
 
 /* ── resultado ── */
 .resultado{
-  display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:8px;
-  background:linear-gradient(160deg,#181430,#131627);
+  display:grid;grid-template-columns:1fr auto 1fr;align-items:stretch;gap:8px;
+  background:var(--card);
   border:1px solid var(--line);border-radius:18px;
-  padding:18px 16px 14px;margin-bottom:14px;text-align:center;
+  padding:14px 12px;margin-bottom:14px;text-align:center;
   animation:aparecer .25s ease;
 }
 @keyframes aparecer{from{opacity:.4;transform:translateY(4px)}to{opacity:1;transform:none}}
-.res-eti{font-size:.7rem;color:var(--muted);font-weight:800;text-transform:uppercase;letter-spacing:.06em}
-.res-num{font-size:1.5rem;font-weight:800;margin-top:4px;word-break:break-word}
-.res-num.destaque{color:var(--accent2)}
+.res-lado{border-radius:14px;padding:12px 10px;display:flex;flex-direction:column;justify-content:center}
+.res-lado:nth-child(1){background:#FCEBEB;border:1px solid #F5C9C9}
+.res-lado:nth-child(3){background:#E6F1FB;border:1px solid #BEDBF6}
+.res-eti{font-size:.66rem;color:var(--muted);font-weight:800;text-transform:uppercase;letter-spacing:.05em}
+.res-lado:nth-child(1) .res-eti{color:var(--red-dark)}
+.res-lado:nth-child(3) .res-eti{color:var(--accent2)}
+.res-num{font-size:1.35rem;font-weight:800;margin-top:4px;word-break:break-word;color:var(--red-dark)}
+.res-num.destaque{color:var(--accent)}
 .res-flecha{
-  width:38px;height:38px;border-radius:50%;background:var(--card2);border:1px solid var(--line);
-  display:flex;align-items:center;justify-content:center;color:var(--muted);font-weight:800;margin:0 auto;
+  width:36px;height:36px;border-radius:50%;background:var(--accent);border:none;
+  display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;margin:auto;
 }
 .res-tasa{grid-column:1/-1;font-size:.78rem;color:var(--muted);margin-top:8px;min-height:1em}
-.res-tasa b{color:var(--gold)}
+.res-tasa b{color:var(--accent)}
 
 /* ── beneficios ── */
 .beneficios{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px}
@@ -186,19 +201,27 @@ body{
 
 /* ── promo ── */
 .promo{
-  background:linear-gradient(120deg,#6D28D9,#C026D3,#F97316);
-  border-radius:20px;padding:20px;margin-bottom:16px;
+  background:linear-gradient(120deg,#0038A8,#1E56D6);
+  border-top:3px solid var(--red);
+  border-radius:16px;padding:20px;margin-bottom:16px;color:#fff;
 }
 .promo-eti{font-size:.8rem;font-weight:800;margin-bottom:6px}
 .promo-txt{font-size:1.05rem;font-weight:800;line-height:1.35}
 
 .pie{text-align:center;font-size:.75rem;color:var(--muted);margin-top:8px}
 
+/* ── elTOQUE (referencia, próximamente) ── */
+.eltoque-grid{display:flex;flex-direction:column;gap:2px;margin-bottom:8px}
+.eltoque-fila{display:flex;justify-content:space-between;font-size:.85rem;padding:6px 0;border-bottom:1px solid var(--line)}
+.eltoque-fila:last-child{border-bottom:none}
+.eltoque-fila span:first-child{color:var(--muted);font-weight:700}
+.eltoque-fila span:last-child{font-weight:800;color:var(--muted)}
+
 /* ── cinta de noticias (tasas) ── */
 .ticker{
   width:100%;overflow:hidden;position:relative;margin-bottom:16px;
   border:1px solid var(--line);border-radius:14px;
-  background:linear-gradient(90deg,#12141F,#171A2A);
+  background:linear-gradient(90deg,var(--card2),var(--card));
   -webkit-mask-image:linear-gradient(90deg,transparent,#000 5%,#000 95%,transparent);
           mask-image:linear-gradient(90deg,transparent,#000 5%,#000 95%,transparent);
 }
@@ -257,10 +280,11 @@ body{
 /* ── botón continuar (primario, flujo) ── */
 .btn-continuar{
   display:block;width:100%;padding:16px;border-radius:16px;border:none;
-  background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;
+  background:var(--red);color:#fff;
   font-family:inherit;font-size:1rem;font-weight:800;cursor:pointer;
-  margin-bottom:10px;transition:transform .1s;
+  margin-bottom:10px;transition:transform .1s,background .15s;
 }
+.btn-continuar:hover:not(:disabled){background:var(--red-dark)}
 .btn-continuar:active{transform:scale(.98)}
 .btn-continuar:disabled{opacity:.4;cursor:not-allowed}
 .wa-secundario{
@@ -268,6 +292,7 @@ body{
   padding:10px;border-radius:12px;text-decoration:none;color:var(--muted);
   font-size:.82rem;font-weight:700;border:1px dashed var(--line);
 }
+.wa-secundario:hover{border-color:var(--accent);color:var(--accent)}
 
 /* ── progreso de pasos ── */
 .progreso{display:flex;justify-content:space-between;gap:6px}
@@ -280,7 +305,7 @@ body{
   display:flex;align-items:center;justify-content:center;font-size:.82rem;color:var(--muted);
 }
 .pstep.act .num{background:var(--accent);border-color:var(--accent);color:#fff}
-.pstep.done .num{background:var(--green);border-color:var(--green);color:#0A0B14}
+.pstep.done .num{background:var(--green);border-color:var(--green);color:#fff}
 .pstep.act span.lbl,.pstep.done span.lbl{color:var(--text)}
 
 /* ── formularios de datos ── */
@@ -313,9 +338,9 @@ body{
   border-radius:14px;padding:12px 14px;font-size:.82rem;font-weight:700;margin-bottom:14px;
   display:flex;gap:10px;align-items:flex-start;line-height:1.4;
 }
-.aviso.ok{background:rgba(52,211,153,.1);border:1px solid rgba(52,211,153,.35);color:var(--green)}
-.aviso.warn{background:rgba(242,194,75,.1);border:1px solid rgba(242,194,75,.35);color:var(--gold)}
-.aviso.info{background:rgba(124,92,255,.1);border:1px solid rgba(124,92,255,.35);color:var(--accent2)}
+.aviso.ok{background:rgba(22,163,74,.08);border:1px solid rgba(22,163,74,.3);color:var(--green)}
+.aviso.warn{background:rgba(180,83,9,.08);border:1px solid rgba(180,83,9,.3);color:var(--gold)}
+.aviso.info{background:rgba(24,95,165,.08);border:1px solid rgba(24,95,165,.3);color:var(--accent2)}
 .aviso b{color:inherit}
 .aviso .txt{color:var(--text);font-weight:600}
 
@@ -389,9 +414,10 @@ body{
   <!-- ═══════ HEADER ═══════ -->
   <header class="hdr">
     <div class="marca">
-      <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCIgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0Ij4KICA8ZGVmcz4KICAgIDxsaW5lYXJHcmFkaWVudCBpZD0iZyIgeDE9IjAiIHkxPSIwIiB4Mj0iMSIgeTI9IjEiPgogICAgICA8c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiM4QjZDRkYiLz4KICAgICAgPHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjNUIzREY1Ii8+CiAgICA8L2xpbmVhckdyYWRpZW50PgogIDwvZGVmcz4KICA8Y2lyY2xlIGN4PSIzMiIgY3k9IjMyIiByPSIzMCIgZmlsbD0idXJsKCNnKSIvPgogIDxwYXRoIGQ9Ik0xNCAzMiBMNTAgMTggTDQwIDQ4IEwzMiAzOCBMMjYgNDQgTDI2IDM1IFoiIGZpbGw9IiNGRkZGRkYiLz4KICA8cGF0aCBkPSJNMzIgMzggTDUwIDE4IEwyNiAzNSBMMjYgNDQgWiIgZmlsbD0iI0Q5Q0VGRiIvPgo8L3N2Zz4K" alt="Yorda Envíos" class="logo">
+      <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCIgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0Ij4KICA8ZGVmcz4KICAgIDxsaW5lYXJHcmFkaWVudCBpZD0iZyIgeDE9IjAiIHkxPSIwIiB4Mj0iMSIgeTI9IjEiPgogICAgICA8c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiMxRTU2RDYiLz4KICAgICAgPHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjMDAzOEE4Ii8+CiAgICA8L2xpbmVhckdyYWRpZW50PgogIDwvZGVmcz4KICA8Y2lyY2xlIGN4PSIzMiIgY3k9IjMyIiByPSIzMCIgZmlsbD0idXJsKCNnKSIvPgogIDxwYXRoIGQ9Ik0xNCAzMiBMNTAgMTggTDQwIDQ4IEwzMiAzOCBMMjYgNDQgTDI2IDM1IFoiIGZpbGw9IiNGRkZGRkYiLz4KICA8cGF0aCBkPSJNMzIgMzggTDUwIDE4IEwyNiAzNSBMMjYgNDQgWiIgZmlsbD0iI0M3RDhGNSIvPgogIDxjaXJjbGUgY3g9IjQ5IiBjeT0iMTUiIHI9IjYiIGZpbGw9IiNDRjE0MkIiLz4KPC9zdmc+Cg==" alt="Yorda Envíos" class="logo">
       <div>
         <div class="nombre">Yorda <span>Envíos</span></div>
+        <div class="tagline" data-i="tagline">Rápido · Seguro · Confiable</div>
         <div class="ruta">🇧🇷 BR → CU 🇨🇺</div>
       </div>
     </div>
@@ -463,7 +489,7 @@ body{
         </div>
 
         <div class="beneficios">
-          <div class="ben"><span>🕒</span><div><b data-i="benEntrega">Entrega estimada</b><i data-i="benHoy">Hoy</i></div></div>
+          <div class="ben"><span>📲</span><div><b data-i="benEntrega">Seguimiento</b><i data-i="benHoy">por WhatsApp</i></div></div>
           <div class="ben"><span>🛡️</span><div><b data-i="benSin">Sin comisiones</b><i data-i="benOcultas">ocultas</i></div></div>
           <div class="ben"><span>⚡</span><div><b data-i="benPagos">Pagos seguros</b><i data-i="benRapidos">y rápidos</i></div></div>
         </div>
@@ -502,9 +528,24 @@ body{
       <section class="panel">
         <div class="panel-titulo"><span class="ico">⭐</span> <span data-i="porqueTitulo">¿Por qué elegir Yorda?</span></div>
         <div class="check" data-i="pq1">✔ Tasas actualizadas todos los días</div>
-        <div class="check" data-i="pq2">✔ Entrega el mismo día</div>
+        <div class="check" data-i="pq2">✔ Entregas disponibles en Cuba</div>
         <div class="check" data-i="pq3">✔ Atención personalizada por WhatsApp</div>
         <div class="check" data-i="pq4">✔ Confirmación de cada operación</div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-titulo"><span class="ico">🔒</span> <span data-i="seguridadTitulo">Tu envío, seguro y confiable</span></div>
+        <div class="lado-nota" data-i="seguridadTxt">Verificamos cada pago manualmente y te avisamos por WhatsApp en cada paso de tu operación.</div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-titulo"><span class="ico">📊</span> <span data-i="eltoqueTitulo">Referencia del mercado cubano</span></div>
+        <div class="eltoque-grid">
+          <div class="eltoque-fila"><span>USD</span><span>—</span></div>
+          <div class="eltoque-fila"><span>MLC</span><span>—</span></div>
+          <div class="eltoque-fila"><span>USDT</span><span>—</span></div>
+        </div>
+        <div class="lado-nota" data-i="eltoqueFuente">Fuente: elTOQUE · Próximamente</div>
       </section>
 
       <section class="promo" id="promo" style="display:none">
@@ -611,6 +652,7 @@ const PROVINCIAS = [
 /* ── textos ES / PT ── */
 const T = {
   es: {
+    tagline:"Rápido · Seguro · Confiable",
     tasasTitulo:"Tasas de Yorda", hoy:"(Hoy)",
     cuanto:"¿Cuánto quieres enviar?", cuantoTarjeta:"¿Cuánto quieres en la tarjeta?",
     cuantoEfe:"¿Cuánto envías en efectivo?",
@@ -620,7 +662,7 @@ const T = {
     cuantoLlegue:"¿Cuánto quieres que llegue?",
     necesitas:"Necesitas enviar",
     pagas:"Tú pagas en Brasil", recibe:"Recibe en Cuba",
-    benEntrega:"Entrega estimada", benHoy:"Hoy",
+    benEntrega:"Seguimiento", benHoy:"por WhatsApp",
     benSin:"Sin comisiones", benOcultas:"ocultas",
     benPagos:"Pagos seguros", benRapidos:"y rápidos",
     ctaTitulo:"Quiero hacer este envío", ctaSub:"Te atendemos por WhatsApp",
@@ -631,9 +673,13 @@ const T = {
     zonasNota:"¿Otro municipio? Consulta disponibilidad por WhatsApp.",
     porqueTitulo:"¿Por qué elegir Yorda?",
     pq1:"✔ Tasas actualizadas todos los días",
-    pq2:"✔ Entrega el mismo día",
+    pq2:"✔ Entregas disponibles en Cuba",
     pq3:"✔ Atención personalizada por WhatsApp",
     pq4:"✔ Confirmación de cada operación",
+    seguridadTitulo:"Tu envío, seguro y confiable",
+    seguridadTxt:"Verificamos cada pago manualmente y te avisamos por WhatsApp en cada paso de tu operación.",
+    eltoqueTitulo:"Referencia del mercado cubano",
+    eltoqueFuente:"Fuente: elTOQUE · Próximamente",
     promoTitulo:"🔥 Promoción del día",
     pie:"Tasas actualizadas en tiempo real · Sin comisiones ocultas",
     pillBrl:"Reales", pillEfe:"Efectivo",
@@ -685,6 +731,7 @@ const T = {
     waTotal:"💰 Total a pagar", waBenefRecibe:"🇨🇺 Beneficiario recibe",
   },
   pt: {
+    tagline:"Rápido · Seguro · Confiável",
     tasasTitulo:"Taxas da Yorda", hoy:"(Hoje)",
     cuanto:"Quanto você quer enviar?", cuantoTarjeta:"Quanto quer no cartão?",
     cuantoEfe:"Quanto envia em dinheiro?",
@@ -694,7 +741,7 @@ const T = {
     cuantoLlegue:"Quanto quer que chegue?",
     necesitas:"Você precisa enviar",
     pagas:"Você paga no Brasil", recibe:"Recebe em Cuba",
-    benEntrega:"Entrega estimada", benHoy:"Hoje",
+    benEntrega:"Acompanhamento", benHoy:"pelo WhatsApp",
     benSin:"Sem taxas", benOcultas:"ocultas",
     benPagos:"Pagamentos seguros", benRapidos:"e rápidos",
     ctaTitulo:"Quero fazer este envio", ctaSub:"Atendemos pelo WhatsApp",
@@ -705,9 +752,13 @@ const T = {
     zonasNota:"Outro município? Consulte a disponibilidade pelo WhatsApp.",
     porqueTitulo:"Por que escolher a Yorda?",
     pq1:"✔ Taxas atualizadas todos os dias",
-    pq2:"✔ Entrega no mesmo dia",
+    pq2:"✔ Entregas disponíveis em Cuba",
     pq3:"✔ Atendimento personalizado pelo WhatsApp",
     pq4:"✔ Confirmação de cada operação",
+    seguridadTitulo:"Seu envio, seguro e confiável",
+    seguridadTxt:"Verificamos cada pagamento manualmente e avisamos pelo WhatsApp em cada etapa da sua operação.",
+    eltoqueTitulo:"Referência do mercado cubano",
+    eltoqueFuente:"Fonte: elTOQUE · Em breve",
     promoTitulo:"🔥 Promoção do dia",
     pie:"Taxas atualizadas em tempo real · Sem taxas ocultas",
     pillBrl:"Reais", pillEfe:"Dinheiro",
@@ -1370,7 +1421,8 @@ function construirMensajeWhatsApp(){
   }[pedido.tipo] || pedido.tipo;
 
   const l = [];
-  l.push(t().waTituloEfe, "", `${t().waTipo}: ${opLabelWa}`, "",
+  const refPedido = "YW" + Date.now().toString(36).toUpperCase().slice(-6);
+  l.push(`${t().waTituloEfe} #${refPedido}`, "", `${t().waTipo}: ${opLabelWa}`, "",
     `${t().waTotal}: R$ ${fmt(pedido.total)}`, `${t().waBenefRecibe}: ${fmt(pedido.montoRecibe)} ${pedido.monedaRecibe}`, "");
 
   if(pedido.metodo === "transferencia"){
