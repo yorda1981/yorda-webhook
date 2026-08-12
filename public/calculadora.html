@@ -201,6 +201,10 @@ body{
 }
 .res-tasa{grid-column:1/-1;font-size:.78rem;color:var(--muted);margin-top:8px;min-height:1em}
 .res-tasa b{color:var(--accent)}
+.res-entrega{grid-column:1/-1;margin-top:10px;padding-top:10px;border-top:1px dashed var(--line);text-align:left}
+.res-entrega-fila{display:flex;justify-content:space-between;font-size:.8rem;color:var(--muted);padding:3px 0}
+.res-entrega-fila.total{font-weight:800;color:var(--text);font-size:.92rem;padding-top:6px}
+.res-entrega-fila.total span:last-child{color:var(--red-dark)}
 
 /* ── beneficios ── */
 .beneficios{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px}
@@ -544,6 +548,11 @@ body{
             <div class="res-num destaque" id="resRecibe">—</div>
           </div>
           <div class="res-tasa" id="resTasa"></div>
+          <div class="res-entrega" id="resEntrega" style="display:none">
+            <div class="res-entrega-fila"><span data-i="rEnvias2">Costo de la operación</span><span id="resEntregaOp">—</span></div>
+            <div class="res-entrega-fila"><span data-i="rCostoEntrega2">🚚 Costo de entrega</span><span id="resEntregaFee">—</span></div>
+            <div class="res-entrega-fila total"><span data-i="rTotal2">Total a pagar</span><span id="resEntregaTotal">—</span></div>
+          </div>
         </div>
 
         <div class="beneficios">
@@ -778,13 +787,14 @@ const T = {
     plazoRestoTxt:"⏱️ Las entregas en provincias pueden demorar hasta 48 horas, según la demanda y disponibilidad.",
     plazoConfirmarTxt:"El plazo comienza a contar después de confirmar la disponibilidad de la entrega.",
     errRequerido:"Este campo es obligatorio.", errTelefono:"Ingresa un teléfono válido (mínimo 8 dígitos).",
-    errTarjeta:"Ingresa un número de tarjeta o cuenta válido.",
+    errTarjeta:"Debe tener exactamente 16 dígitos.",
     opCupTransf:"Transferencia CUP", opUsdTransf:"Transferencia USD", opMlcTransf:"Transferencia MLC",
     opCupEfe:"CUP en efectivo", opUsdEfe:"USD en efectivo",
     rEnvias:"Envías", rRecibe:"Recibe", rTasa:"Tasa aplicada", rBeneficiario:"Beneficiario", rTelefono:"Teléfono",
     rProvincia:"Provincia", rMunicipio:"Municipio", rDireccion:"Dirección", rReferencia:"Referencia",
     rTarjeta:"Tarjeta/cuenta", rBanco:"Banco", rEntrega:"Entrega", rCostoOp:"Costo de la operación",
     rCostoEntrega:"Costo de entrega", rTotal:"TOTAL A PAGAR",
+    rEnvias2:"Costo de la operación", rCostoEntrega2:"🚚 Costo de entrega", rTotal2:"Total a pagar",
     waTituloEfe:"🇨🇺 *NUEVO PEDIDO — YORDA ENVÍOS*", waTipo:"Tipo",
     waTotal:"💰 Total a pagar", waBenefRecibe:"🇨🇺 Beneficiario recibe",
   },
@@ -857,13 +867,14 @@ const T = {
     plazoRestoTxt:"⏱️ As entregas nas províncias podem demorar até 48 horas, conforme demanda e disponibilidade.",
     plazoConfirmarTxt:"O prazo começa a contar após confirmarmos a disponibilidade da entrega.",
     errRequerido:"Este campo é obrigatório.", errTelefono:"Digite um telefone válido (mínimo 8 dígitos).",
-    errTarjeta:"Digite um número de cartão ou conta válido.",
+    errTarjeta:"Deve ter exatamente 16 dígitos.",
     opCupTransf:"Transferência CUP", opUsdTransf:"Transferência USD", opMlcTransf:"Transferência MLC",
     opCupEfe:"CUP em dinheiro", opUsdEfe:"USD em dinheiro",
     rEnvias:"Você envia", rRecibe:"Recebe", rTasa:"Taxa aplicada", rBeneficiario:"Beneficiário", rTelefono:"Telefone",
     rProvincia:"Província", rMunicipio:"Município", rDireccion:"Endereço", rReferencia:"Referência",
     rTarjeta:"Cartão/conta", rBanco:"Banco", rEntrega:"Entrega", rCostoOp:"Custo da operação",
     rCostoEntrega:"Custo de entrega", rTotal:"TOTAL A PAGAR",
+    rEnvias2:"Custo da operação", rCostoEntrega2:"🚚 Custo de entrega", rTotal2:"Total a pagar",
     waTituloEfe:"🇨🇺 *NOVO PEDIDO — YORDA ENVÍOS*", waTipo:"Tipo",
     waTotal:"💰 Total a pagar", waBenefRecibe:"🇨🇺 Beneficiário recebe",
   }
@@ -1075,6 +1086,7 @@ function calcular(){
 
   if(!tasas || !v || v<=0){
     $("resPaga").textContent = "—"; $("resRecibe").textContent = "—"; $("resTasa").textContent = "";
+    $("resEntrega").style.display = "none";
     setWa(t().waGen); return;
   }
 
@@ -1119,19 +1131,35 @@ function calcular(){
   }
 
   $("btnContinuar").disabled = false;
-  $("resPaga").textContent   = resumen.paga;
   $("resRecibe").textContent = resumen.recibe;
   $("resTasa").innerHTML     = resumen.tasaTxt;
   const rr = $("resRecibe");
   rr.classList.remove("flash"); void rr.offsetWidth; rr.classList.add("flash");
   setWa(resumen.waMsg);
   guardarHist();
+
+  // Vista previa de la tarifa de entrega y el total (solo entrega en efectivo) —
+  // el cliente ve el TOTAL real desde el paso 1, sin sorpresas en la revisión.
+  const esEntregaPreview = resumen.tipo === "cup_efectivo" || resumen.tipo === "usd_efectivo";
+  if(esEntregaPreview){
+    const fee = Number(tarifaEntrega) || 0;
+    const total = resumen.montoPaga + fee;
+    $("resPaga").textContent         = `R$ ${fmt(total)}`;
+    $("resEntregaOp").textContent    = `R$ ${fmt(resumen.montoPaga)}`;
+    $("resEntregaFee").textContent   = fee > 0 ? `R$ ${fmt(fee)}` : (lang==="pt" ? "Grátis" : "Gratis");
+    $("resEntregaTotal").textContent = `R$ ${fmt(total)}`;
+    $("resEntrega").style.display = "block";
+  } else {
+    $("resPaga").textContent = resumen.paga;
+    $("resEntrega").style.display = "none";
+  }
 }
 
 function mostrarNoDisp(){
   $("resPaga").textContent = "—";
   $("resRecibe").textContent = "—";
   $("resTasa").textContent = t().noDisp;
+  $("resEntrega").style.display = "none";
   setWa(t().waGen);
 }
 
@@ -1255,7 +1283,7 @@ function renderDatosForm(){
     html += `
     <div class="campo-form" id="fTarjeta">
       <label>${t().lblTarjeta} <span class="req">*</span></label>
-      <input type="text" id="inTarjeta" inputmode="numeric" value="${pedido.datos.tarjeta||""}" placeholder="16 dígitos">
+      <input type="text" id="inTarjeta" inputmode="numeric" maxlength="16" value="${pedido.datos.tarjeta||""}" placeholder="16 dígitos">
       <div class="err">${t().errTarjeta}</div>
     </div>
     <div class="sep-form">${t().sepOpcionales}</div>
@@ -1303,6 +1331,13 @@ function renderDatosForm(){
   $("datosForm").innerHTML = html;
   $("btnCambiarMonto").addEventListener("click", ()=> goToPaso(1));
 
+  if(!esEfectivo){
+    const inTarjeta = $("inTarjeta");
+    inTarjeta.addEventListener("input", ()=>{
+      inTarjeta.value = soloDigitos(inTarjeta.value).slice(0, 16);
+    });
+  }
+
   if(esEfectivo){
     const selProv = $("inProvincia"), selMun = $("inMunicipio");
     function poblarMunicipios(nombreProv){
@@ -1326,7 +1361,7 @@ function validarDatos(){
   let ok = true;
   if(pedido.metodo === "transferencia"){
     const tarjeta = $("inTarjeta").value.trim();
-    const tarjetaValida = soloDigitos(tarjeta).length >= 10;
+    const tarjetaValida = soloDigitos(tarjeta).length === 16;
     marcarInvalido("fTarjeta", !tarjetaValida); if(!tarjetaValida) ok = false;
     pedido.datos = {
       tarjeta, nombreBenef: $("inNombre").value.trim(), telefono: $("inTelefono").value.trim(),
