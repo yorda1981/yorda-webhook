@@ -358,9 +358,13 @@ app.post("/admin/completar-operacion/:id", adminLimiter, verificarToken, async (
         const operacion = await completarOperacion(req.params.id);
         if (!operacion) return res.status(404).json({ success: false, error: "Operación no encontrada" });
         try {
+            const esEntrega = operacion.tipo === "cup_efectivo" || operacion.tipo === "usd_efectivo";
+            const msg = esEntrega
+                ? "🎉 ¡Tu entrega fue completada con éxito! Gracias por preferir nuestros servicios. 🇨🇺💜"
+                : "🎉 ¡Tu transferencia fue completada con éxito! Gracias por preferir nuestros servicios. 🇨🇺💜";
             await axios.post(
                 `https://api.z-api.io/instances/${process.env.ZAPI_INSTANCE}/token/${process.env.ZAPI_TOKEN}/send-text`,
-                { phone: operacion.phone, message: `🎉 ¡Operación completada! Gracias por preferir nuestros servicios. 🇨🇺💜` },
+                { phone: operacion.phone, message: msg },
                 { headers: { "Client-Token": process.env.ZAPI_CLIENT_TOKEN } }
             );
         } catch (err) {
