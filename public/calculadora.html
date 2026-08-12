@@ -14,6 +14,7 @@
 <link rel="icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCIgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0Ij4KICA8ZGVmcz4KICAgIDxsaW5lYXJHcmFkaWVudCBpZD0iZyIgeDE9IjAiIHkxPSIwIiB4Mj0iMSIgeTI9IjEiPgogICAgICA8c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiM4QjZDRkYiLz4KICAgICAgPHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjNUIzREY1Ii8+CiAgICA8L2xpbmVhckdyYWRpZW50PgogIDwvZGVmcz4KICA8Y2lyY2xlIGN4PSIzMiIgY3k9IjMyIiByPSIzMCIgZmlsbD0idXJsKCNnKSIvPgogIDxwYXRoIGQ9Ik0xNCAzMiBMNTAgMTggTDQwIDQ4IEwzMiAzOCBMMjYgNDQgTDI2IDM1IFoiIGZpbGw9IiNGRkZGRkYiLz4KICA8cGF0aCBkPSJNMzIgMzggTDUwIDE4IEwyNiAzNSBMMjYgNDQgWiIgZmlsbD0iI0Q5Q0VGRiIvPgo8L3N2Zz4K" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
 /* ═══════════════════════════════════════════
    Calculadora Yorda v2.0 — estilos
@@ -244,6 +245,133 @@ body{
 @keyframes flash{0%{color:var(--green)}100%{}}
 .res-num.destaque.flash{animation:flash .5s ease}
 
+/* ── sub-toggle (moneda de efectivo) ── */
+.subtoggle{display:flex;gap:8px;margin:-6px 0 16px}
+.subchip{
+  flex:1;padding:9px 0;border-radius:12px;border:1px solid var(--line);
+  background:var(--card2);color:var(--muted);font-family:inherit;
+  font-size:.82rem;font-weight:700;cursor:pointer;transition:all .15s;
+}
+.subchip.act{background:var(--accent2);border-color:var(--accent2);color:#fff}
+
+/* ── botón continuar (primario, flujo) ── */
+.btn-continuar{
+  display:block;width:100%;padding:16px;border-radius:16px;border:none;
+  background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;
+  font-family:inherit;font-size:1rem;font-weight:800;cursor:pointer;
+  margin-bottom:10px;transition:transform .1s;
+}
+.btn-continuar:active{transform:scale(.98)}
+.btn-continuar:disabled{opacity:.4;cursor:not-allowed}
+.wa-secundario{
+  display:flex;align-items:center;justify-content:center;gap:8px;
+  padding:10px;border-radius:12px;text-decoration:none;color:var(--muted);
+  font-size:.82rem;font-weight:700;border:1px dashed var(--line);
+}
+
+/* ── progreso de pasos ── */
+.progreso{display:flex;justify-content:space-between;gap:6px}
+.pstep{
+  flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;
+  font-size:.7rem;color:var(--muted);font-weight:800;text-align:center;position:relative;
+}
+.pstep .num{
+  width:28px;height:28px;border-radius:50%;background:var(--card2);border:1px solid var(--line);
+  display:flex;align-items:center;justify-content:center;font-size:.82rem;color:var(--muted);
+}
+.pstep.act .num{background:var(--accent);border-color:var(--accent);color:#fff}
+.pstep.done .num{background:var(--green);border-color:var(--green);color:#0A0B14}
+.pstep.act span.lbl,.pstep.done span.lbl{color:var(--text)}
+
+/* ── formularios de datos ── */
+.campo-form{margin-bottom:14px}
+.campo-form label{display:block;font-size:.82rem;color:var(--muted);font-weight:700;margin-bottom:7px}
+.campo-form .req{color:var(--gold)}
+.campo-form input[type=text],.campo-form input[type=tel],.campo-form select,.campo-form textarea{
+  width:100%;background:var(--card2);border:1px solid var(--line);border-radius:14px;
+  padding:13px 14px;color:var(--text);font-family:inherit;font-size:.95rem;outline:none;
+}
+.campo-form input:focus,.campo-form select:focus,.campo-form textarea:focus{border-color:var(--accent)}
+.campo-form textarea{resize:vertical;min-height:70px}
+.campo-form .valor-fijo{
+  background:var(--card2);border:1px solid var(--line);border-radius:14px;
+  padding:13px 14px;font-size:1.1rem;font-weight:800;color:var(--accent2);
+  display:flex;justify-content:space-between;align-items:center;gap:8px;
+}
+.campo-form .valor-fijo button{
+  background:none;border:none;color:var(--muted);font-family:inherit;
+  font-size:.75rem;font-weight:700;cursor:pointer;text-decoration:underline;
+}
+.campo-form .err{color:#F87171;font-size:.75rem;margin-top:6px;display:none}
+.campo-form.invalido input,.campo-form.invalido select,.campo-form.invalido textarea{border-color:#F87171}
+.campo-form.invalido .err{display:block}
+.sep-form{font-size:.72rem;color:var(--accent2);font-weight:800;text-transform:uppercase;letter-spacing:.05em;margin:18px 0 10px}
+.sep-form:first-child{margin-top:0}
+
+/* ── avisos ── */
+.aviso{
+  border-radius:14px;padding:12px 14px;font-size:.82rem;font-weight:700;margin-bottom:14px;
+  display:flex;gap:10px;align-items:flex-start;line-height:1.4;
+}
+.aviso.ok{background:rgba(52,211,153,.1);border:1px solid rgba(52,211,153,.35);color:var(--green)}
+.aviso.warn{background:rgba(242,194,75,.1);border:1px solid rgba(242,194,75,.35);color:var(--gold)}
+.aviso.info{background:rgba(124,92,255,.1);border:1px solid rgba(124,92,255,.35);color:var(--accent2)}
+.aviso b{color:inherit}
+.aviso .txt{color:var(--text);font-weight:600}
+
+/* ── botones de paso ── */
+.paso-botones{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:18px}
+.paso-botones.solo1{grid-template-columns:1fr}
+.btn-primario,.btn-secundario{
+  padding:14px;border-radius:14px;font-family:inherit;font-size:.9rem;font-weight:800;cursor:pointer;
+}
+.btn-primario{background:var(--accent);border:none;color:#fff}
+.btn-primario:disabled{opacity:.4;cursor:not-allowed}
+.btn-secundario{background:var(--card2);border:1px solid var(--line);color:var(--muted)}
+
+/* ── resumen ── */
+.resumen-lista{display:flex;flex-direction:column;gap:2px;margin-bottom:6px}
+.resumen-fila{display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid var(--line);font-size:.88rem}
+.resumen-fila:last-child{border-bottom:none}
+.resumen-fila .k{color:var(--muted)}
+.resumen-fila .v{font-weight:700;text-align:right}
+.resumen-total{
+  display:flex;justify-content:space-between;align-items:center;margin-top:10px;
+  background:var(--card2);border:1px solid var(--line);border-radius:14px;padding:14px 16px;
+}
+.resumen-total .k{font-size:.85rem;color:var(--muted);font-weight:800}
+.resumen-total .v{font-size:1.35rem;font-weight:800;color:var(--accent2)}
+.check-confirmo{
+  display:flex;align-items:flex-start;gap:10px;margin:16px 0 6px;font-size:.85rem;color:var(--text);
+  cursor:pointer;line-height:1.4;
+}
+.check-confirmo input{margin-top:3px;width:18px;height:18px;flex:none}
+
+/* ── PIX ── */
+.pix-total{text-align:center;margin-bottom:16px}
+.pix-total .k{font-size:.78rem;color:var(--muted);font-weight:800;text-transform:uppercase}
+.pix-total .v{font-size:2rem;font-weight:800;color:var(--accent2)}
+.pix-qr{display:flex;justify-content:center;margin-bottom:16px;background:#fff;border-radius:16px;padding:16px}
+.pix-copia{
+  background:var(--card2);border:1px solid var(--line);border-radius:14px;
+  padding:12px 14px;font-size:.75rem;color:var(--muted);word-break:break-all;margin-bottom:12px;
+  max-height:70px;overflow:auto;
+}
+.btn-copiar-pix{
+  width:100%;padding:14px;border-radius:14px;border:none;background:var(--card2);
+  border:1px solid var(--accent);color:var(--accent2);font-family:inherit;font-weight:800;
+  cursor:pointer;margin-bottom:12px;
+}
+.btn-wa-final{
+  display:flex;align-items:center;justify-content:center;gap:10px;width:100%;padding:16px;
+  border-radius:16px;text-decoration:none;background:linear-gradient(135deg,#25D366,#128C7E);
+  color:#fff;font-weight:800;border:none;cursor:pointer;font-family:inherit;font-size:1rem;
+}
+.btn-wa-final:disabled{opacity:.5;cursor:not-allowed}
+
+@media (min-width:600px){
+  .paso-botones.solo1{grid-template-columns:1fr}
+}
 </style>
 </head>
 <body>
@@ -293,6 +421,11 @@ body{
           <button class="pill" data-m="efe" id="pillEfe">Efectivo</button>
         </div>
 
+        <div class="subtoggle" id="efeSub" style="display:none">
+          <button class="subchip act" data-c="cup" id="subCup">CUP</button>
+          <button class="subchip" data-c="usd" id="subUsd">USD</button>
+        </div>
+
         <label class="campo-label" id="lblMonto" data-i="cuanto">¿Cuánto quieres enviar?</label>
         <div class="campo">
           <span class="prefijo" id="prefijo">R$</span>
@@ -325,9 +458,10 @@ body{
           <div class="ben"><span>⚡</span><div><b data-i="benPagos">Pagos seguros</b><i data-i="benRapidos">y rápidos</i></div></div>
         </div>
 
-        <a class="cta" id="btnWa" href="#" target="_blank" rel="noopener">
-          <span class="cta-ico">💬</span>
-          <span><b data-i="ctaTitulo">Quiero hacer este envío</b><i data-i="ctaSub">Te atendemos por WhatsApp</i></span>
+        <button class="btn-continuar" id="btnContinuar" data-i="continuar" disabled>Continuar con este envío</button>
+
+        <a class="wa-secundario" id="btnWa" href="#" target="_blank" rel="noopener">
+          💬 <span data-i="ctaSub2">o escríbenos directo por WhatsApp</span>
         </a>
 
         <div class="acciones">
@@ -366,6 +500,65 @@ body{
       </section>
 
     </aside>
+  </div>
+
+  <!-- ═══════ FLUJO DE SOLICITUD (pasos 2-4) ═══════ -->
+  <div id="flujo" style="display:none">
+
+    <section class="panel" id="progresoPanel">
+      <div class="progreso" id="progreso">
+        <div class="pstep act" data-p="1"><span class="num">1</span><span class="lbl" data-i="pCalcular">Calcular</span></div>
+        <div class="pstep" data-p="2"><span class="num">2</span><span class="lbl" data-i="pDatos">Datos</span></div>
+        <div class="pstep" data-p="3"><span class="num">3</span><span class="lbl" data-i="pRevisar">Revisar</span></div>
+        <div class="pstep" data-p="4"><span class="num">4</span><span class="lbl" data-i="pPagar">Pagar</span></div>
+      </div>
+    </section>
+
+    <!-- ── PASO 2: DATOS ── -->
+    <section class="panel" id="pasoDatosPanel" style="display:none">
+      <div class="panel-titulo"><span class="ico">📝</span> <span data-i="datosTitulo">Datos del envío</span></div>
+      <div id="datosForm"></div>
+      <div class="paso-botones">
+        <button class="btn-secundario" id="btnDatosVolver" data-i="volver">← Volver</button>
+        <button class="btn-primario" id="btnDatosContinuar" data-i="continuarRevisar">Continuar</button>
+      </div>
+    </section>
+
+    <!-- ── PASO 3: REVISAR ── -->
+    <section class="panel" id="pasoRevisarPanel" style="display:none">
+      <div class="panel-titulo"><span class="ico">🧾</span> <span data-i="revisarTitulo">Revisa tu envío</span></div>
+      <div id="revisarContenido"></div>
+      <label class="check-confirmo">
+        <input type="checkbox" id="chkConfirmo">
+        <span data-i="chkTxt">Confirmo que revisé los datos del beneficiario y son correctos.</span>
+      </label>
+      <div class="paso-botones">
+        <button class="btn-secundario" id="btnRevisarVolver" data-i="modificar">Modificar</button>
+        <button class="btn-primario" id="btnRevisarConfirmar" disabled data-i="confirmarPagar">Confirmar y pagar</button>
+      </div>
+    </section>
+
+    <!-- ── PASO 4: PIX / WHATSAPP ── -->
+    <section class="panel" id="pasoPixPanel" style="display:none">
+      <div class="panel-titulo"><span class="ico">💳</span> <span data-i="pixTitulo">Pagar con PIX</span></div>
+      <div class="pix-total">
+        <div class="k" data-i="pixTotalTitulo">Total a pagar</div>
+        <div class="v" id="pixTotalValor">R$ 0</div>
+      </div>
+      <div class="pix-qr" id="pixQr" style="display:none"></div>
+      <div id="pixSinClave" class="aviso info" style="display:none">
+        <span>ℹ️</span><span class="txt" data-i="pixSinClaveTxt">Para completar el pago, coordina la clave PIX directamente con nosotros por WhatsApp.</span>
+      </div>
+      <div id="pixConClave" style="display:none">
+        <div class="pix-copia" id="pixCopiaTexto"></div>
+        <button class="btn-copiar-pix" id="btnCopiarPix" data-i="copiarPix">📋 Copiar código PIX</button>
+      </div>
+      <button class="btn-wa-final" id="btnWaFinal" data-i="enviarPedido">💬 Enviar pedido por WhatsApp</button>
+      <div class="paso-botones solo1" style="margin-top:10px">
+        <button class="btn-secundario" id="btnNuevoEnvio" data-i="nuevoEnvio">Hacer otro envío</button>
+      </div>
+    </section>
+
   </div>
 
   <footer class="pie">
@@ -429,6 +622,39 @@ const T = {
     waGen:"Hola! Quiero hacer un envío a Cuba 🇨🇺",
     copiado:"Copiado ✅",
     hace:m=>m<1?"Hace un momento":m<60?`Hace ${Math.floor(m)} min`:`Hace ${Math.floor(m/60)} h`,
+    cuantoEfeUsd:"¿Cuántos USD quieres que reciba en efectivo?",
+    waEfeUsd:v=>`Hola! Quiero enviar USD${v} para entrega en efectivo`,
+    continuar:"Continuar con este envío", ctaSub2:"o escríbenos directo por WhatsApp",
+    pCalcular:"Calcular", pDatos:"Datos", pRevisar:"Revisar", pPagar:"Pagar",
+    datosTitulo:"Datos del envío", volver:"← Volver", continuarRevisar:"Continuar",
+    revisarTitulo:"Revisa tu envío", chkTxt:"Confirmo que revisé los datos del beneficiario y son correctos.",
+    modificar:"Modificar", confirmarPagar:"Confirmar y pagar",
+    pixTitulo:"Pagar con PIX", pixTotalTitulo:"Total a pagar",
+    pixSinClaveTxt:"Para completar el pago, coordina la clave PIX directamente con nosotros por WhatsApp.",
+    copiarPix:"📋 Copiar código PIX", enviarPedido:"💬 Enviar pedido por WhatsApp", nuevoEnvio:"Hacer otro envío",
+    lblTarjeta:"Número de tarjeta o cuenta destino", lblValorRecibe:"Valor a recibir", lblCambiar:"Cambiar monto",
+    lblNombreBenef:"Nombre del beneficiario (opcional)", lblTelefono:"Teléfono (opcional)",
+    lblBanco:"Banco (opcional)", lblObservaciones:"Observaciones (opcional)",
+    lblNombreCompleto:"Nombre y apellidos de quien recibe", lblTelefonoReq:"Teléfono",
+    lblProvincia:"Provincia", lblMunicipio:"Municipio", lblDireccion:"Dirección completa",
+    lblReferencia:"Referencia de la dirección (opcional)", lblTelefonoAlt:"Teléfono alternativo (opcional)",
+    optProvincia:"Selecciona una provincia", optMunicipio:"Selecciona un municipio",
+    sepObligatorios:"Datos obligatorios", sepOpcionales:"Datos opcionales",
+    entregaDisponible:"✅ Entrega disponible", entregaConfirmar:"⚠️ Disponibilidad por confirmar",
+    entregaConfirmarTxt:"Para entregas fuera del municipio cabecera, confirmaremos disponibilidad por WhatsApp.",
+    plazoHabanaTxt:"⏱️ Las entregas en La Habana pueden demorar hasta 24 horas, según la demanda y disponibilidad.",
+    plazoRestoTxt:"⏱️ Las entregas en provincias pueden demorar hasta 48 horas, según la demanda y disponibilidad.",
+    plazoConfirmarTxt:"El plazo comienza a contar después de confirmar la disponibilidad de la entrega.",
+    errRequerido:"Este campo es obligatorio.", errTelefono:"Ingresa un teléfono válido (mínimo 8 dígitos).",
+    errTarjeta:"Ingresa un número de tarjeta o cuenta válido.",
+    opCupTransf:"Transferencia CUP", opUsdTransf:"Transferencia USD", opMlcTransf:"Transferencia MLC",
+    opCupEfe:"CUP en efectivo", opUsdEfe:"USD en efectivo",
+    rEnvias:"Envías", rRecibe:"Recibe", rTasa:"Tasa aplicada", rBeneficiario:"Beneficiario", rTelefono:"Teléfono",
+    rProvincia:"Provincia", rMunicipio:"Municipio", rDireccion:"Dirección", rReferencia:"Referencia",
+    rTarjeta:"Tarjeta/cuenta", rBanco:"Banco", rEntrega:"Entrega", rCostoOp:"Costo de la operación",
+    rCostoEntrega:"Costo de entrega", rTotal:"TOTAL A PAGAR",
+    waTituloEfe:"🇨🇺 *NUEVO PEDIDO — YORDA ENVÍOS*", waTipo:"Tipo",
+    waTotal:"💰 Total a pagar", waBenefRecibe:"🇨🇺 Beneficiario recibe",
   },
   pt: {
     tasasTitulo:"Taxas da Yorda", hoy:"(Hoje)",
@@ -469,11 +695,46 @@ const T = {
     waGen:"Olá! Quero fazer um envio para Cuba 🇨🇺",
     copiado:"Copiado ✅",
     hace:m=>m<1?"Agora mesmo":m<60?`Há ${Math.floor(m)} min`:`Há ${Math.floor(m/60)} h`,
+    cuantoEfeUsd:"Quantos USD você quer receber em dinheiro?",
+    waEfeUsd:v=>`Olá! Quero enviar USD${v} para entrega em dinheiro`,
+    continuar:"Continuar com este envio", ctaSub2:"ou fale conosco direto pelo WhatsApp",
+    pCalcular:"Calcular", pDatos:"Dados", pRevisar:"Revisar", pPagar:"Pagar",
+    datosTitulo:"Dados do envio", volver:"← Voltar", continuarRevisar:"Continuar",
+    revisarTitulo:"Revise seu envio", chkTxt:"Confirmo que revisei os dados do beneficiário e estão corretos.",
+    modificar:"Modificar", confirmarPagar:"Confirmar e pagar",
+    pixTitulo:"Pagar com PIX", pixTotalTitulo:"Total a pagar",
+    pixSinClaveTxt:"Para concluir o pagamento, combine a chave PIX diretamente conosco pelo WhatsApp.",
+    copiarPix:"📋 Copiar código PIX", enviarPedido:"💬 Enviar pedido pelo WhatsApp", nuevoEnvio:"Fazer outro envio",
+    lblTarjeta:"Número do cartão ou conta de destino", lblValorRecibe:"Valor a receber", lblCambiar:"Alterar valor",
+    lblNombreBenef:"Nome do beneficiário (opcional)", lblTelefono:"Telefone (opcional)",
+    lblBanco:"Banco (opcional)", lblObservaciones:"Observações (opcional)",
+    lblNombreCompleto:"Nome completo de quem recebe", lblTelefonoReq:"Telefone",
+    lblProvincia:"Província", lblMunicipio:"Município", lblDireccion:"Endereço completo",
+    lblReferencia:"Referência do endereço (opcional)", lblTelefonoAlt:"Telefone alternativo (opcional)",
+    optProvincia:"Selecione uma província", optMunicipio:"Selecione um município",
+    sepObligatorios:"Dados obrigatórios", sepOpcionales:"Dados opcionais",
+    entregaDisponible:"✅ Entrega disponível", entregaConfirmar:"⚠️ Disponibilidade a confirmar",
+    entregaConfirmarTxt:"Para entregas fora do município sede, confirmaremos a disponibilidade pelo WhatsApp.",
+    plazoHabanaTxt:"⏱️ As entregas em Havana podem demorar até 24 horas, conforme demanda e disponibilidade.",
+    plazoRestoTxt:"⏱️ As entregas nas províncias podem demorar até 48 horas, conforme demanda e disponibilidade.",
+    plazoConfirmarTxt:"O prazo começa a contar após confirmarmos a disponibilidade da entrega.",
+    errRequerido:"Este campo é obrigatório.", errTelefono:"Digite um telefone válido (mínimo 8 dígitos).",
+    errTarjeta:"Digite um número de cartão ou conta válido.",
+    opCupTransf:"Transferência CUP", opUsdTransf:"Transferência USD", opMlcTransf:"Transferência MLC",
+    opCupEfe:"CUP em dinheiro", opUsdEfe:"USD em dinheiro",
+    rEnvias:"Você envia", rRecibe:"Recebe", rTasa:"Taxa aplicada", rBeneficiario:"Beneficiário", rTelefono:"Telefone",
+    rProvincia:"Província", rMunicipio:"Município", rDireccion:"Endereço", rReferencia:"Referência",
+    rTarjeta:"Cartão/conta", rBanco:"Banco", rEntrega:"Entrega", rCostoOp:"Custo da operação",
+    rCostoEntrega:"Custo de entrega", rTotal:"TOTAL A PAGAR",
+    waTituloEfe:"🇨🇺 *NOVO PEDIDO — YORDA ENVÍOS*", waTipo:"Tipo",
+    waTotal:"💰 Total a pagar", waBenefRecibe:"🇨🇺 Beneficiário recebe",
   }
 };
 
 /* ── estado ── */
 let tasas = null, modo = "brl", lang = "es", ultFetch = 0, invertido = false;
+let tarifaEntrega = 0;   // R$ — se carga desde /api/tasas (columna tarifa_entrega, configurable en el panel admin)
+let efeMoneda = "cup";   // moneda a entregar en efectivo: "cup" | "usd"
 const $ = id => document.getElementById(id);
 const t = () => T[lang];
 
@@ -486,6 +747,7 @@ const TRAMOS = [
 const CHIPS = {
   brl:[100,200,500,1000,2000],
   efe:[100,200,500,1000,2000],
+  efeUsd:[50,100,200,500,1000],
   usd:[50,100,200,500,1000],
   mlc:[50,100,200,500,1000],
 };
@@ -495,6 +757,7 @@ async function cargarTasas(){
   try{
     const r = await fetch("/api/tasas");
     tasas = await r.json();
+    tarifaEntrega = Number(tasas.tarifa_entrega || 0);
     ultFetch = Date.now();
     $("estado").classList.add("on");
     if(tasas.oferta){ $("promoTxt").textContent = tasas.oferta; $("promo").style.display = "block"; }
@@ -577,6 +840,15 @@ document.querySelectorAll(".pill").forEach(p=>{
     document.querySelectorAll(".pill").forEach(x=>x.classList.remove("act"));
     p.classList.add("act");
     modo = p.dataset.m;
+    $("efeSub").style.display = (modo==="efe") ? "flex" : "none";
+    actualizarLabels(); pintarChips(); calcular();
+  });
+});
+document.querySelectorAll(".subchip").forEach(s=>{
+  s.addEventListener("click", ()=>{
+    document.querySelectorAll(".subchip").forEach(x=>x.classList.remove("act"));
+    s.classList.add("act");
+    efeMoneda = s.dataset.c;
     actualizarLabels(); pintarChips(); calcular();
   });
 });
@@ -592,6 +864,7 @@ function actualizarLabels(){
   }
   if(modo==="brl" && invertido){ $("lblMonto").textContent = t().cuantoLlegue; $("prefijo").textContent = "CUP"; }
   else if(modo==="brl"){ $("lblMonto").textContent = t().cuanto; $("prefijo").textContent = "R$"; }
+  else if(modo==="efe" && efeMoneda==="usd"){ $("lblMonto").textContent = t().cuantoEfeUsd; $("prefijo").textContent = "USD"; }
   else if(modo==="efe"){ $("lblMonto").textContent = t().cuantoEfe; $("prefijo").textContent = "R$"; }
   else { $("lblMonto").textContent = t().cuantoTarjeta; $("prefijo").textContent = modo.toUpperCase(); }
 }
@@ -605,7 +878,8 @@ if(_bi) _bi.addEventListener("click", ()=>{
 
 /* ── chips de montos rápidos ── */
 function pintarChips(){
-  $("chips").innerHTML = CHIPS[modo].map(v=>`<button class="chip" data-v="${v}">${v.toLocaleString("pt-BR")}</button>`).join("");
+  const set = (modo==="efe" && efeMoneda==="usd") ? CHIPS.efeUsd : CHIPS[modo];
+  $("chips").innerHTML = set.map(v=>`<button class="chip" data-v="${v}">${v.toLocaleString("pt-BR")}</button>`).join("");
   document.querySelectorAll(".chip").forEach(ch=>{
     ch.addEventListener("click", ()=>{
       $("monto").value = ch.dataset.v;
@@ -628,6 +902,7 @@ function calcular(){
   const v = Number($("monto").value);
   document.querySelectorAll(".chip").forEach(ch=>ch.classList.toggle("act", Number(ch.dataset.v)===v));
   resumen = null;
+  $("btnContinuar").disabled = true;
 
   if(!tasas || !v || v<=0){
     $("resPaga").textContent = "—"; $("resRecibe").textContent = "—"; $("resTasa").textContent = "";
@@ -645,25 +920,36 @@ function calcular(){
       }
       if(!reales){ tasaUsada = Number(tasas.brl_1000||0); if(tasaUsada>0) reales = Math.ceil(v/tasaUsada); }
       if(!reales){ mostrarNoDisp(); return; }
-      resumen = { paga:`R$ ${fmt(reales)}`, recibe:`${fmt(v)} CUP`, tasaTxt:t().tasaAplicada(tasaUsada,"CUP/BRL"), waMsg:t().waInv(v) };
+      resumen = { paga:`R$ ${fmt(reales)}`, recibe:`${fmt(v)} CUP`, tasaTxt:t().tasaAplicada(tasaUsada,"CUP/BRL"), waMsg:t().waInv(v),
+        tipo:"cup_transferencia", monedaRecibe:"CUP", montoRecibe:v, montoPaga:reales, tasa:tasaUsada };
     } else {
       const tr = tramoDe(v), tasa = Number(tasas[tr.key]||0);
       const cup = Math.floor(v*tasa);
-      resumen = { paga:`R$ ${fmt(v)}`, recibe:`${fmt(cup)} CUP`, tasaTxt:t().tasaAplicada(tasa,"CUP/BRL"), waMsg:t().waBrl(v) };
+      resumen = { paga:`R$ ${fmt(v)}`, recibe:`${fmt(cup)} CUP`, tasaTxt:t().tasaAplicada(tasa,"CUP/BRL"), waMsg:t().waBrl(v),
+        tipo:"cup_transferencia", monedaRecibe:"CUP", montoRecibe:cup, montoPaga:v, tasa };
     }
+  } else if(modo==="efe" && efeMoneda==="usd"){
+    const tasa = Number(tasas.usd1)||0;
+    if(tasa<=0){ mostrarNoDisp(); return; }
+    const brl = Math.floor(v*tasa);
+    resumen = { paga:`R$ ${fmt(brl)}`, recibe:`${fmt(v)} USD ${t().efectivoTag}`, tasaTxt:t().tasaAplicada(tasa,"BRL/USD"), waMsg:t().waEfeUsd(v),
+      tipo:"usd_efectivo", monedaRecibe:"USD", montoRecibe:v, montoPaga:brl, tasa };
   } else if(modo==="efe"){
     const tasa = Number(tasas.efectivo)||0;
     if(tasa<=0){ mostrarNoDisp(); return; }
     const cup = Math.floor(v*tasa);
-    resumen = { paga:`R$ ${fmt(v)}`, recibe:`${fmt(cup)} CUP ${t().efectivoTag}`, tasaTxt:t().tasaAplicada(tasa,"CUP/BRL"), waMsg:t().waEfe(v) };
+    resumen = { paga:`R$ ${fmt(v)}`, recibe:`${fmt(cup)} CUP ${t().efectivoTag}`, tasaTxt:t().tasaAplicada(tasa,"CUP/BRL"), waMsg:t().waEfe(v),
+      tipo:"cup_efectivo", monedaRecibe:"CUP", montoRecibe:cup, montoPaga:v, tasa };
   } else {
     const m = modo.toUpperCase();
     const tasa = Number(modo==="usd" ? tasas.usd1 : tasas.mlc) || 0;
     if(tasa<=0){ mostrarNoDisp(); return; }
     const brl = Math.floor(v*tasa);
-    resumen = { paga:`R$ ${fmt(brl)}`, recibe:`${fmt(v)} ${m}`, tasaTxt:t().tasaAplicada(tasa,`BRL/${m}`), waMsg:t().waUsd(v,m) };
+    resumen = { paga:`R$ ${fmt(brl)}`, recibe:`${fmt(v)} ${m}`, tasaTxt:t().tasaAplicada(tasa,`BRL/${m}`), waMsg:t().waUsd(v,m),
+      tipo:`${modo}_transferencia`, monedaRecibe:m, montoRecibe:v, montoPaga:brl, tasa };
   }
 
+  $("btnContinuar").disabled = false;
   $("resPaga").textContent   = resumen.paga;
   $("resRecibe").textContent = resumen.recibe;
   $("resTasa").innerHTML     = resumen.tasaTxt;
@@ -724,6 +1010,383 @@ $("btnShare").addEventListener("click", async ()=>{
   const data = { title:"Yorda Envíos 🇧🇷→🇨🇺", text:"Calcula tu envío a Cuba al instante:", url:location.href };
   if(navigator.share){ try{ await navigator.share(data); }catch{} }
   else { try{ await navigator.clipboard.writeText(location.href); alert(t().copiado); }catch{ prompt("Link:", location.href); } }
+});
+
+/* ═══════════════════════════════════════════
+   FLUJO DE SOLICITUD — Calcular → Datos → Revisar → Pagar
+   ═══════════════════════════════════════════ */
+
+// Provincias de Cuba + municipio cabecera (entrega directa) + zona (plazo de entrega)
+const PROVINCIAS = [
+  { nombre:"Pinar del Río", cabecera:"Pinar del Río", zona:"resto", municipios:["Consolación del Sur","Guane","La Palma","Los Palacios","Mantua","Minas de Matahambre","Pinar del Río","San Juan y Martínez","San Luis","Sandino","Viñales"] },
+  { nombre:"Artemisa", cabecera:"Artemisa", zona:"resto", municipios:["Alquízar","Artemisa","Bahía Honda","Bauta","Caimito","Candelaria","Guanajay","Güira de Melena","Mariel","San Antonio de los Baños","San Cristóbal"] },
+  { nombre:"La Habana", cabecera:"Plaza de la Revolución", zona:"habana", municipios:["Arroyo Naranjo","Boyeros","Centro Habana","Cerro","Cotorro","Diez de Octubre","Guanabacoa","Habana del Este","Habana Vieja","La Lisa","Marianao","Playa","Plaza de la Revolución","Regla","San Miguel del Padrón"] },
+  { nombre:"Mayabeque", cabecera:"San José de las Lajas", zona:"resto", municipios:["Batabanó","Bejucal","Güines","Jaruco","Madruga","Melena del Sur","Nueva Paz","Quivicán","San José de las Lajas","San Nicolás","Santa Cruz del Norte"] },
+  { nombre:"Matanzas", cabecera:"Matanzas", zona:"resto", municipios:["Calimete","Cárdenas","Ciénaga de Zapata","Colón","Jagüey Grande","Jovellanos","Limonar","Los Arabos","Martí","Matanzas","Pedro Betancourt","Perico","Unión de Reyes"] },
+  { nombre:"Villa Clara", cabecera:"Santa Clara", zona:"resto", municipios:["Caibarién","Camajuaní","Cifuentes","Corralillo","Encrucijada","Manicaragua","Placetas","Quemado de Güines","Ranchuelo","Remedios","Sagua la Grande","Santa Clara","Santo Domingo"] },
+  { nombre:"Cienfuegos", cabecera:"Cienfuegos", zona:"resto", municipios:["Abreus","Aguada de Pasajeros","Camarones","Cienfuegos","Cruces","Cumanayagua","Lajas","Palmira","Rodas"] },
+  { nombre:"Sancti Spíritus", cabecera:"Sancti Spíritus", zona:"resto", municipios:["Cabaiguán","Fomento","Jatibonico","La Sierpe","Sancti Spíritus","Taguasco","Trinidad","Yaguajay"] },
+  { nombre:"Ciego de Ávila", cabecera:"Ciego de Ávila", zona:"resto", municipios:["Baraguá","Bolivia","Chambas","Ciego de Ávila","Ciro Redondo","Florencia","Majagua","Morón","Primero de Enero","Venezuela"] },
+  { nombre:"Camagüey", cabecera:"Camagüey", zona:"resto", municipios:["Camagüey","Carlos Manuel de Céspedes","Esmeralda","Florida","Guáimaro","Jimaguayú","Minas","Najasa","Nuevitas","Santa Cruz del Sur","Sibanicú","Sierra de Cubitas","Vertientes"] },
+  { nombre:"Las Tunas", cabecera:"Las Tunas", zona:"resto", municipios:["Amancio","Colombia","Jesús Menéndez","Jobabo","Las Tunas","Majibacoa","Manatí","Puerto Padre"] },
+  { nombre:"Holguín", cabecera:"Holguín", zona:"resto", municipios:["Antilla","Báguano","Banes","Cacocum","Calixto García","Cueto","Frank País","Gibara","Holguín","Mayarí","Moa","Rafael Freyre","Sagua de Tánamo","Urbano Noris"] },
+  { nombre:"Granma", cabecera:"Bayamo", zona:"resto", municipios:["Bartolomé Masó","Bayamo","Buey Arriba","Campechuela","Cauto Cristo","Guisa","Jiguaní","Manzanillo","Media Luna","Niquero","Pilón","Río Cauto","Yara"] },
+  { nombre:"Santiago de Cuba", cabecera:"Santiago de Cuba", zona:"resto", municipios:["Contramaestre","Guamá","Mella","Palma Soriano","San Luis","Santiago de Cuba","Segundo Frente","Songo-La Maya","Tercer Frente"] },
+  { nombre:"Guantánamo", cabecera:"Guantánamo", zona:"resto", municipios:["Baracoa","Caimanera","El Salvador","Guantánamo","Imías","Maisí","Manuel Tames","Niceto Pérez","San Antonio del Sur","Yateras"] },
+  { nombre:"Isla de la Juventud", cabecera:"Isla de la Juventud", zona:"resto", municipios:["Isla de la Juventud"] },
+];
+
+let pedido = null, paso = 1;
+
+/* ── navegación entre pasos ── */
+function goToPaso(n){
+  paso = n;
+  const enFlujo = n > 1;
+  document.querySelector(".grid").style.display = enFlujo ? "none" : "";
+  document.querySelector(".tasas-panel").style.display = enFlujo ? "none" : "";
+  $("ticker").style.display = enFlujo ? "none" : (tasas ? "block" : "none");
+  $("flujo").style.display = enFlujo ? "block" : "none";
+  $("pasoDatosPanel").style.display    = n===2 ? "block" : "none";
+  $("pasoRevisarPanel").style.display  = n===3 ? "block" : "none";
+  $("pasoPixPanel").style.display      = n===4 ? "block" : "none";
+  document.querySelectorAll("#progreso .pstep").forEach(el=>{
+    const p = Number(el.dataset.p);
+    el.classList.toggle("act", p===n);
+    el.classList.toggle("done", p<n);
+  });
+  if(n===2) renderDatosForm();
+  if(n===3) renderRevisar();
+  if(n===4) renderPix();
+  window.scrollTo({ top:0, behavior:"smooth" });
+}
+
+$("btnContinuar").addEventListener("click", ()=>{
+  if(!resumen) return;
+  pedido = {
+    tipo: resumen.tipo, monedaRecibe: resumen.monedaRecibe, montoRecibe: resumen.montoRecibe,
+    costoOperacion: resumen.montoPaga, tasa: resumen.tasa,
+    metodo: resumen.tipo.endsWith("_efectivo") ? "efectivo" : "transferencia",
+    datos: {}, entregaDisponible: null, zona: null, plazoTxt: "", costoEntrega: 0, total: 0
+  };
+  goToPaso(2);
+});
+
+/* ── PASO 2: datos ── */
+function calcularEntrega(nombreProv, nombreMun){
+  const prov = PROVINCIAS.find(p=>p.nombre===nombreProv);
+  if(!prov) return null;
+  const disponible = prov.cabecera === nombreMun;
+  const plazoTxt = prov.zona === "habana" ? t().plazoHabanaTxt : t().plazoRestoTxt;
+  return { disponible, zona: prov.zona, plazoTxt };
+}
+
+function pintarAvisoEntrega(nombreProv, nombreMun, targetId){
+  const el = $(targetId);
+  const info = calcularEntrega(nombreProv, nombreMun);
+  if(!info || !nombreMun){ el.innerHTML = ""; return; }
+  el.innerHTML = info.disponible
+    ? `<div class="aviso ok"><span>✅</span><div><b>${t().entregaDisponible}</b><div class="txt">${info.plazoTxt}</div></div></div>`
+    : `<div class="aviso warn"><span>⚠️</span><div><b>${t().entregaConfirmar}</b><div class="txt">${t().entregaConfirmarTxt}</div><div class="txt">${info.plazoTxt} ${t().plazoConfirmarTxt}</div></div></div>`;
+}
+
+function renderDatosForm(){
+  const esEfectivo = pedido.metodo === "efectivo";
+  const montoTxt = `${fmt(pedido.montoRecibe)} ${pedido.monedaRecibe}`;
+
+  let html = `
+    <div class="sep-form">${t().sepObligatorios}</div>
+    <div class="campo-form">
+      <label>${t().lblValorRecibe}</label>
+      <div class="valor-fijo"><span>${montoTxt}</span><button type="button" id="btnCambiarMonto">${t().lblCambiar}</button></div>
+    </div>`;
+
+  if(!esEfectivo){
+    html += `
+    <div class="campo-form" id="fTarjeta">
+      <label>${t().lblTarjeta} <span class="req">*</span></label>
+      <input type="text" id="inTarjeta" inputmode="numeric" value="${pedido.datos.tarjeta||""}" placeholder="16 dígitos">
+      <div class="err">${t().errTarjeta}</div>
+    </div>
+    <div class="sep-form">${t().sepOpcionales}</div>
+    <div class="campo-form"><label>${t().lblNombreBenef}</label><input type="text" id="inNombre" value="${pedido.datos.nombreBenef||""}"></div>
+    <div class="campo-form"><label>${t().lblTelefono}</label><input type="tel" id="inTelefono" value="${pedido.datos.telefono||""}"></div>
+    <div class="campo-form"><label>${t().lblBanco}</label><input type="text" id="inBanco" value="${pedido.datos.banco||""}"></div>
+    <div class="campo-form"><label>${t().lblObservaciones}</label><textarea id="inObs">${pedido.datos.observaciones||""}</textarea></div>`;
+  } else {
+    html += `
+    <div class="campo-form" id="fNombre">
+      <label>${t().lblNombreCompleto} <span class="req">*</span></label>
+      <input type="text" id="inNombreCompleto" value="${pedido.datos.nombreCompleto||""}">
+      <div class="err">${t().errRequerido}</div>
+    </div>
+    <div class="campo-form" id="fTelefonoReq">
+      <label>${t().lblTelefonoReq} <span class="req">*</span></label>
+      <input type="tel" id="inTelefonoReq" value="${pedido.datos.telefono||""}" placeholder="+53 5xxxxxxx">
+      <div class="err">${t().errTelefono}</div>
+    </div>
+    <div class="campo-form" id="fProvincia">
+      <label>${t().lblProvincia} <span class="req">*</span></label>
+      <select id="inProvincia">
+        <option value="">${t().optProvincia}</option>
+        ${PROVINCIAS.map(p=>`<option value="${p.nombre}" ${pedido.datos.provincia===p.nombre?"selected":""}>${p.nombre}</option>`).join("")}
+      </select>
+      <div class="err">${t().errRequerido}</div>
+    </div>
+    <div class="campo-form" id="fMunicipio">
+      <label>${t().lblMunicipio} <span class="req">*</span></label>
+      <select id="inMunicipio" ${pedido.datos.provincia?"":"disabled"}></select>
+      <div class="err">${t().errRequerido}</div>
+    </div>
+    <div id="avisoEntregaDatos"></div>
+    <div class="campo-form" id="fDireccion">
+      <label>${t().lblDireccion} <span class="req">*</span></label>
+      <textarea id="inDireccion">${pedido.datos.direccion||""}</textarea>
+      <div class="err">${t().errRequerido}</div>
+    </div>
+    <div class="sep-form">${t().sepOpcionales}</div>
+    <div class="campo-form"><label>${t().lblReferencia}</label><input type="text" id="inReferencia" value="${pedido.datos.referencia||""}" placeholder="Ej: Casa azul frente a la farmacia"></div>
+    <div class="campo-form"><label>${t().lblTelefonoAlt}</label><input type="tel" id="inTelefonoAlt" value="${pedido.datos.telefonoAlt||""}"></div>
+    <div class="campo-form"><label>${t().lblObservaciones}</label><textarea id="inObsEfe">${pedido.datos.observaciones||""}</textarea></div>`;
+  }
+
+  $("datosForm").innerHTML = html;
+  $("btnCambiarMonto").addEventListener("click", ()=> goToPaso(1));
+
+  if(esEfectivo){
+    const selProv = $("inProvincia"), selMun = $("inMunicipio");
+    function poblarMunicipios(nombreProv){
+      const prov = PROVINCIAS.find(p=>p.nombre===nombreProv);
+      selMun.innerHTML = `<option value="">${t().optMunicipio}</option>` + (prov ? prov.municipios.map(m=>`<option value="${m}">${m}</option>`).join("") : "");
+      selMun.disabled = !prov;
+    }
+    selProv.addEventListener("change", ()=>{ poblarMunicipios(selProv.value); $("avisoEntregaDatos").innerHTML = ""; });
+    selMun.addEventListener("change", ()=> pintarAvisoEntrega(selProv.value, selMun.value, "avisoEntregaDatos"));
+    if(pedido.datos.provincia){
+      poblarMunicipios(pedido.datos.provincia);
+      if(pedido.datos.municipio){ selMun.value = pedido.datos.municipio; pintarAvisoEntrega(selProv.value, selMun.value, "avisoEntregaDatos"); }
+    }
+  }
+}
+
+function soloDigitos(s){ return (s||"").replace(/\D/g,""); }
+function marcarInvalido(id, invalido){ const el = document.getElementById(id); if(el) el.classList.toggle("invalido", invalido); }
+
+function validarDatos(){
+  let ok = true;
+  if(pedido.metodo === "transferencia"){
+    const tarjeta = $("inTarjeta").value.trim();
+    const tarjetaValida = soloDigitos(tarjeta).length >= 10;
+    marcarInvalido("fTarjeta", !tarjetaValida); if(!tarjetaValida) ok = false;
+    pedido.datos = {
+      tarjeta, nombreBenef: $("inNombre").value.trim(), telefono: $("inTelefono").value.trim(),
+      banco: $("inBanco").value.trim(), observaciones: $("inObs").value.trim()
+    };
+  } else {
+    const nombre = $("inNombreCompleto").value.trim();
+    const telefono = $("inTelefonoReq").value.trim();
+    const provincia = $("inProvincia").value;
+    const municipio = $("inMunicipio").value;
+    const direccion = $("inDireccion").value.trim();
+    const telDigitos = soloDigitos(telefono);
+
+    marcarInvalido("fNombre", !nombre); if(!nombre) ok = false;
+    marcarInvalido("fTelefonoReq", telDigitos.length < 8); if(telDigitos.length < 8) ok = false;
+    marcarInvalido("fProvincia", !provincia); if(!provincia) ok = false;
+    marcarInvalido("fMunicipio", !municipio); if(!municipio) ok = false;
+    marcarInvalido("fDireccion", !direccion); if(!direccion) ok = false;
+
+    const info = calcularEntrega(provincia, municipio);
+    pedido.datos = {
+      nombreCompleto: nombre, telefono, provincia, municipio, direccion,
+      referencia: $("inReferencia").value.trim(), telefonoAlt: $("inTelefonoAlt").value.trim(),
+      observaciones: $("inObsEfe").value.trim()
+    };
+    if(info){ pedido.entregaDisponible = info.disponible; pedido.zona = info.zona; pedido.plazoTxt = info.plazoTxt; }
+  }
+  return ok;
+}
+
+$("btnDatosVolver").addEventListener("click", ()=> goToPaso(1));
+$("btnDatosContinuar").addEventListener("click", ()=>{
+  if(!validarDatos()) return;
+  goToPaso(3);
+});
+
+/* ── PASO 3: revisar ── */
+function fila(k, v){ return `<div class="resumen-fila"><span class="k">${k}</span><span class="v">${v}</span></div>`; }
+function unidadTasa(tipo){
+  return { cup_transferencia:"CUP/BRL", cup_efectivo:"CUP/BRL", usd_transferencia:"BRL/USD", usd_efectivo:"BRL/USD", mlc_transferencia:"BRL/MLC" }[tipo] || "";
+}
+
+function renderRevisar(){
+  pedido.costoEntrega = pedido.metodo === "efectivo" ? Number(tarifaEntrega)||0 : 0;
+  pedido.total = Number(pedido.costoOperacion) + Number(pedido.costoEntrega);
+
+  const opLabel = {
+    cup_transferencia:t().opCupTransf, usd_transferencia:t().opUsdTransf, mlc_transferencia:t().opMlcTransf,
+    cup_efectivo:t().opCupEfe, usd_efectivo:t().opUsdEfe
+  }[pedido.tipo] || pedido.tipo;
+
+  let filas = [
+    fila(t().rEnvias, `R$ ${fmt(pedido.costoOperacion)}`),
+    fila(t().rRecibe, `${fmt(pedido.montoRecibe)} ${pedido.monedaRecibe}`),
+    fila(t().rTasa, `${pedido.tasa} ${unidadTasa(pedido.tipo)}`),
+  ];
+
+  if(pedido.metodo === "transferencia"){
+    filas.push(fila(t().rTarjeta, pedido.datos.tarjeta));
+    if(pedido.datos.banco)       filas.push(fila(t().rBanco, pedido.datos.banco));
+    if(pedido.datos.nombreBenef) filas.push(fila(t().rBeneficiario, pedido.datos.nombreBenef));
+    if(pedido.datos.telefono)    filas.push(fila(t().rTelefono, pedido.datos.telefono));
+  } else {
+    filas.push(fila(t().rBeneficiario, pedido.datos.nombreCompleto));
+    filas.push(fila(t().rTelefono, pedido.datos.telefono));
+    filas.push(fila(t().rProvincia, pedido.datos.provincia));
+    filas.push(fila(t().rMunicipio, pedido.datos.municipio));
+    filas.push(fila(t().rDireccion, pedido.datos.direccion));
+    if(pedido.datos.referencia) filas.push(fila(t().rReferencia, pedido.datos.referencia));
+  }
+
+  let html = `<div class="sep-form" style="margin-top:0">${opLabel}</div><div class="resumen-lista">${filas.join("")}</div>`;
+
+  if(pedido.metodo === "efectivo"){
+    html += pedido.entregaDisponible
+      ? `<div class="aviso ok"><span>✅</span><div><b>${t().entregaDisponible}</b><div class="txt">${pedido.plazoTxt}</div></div></div>`
+      : `<div class="aviso warn"><span>⚠️</span><div><b>${t().entregaConfirmar}</b><div class="txt">${t().entregaConfirmarTxt}</div><div class="txt">${pedido.plazoTxt} ${t().plazoConfirmarTxt}</div></div></div>`;
+  }
+
+  html += `<div class="resumen-lista">
+    ${fila(t().rCostoOp, `R$ ${fmt(pedido.costoOperacion)}`)}
+    ${pedido.costoEntrega > 0 ? fila(t().rCostoEntrega, `R$ ${fmt(pedido.costoEntrega)}`) : ""}
+  </div>`;
+  html += `<div class="resumen-total"><span class="k">${t().rTotal}</span><span class="v">R$ ${fmt(pedido.total)}</span></div>`;
+
+  $("revisarContenido").innerHTML = html;
+  $("chkConfirmo").checked = false;
+  $("btnRevisarConfirmar").disabled = true;
+}
+
+$("chkConfirmo").addEventListener("change", ()=>{ $("btnRevisarConfirmar").disabled = !$("chkConfirmo").checked; });
+$("btnRevisarVolver").addEventListener("click", ()=> goToPaso(2));
+$("btnRevisarConfirmar").addEventListener("click", ()=>{
+  if($("btnRevisarConfirmar").disabled) return;
+  goToPaso(4);
+});
+
+/* ── PASO 4: PIX + WhatsApp ── */
+let pixInfoCache = null;
+async function obtenerPixInfo(){
+  if(pixInfoCache) return pixInfoCache;
+  try{ const r = await fetch("/api/pix-info"); pixInfoCache = await r.json(); }
+  catch{ pixInfoCache = {}; }
+  return pixInfoCache;
+}
+
+function limpiarTextoPix(s, max){
+  return (s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toUpperCase().replace(/[^A-Z0-9 ]/g,"").trim().slice(0, max) || "NA";
+}
+function tlv(id, value){ return id + String(value.length).padStart(2,"0") + value; }
+function crc16(payload){
+  let crc = 0xFFFF;
+  for(let i=0;i<payload.length;i++){
+    crc ^= (payload.charCodeAt(i) << 8);
+    for(let j=0;j<8;j++){
+      crc = (crc & 0x8000) !== 0 ? ((crc << 1) ^ 0x1021) & 0xFFFF : (crc << 1) & 0xFFFF;
+    }
+  }
+  return crc.toString(16).toUpperCase().padStart(4,"0");
+}
+function montarPayloadPix({ chave, nome, cidade, valor, txid }){
+  const gui = tlv("00","br.gov.bcb.pix");
+  const key = tlv("01", chave);
+  const mai = tlv("26", gui + key);
+  const mcc = tlv("52","0000");
+  const cur = tlv("53","986");
+  const amt = valor > 0 ? tlv("54", Number(valor).toFixed(2)) : "";
+  const country = tlv("58","BR");
+  const merchantName = tlv("59", limpiarTextoPix(nome, 25));
+  const merchantCity = tlv("60", limpiarTextoPix(cidade, 15));
+  const addData = tlv("62", tlv("05", limpiarTextoPix(txid || "***", 25)));
+  const semCRC = "000201" + mai + mcc + cur + amt + country + merchantName + merchantCity + addData + "6304";
+  return semCRC + crc16(semCRC);
+}
+
+async function renderPix(){
+  $("pixTotalValor").textContent = `R$ ${fmt(pedido.total)}`;
+  $("btnWaFinal").disabled = false;
+  const info = await obtenerPixInfo();
+
+  if(info && info.key){
+    $("pixSinClave").style.display = "none";
+    $("pixConClave").style.display = "block";
+    $("pixQr").style.display = "flex";
+    $("pixQr").innerHTML = "";
+    const txid = "YORDA" + Date.now().toString().slice(-10);
+    const payload = montarPayloadPix({ chave: info.key, nome: info.holder || "YORDA ENVIOS", cidade: "MADRE DE DEUS", valor: pedido.total, txid });
+    pedido.pixPayload = payload;
+    if(window.QRCode){ try{ new QRCode($("pixQr"), { text: payload, width:220, height:220, correctLevel: QRCode.CorrectLevel.M }); }catch{} }
+    $("pixCopiaTexto").textContent = payload;
+  } else {
+    $("pixSinClave").style.display = "flex";
+    $("pixConClave").style.display = "none";
+    $("pixQr").style.display = "none";
+  }
+}
+
+$("btnCopiarPix").addEventListener("click", async ()=>{
+  try{ await navigator.clipboard.writeText(pedido.pixPayload || ""); alert(t().copiado); }
+  catch{ prompt("Copiar:", pedido.pixPayload || ""); }
+});
+
+function construirMensajeWhatsApp(){
+  const opLabelWa = {
+    cup_transferencia: lang==="pt" ? "TRANSFERÊNCIA CUP" : "TRANSFERENCIA CUP",
+    usd_transferencia: lang==="pt" ? "TRANSFERÊNCIA USD" : "TRANSFERENCIA USD",
+    mlc_transferencia: lang==="pt" ? "TRANSFERÊNCIA MLC" : "TRANSFERENCIA MLC",
+    cup_efectivo: lang==="pt" ? "CUP EM DINHEIRO" : "CUP EN EFECTIVO",
+    usd_efectivo: lang==="pt" ? "USD EM DINHEIRO" : "USD EN EFECTIVO",
+  }[pedido.tipo] || pedido.tipo;
+
+  const l = [];
+  l.push(t().waTituloEfe, "", `${t().waTipo}: ${opLabelWa}`, "",
+    `${t().waTotal}: R$ ${fmt(pedido.total)}`, `${t().waBenefRecibe}: ${fmt(pedido.montoRecibe)} ${pedido.monedaRecibe}`, "");
+
+  if(pedido.metodo === "transferencia"){
+    l.push(`💳 ${t().rTarjeta}: ${pedido.datos.tarjeta}`);
+    if(pedido.datos.banco)       l.push(`🏦 ${t().rBanco}: ${pedido.datos.banco}`);
+    if(pedido.datos.nombreBenef) l.push(`👤 ${t().rBeneficiario}: ${pedido.datos.nombreBenef}`);
+    if(pedido.datos.telefono)    l.push(`📞 ${t().rTelefono}: ${pedido.datos.telefono}`);
+  } else {
+    l.push(`👤 ${t().rBeneficiario}: ${pedido.datos.nombreCompleto}`);
+    l.push(`📞 ${t().rTelefono}: ${pedido.datos.telefono}`);
+    l.push(`📍 ${t().rProvincia}: ${pedido.datos.provincia}`);
+    l.push(`📍 ${t().rMunicipio}: ${pedido.datos.municipio}`);
+    l.push(`🏠 ${t().rDireccion}: ${pedido.datos.direccion}`);
+    if(pedido.datos.referencia)   l.push(`📌 ${t().rReferencia}: ${pedido.datos.referencia}`);
+    if(pedido.datos.telefonoAlt)  l.push(`📞 ${t().lblTelefonoAlt}: ${pedido.datos.telefonoAlt}`);
+    l.push("");
+    l.push(`🚚 ${t().rEntrega}: ${pedido.entregaDisponible ? (lang==="pt"?"Disponível":"Disponible") : (lang==="pt"?"A confirmar":"Por confirmar")}`);
+    if(pedido.plazoTxt) l.push(pedido.plazoTxt);
+  }
+  if(pedido.datos.observaciones) l.push(`📝 ${pedido.datos.observaciones}`);
+  l.push("", `💳 ${lang==="pt"?"Pagamento":"Pago"}: PIX`);
+
+  return l.join("\n");
+}
+
+$("btnWaFinal").addEventListener("click", ()=>{
+  if(!pedido) return;
+  const msg = construirMensajeWhatsApp();
+  $("btnWaFinal").disabled = true;
+  window.open("https://wa.me/" + WHATSAPP + "?text=" + encodeURIComponent(msg), "_blank");
+  setTimeout(()=>{ $("btnWaFinal").disabled = false; }, 4000);
+});
+
+$("btnNuevoEnvio").addEventListener("click", ()=>{
+  pedido = null; resumen = null; pixInfoCache = pixInfoCache; // conserva la clave PIX en caché, descarta datos del pedido
+  $("monto").value = "";
+  calcular();
+  goToPaso(1);
 });
 
 </script>
