@@ -9,9 +9,10 @@ const pool = require("./db");
 
 const openaiService = require("./src/services/openai");
 const { obtenerTodos, obtenerCliente } = require("./src/services/customer-memory");
-const { obtenerTodas, confirmarOperacion, obtenerEstadisticas } = require("./src/services/operations");
+const { obtenerTodas, confirmarOperacion, completarOperacion, obtenerEstadisticas } = require("./src/services/operations");
 const crm = require("./src/services/crm");
 const { leerTasas } = require("./src/flows/cotizacion-flow");
+const { esPedidoWebEntrega, procesarPedidoWebEntrega } = require("./src/flows/pedido-web-flow");
 const { enviarSeguro, getAdminPhone, getPIXKey, getPIXHolder, getPIXBank, getPIXImage } = require("./src/flows/shared");
 
 const app = express();
@@ -53,6 +54,20 @@ const MINUTOS_PAUSA = 10;
         // Tarifa de entrega en efectivo (R$), configuración única — la usa la calculadora web.
         await pool.query("ALTER TABLE rates ADD COLUMN IF NOT EXISTS tarifa_entrega NUMERIC DEFAULT 0");
     } catch (e) { console.error("⚠️ Migración tarifa_entrega:", e.message); }
+    try {
+        // Datos de pedidos de entrega generados desde la calculadora web.
+        await pool.query(`
+            ALTER TABLE operations
+                ADD COLUMN IF NOT EXISTS ref_web VARCHAR(20),
+                ADD COLUMN IF NOT EXISTS direccion TEXT,
+                ADD COLUMN IF NOT EXISTS provincia VARCHAR(60),
+                ADD COLUMN IF NOT EXISTS municipio VARCHAR(60),
+                ADD COLUMN IF NOT EXISTS referencia_entrega TEXT,
+                ADD COLUMN IF NOT EXISTS telefono_entrega VARCHAR(30),
+                ADD COLUMN IF NOT EXISTS entrega_disponible BOOLEAN,
+                ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP
+        `);
+    } catch (e) { console.error("⚠️ Migración pedidos web:", e.message); }
 })();
 
 // ─────────────────────────────────────────
@@ -212,6 +227,17 @@ app.post("/webhook", webhookLimiter, async (req, res) => {
 
         if (!textMessage) return;
 
+        // Pedido de entrega generado por la calculadora web — se procesa aparte, sin pasar por GPT.
+        if (esPedidoWebEntrega(textMessage)) {
+            try {
+                const manejado = await procesarPedidoWebEntrega(phoneRaw, textMessage, pushName);
+                if (manejado) return;
+            } catch (e) {
+                console.error("❌ Error procesando pedido web:", e.message);
+            }
+            // si no se pudo interpretar (mensaje editado/incompleto), sigue el flujo normal abajo
+        }
+
         const mensajeAnterior = pendingMessages.get(phoneRaw) || "";
         pendingMessages.set(phoneRaw, mensajeAnterior ? mensajeAnterior + "\n" + textMessage : textMessage);
 
@@ -293,9 +319,32 @@ app.post("/admin/confirmar-operacion/:id", adminLimiter, verificarToken, async (
         const operacion = await confirmarOperacion(req.params.id);
         if (!operacion) return res.status(404).json({ success: false, error: "Operación no encontrada" });
         try {
+            const esEntrega = operacion.tipo === "cup_efectivo" || operacion.tipo === "usd_efectivo";
+            const notaPlazo = esEntrega
+                ? "\n\n🚚 Recuerda: la entrega puede demorar hasta 48 horas, según la demanda y disponibilidad."
+                : "";
             await axios.post(
                 `https://api.z-api.io/instances/${process.env.ZAPI_INSTANCE}/token/${process.env.ZAPI_TOKEN}/send-text`,
-                { phone: operacion.phone, message: `✅ Recibimos su pago de R$${operacion.monto}.\n\nProcederemos a realizar la transferencia a Cuba.\n\nCuando se complete le enviaremos el comprobante. 😊` },
+                { phone: operacion.phone, message: `✅ Recibimos su pago de R$${operacion.monto}.\n\nProcederemos a realizar la transferencia a Cuba.\n\nCuando se complete le enviaremos el comprobante. 😊${notaPlazo}` },
+                { headers: { "Client-Token": process.env.ZAPI_CLIENT_TOKEN } }
+            );
+        } catch (err) {
+            console.error("❌ Error enviando WhatsApp:", err.message);
+        }
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.post("/admin/completar-operacion/:id", adminLimiter, verificarToken, async (req, res) => {
+    try {
+        const operacion = await completarOperacion(req.params.id);
+        if (!operacion) return res.status(404).json({ success: false, error: "Operación no encontrada" });
+        try {
+            await axios.post(
+                `https://api.z-api.io/instances/${process.env.ZAPI_INSTANCE}/token/${process.env.ZAPI_TOKEN}/send-text`,
+                { phone: operacion.phone, message: `🎉 ¡Operación completada! Gracias por preferir nuestros servicios. 🇨🇺💜` },
                 { headers: { "Client-Token": process.env.ZAPI_CLIENT_TOKEN } }
             );
         } catch (err) {
