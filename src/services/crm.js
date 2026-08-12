@@ -355,16 +355,18 @@ async function marcarRecordatorio(phone, tipo) {
 // ESTADÍSTICAS CRM (para dashboard)
 // ─────────────────────────────────────────
 
-async function obtenerEstadisticasCRM() {
+async function obtenerEstadisticasCRM(dias) {
     try {
+        const diasNum = Number(dias);
+        const filtroFecha = (diasNum && diasNum > 0) ? `AND updated_at > NOW() - INTERVAL '${diasNum} days'` : "";
         const r = await pool.query(`
             SELECT
-                COUNT(*) FILTER (WHERE estado_crm = 'nuevo_cliente')           AS nuevos,
-                COUNT(*) FILTER (WHERE estado_crm = 'cotizado')                AS cotizados,
-                COUNT(*) FILTER (WHERE estado_crm = 'esperando_pix')           AS esperando_pix,
-                COUNT(*) FILTER (WHERE estado_crm = 'esperando_comprobante')   AS esperando_comprobante,
-                COUNT(*) FILTER (WHERE estado_crm = 'completado')              AS completados,
-                COUNT(*) FILTER (WHERE estado_crm = 'abandono')                AS abandonos,
+                COUNT(*) FILTER (WHERE estado_crm = 'nuevo_cliente' ${filtroFecha})           AS nuevos,
+                COUNT(*) FILTER (WHERE estado_crm = 'cotizado' ${filtroFecha})                AS cotizados,
+                COUNT(*) FILTER (WHERE estado_crm = 'esperando_pix' ${filtroFecha})           AS esperando_pix,
+                COUNT(*) FILTER (WHERE estado_crm = 'esperando_comprobante' ${filtroFecha})   AS esperando_comprobante,
+                COUNT(*) FILTER (WHERE estado_crm = 'completado' ${filtroFecha})              AS completados,
+                COUNT(*) FILTER (WHERE estado_crm = 'abandono' ${filtroFecha})                AS abandonos,
                 COUNT(*) FILTER (WHERE cliente_frecuente = true)               AS frecuentes,
                 COUNT(*) FILTER (
                     WHERE estado_crm = 'completado'
@@ -372,10 +374,10 @@ async function obtenerEstadisticasCRM() {
                 )                                                               AS cierres_hoy,
                 -- Conversión: completados / (cotizados + esperando_pix + completado + abandono)
                 ROUND(
-                    COUNT(*) FILTER (WHERE estado_crm = 'completado') * 100.0 /
+                    COUNT(*) FILTER (WHERE estado_crm = 'completado' ${filtroFecha}) * 100.0 /
                     NULLIF(COUNT(*) FILTER (WHERE estado_crm IN (
                         'cotizado','esperando_pix','esperando_comprobante','completado','abandono'
-                    )), 0)
+                    ) ${filtroFecha}), 0)
                 , 1) AS conversion_pct
             FROM customers
         `);
