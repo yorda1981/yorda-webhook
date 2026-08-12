@@ -336,12 +336,15 @@ app.post("/admin/confirmar-operacion/:id", adminLimiter, verificarToken, async (
         if (!operacion) return res.status(404).json({ success: false, error: "Operación no encontrada" });
         try {
             const esEntrega = operacion.tipo === "cup_efectivo" || operacion.tipo === "usd_efectivo";
+            const cuerpo = esEntrega
+                ? "Procederemos a coordinar su entrega en Cuba."
+                : "Procederemos a realizar la transferencia a Cuba.";
             const notaPlazo = esEntrega
                 ? "\n\n🚚 Recuerda: la entrega puede demorar hasta 48 horas, según la demanda y disponibilidad."
                 : "";
             await axios.post(
                 `https://api.z-api.io/instances/${process.env.ZAPI_INSTANCE}/token/${process.env.ZAPI_TOKEN}/send-text`,
-                { phone: operacion.phone, message: `✅ Recibimos su pago de R$${operacion.monto}.\n\nProcederemos a realizar la transferencia a Cuba.\n\nCuando se complete le enviaremos el comprobante. 😊${notaPlazo}` },
+                { phone: operacion.phone, message: `✅ Recibimos su pago de R$${operacion.monto}.\n\n${cuerpo}\n\nCuando se complete le enviaremos el comprobante. 😊${notaPlazo}` },
                 { headers: { "Client-Token": process.env.ZAPI_CLIENT_TOKEN } }
             );
         } catch (err) {
