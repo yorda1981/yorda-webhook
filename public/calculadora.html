@@ -33,6 +33,46 @@
   --muted:#5F6B7A;
   --green:#16A34A;
   --gold:#B45309;
+  --bg-tint-1:#E9F0FA;
+  --bg-tint-2:#FBEBEC;
+  --placeholder:#AEB9C8;
+  --hdr-grad-1:#0038A8;
+  --hdr-grad-2:#062B70;
+  --hdr-text-soft:#CFE0FA;
+  --hdr-text-softer:#B9CBEA;
+  --hdr-dot-off:#7C93C4;
+  --hdr-lang-border:rgba(255,255,255,.35);
+  --res-paga-bg:#FCEBEB;
+  --res-paga-border:#F5C9C9;
+  --res-recibe-bg:#E6F1FB;
+  --res-recibe-border:#BEDBF6;
+}
+[data-theme="dark"]{
+  --bg:#0A0F1C;
+  --card:#121B2E;
+  --card2:#182437;
+  --line:#28374F;
+  --accent:#3B82F6;
+  --accent2:#60A5FA;
+  --red:#D6293F;
+  --red-dark:#FF6B7D;
+  --text:#EDF1F9;
+  --muted:#8FA0BA;
+  --green:#34D399;
+  --gold:#F2C24B;
+  --bg-tint-1:#101E38;
+  --bg-tint-2:#2A1420;
+  --placeholder:#4A5A76;
+  --hdr-grad-1:#0B2C6E;
+  --hdr-grad-2:#040D22;
+  --hdr-text-soft:#C4D4F2;
+  --hdr-text-softer:#93A9CE;
+  --hdr-dot-off:#4C5E80;
+  --hdr-lang-border:rgba(255,255,255,.2);
+  --res-paga-bg:#2A1420;
+  --res-paga-border:#4A1F2C;
+  --res-recibe-bg:#101E38;
+  --res-recibe-border:#1C3B63;
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{
@@ -41,32 +81,40 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 body{
   font-family:'Manrope',system-ui,sans-serif;
   background:var(--bg);color:var(--text);min-height:100vh;
+  transition:background .2s,color .2s;
   background-image:
-    radial-gradient(ellipse 60% 40% at 20% -10%, #E9F0FA 0%, transparent 60%),
-    radial-gradient(ellipse 50% 35% at 90% 0%, #FBEBEC 0%, transparent 55%);
+    radial-gradient(ellipse 60% 40% at 20% -10%, var(--bg-tint-1) 0%, transparent 60%),
+    radial-gradient(ellipse 50% 35% at 90% 0%, var(--bg-tint-2) 0%, transparent 55%);
 }
 .page{max-width:1080px;margin:0 auto;padding:20px 16px 48px}
 
 /* ── header ── */
 .hdr{
   display:flex;align-items:center;justify-content:space-between;gap:12px;
-  background:linear-gradient(135deg,var(--accent),#062B70);
+  background:linear-gradient(135deg,var(--hdr-grad-1),var(--hdr-grad-2));
   border-radius:20px;padding:16px 20px;margin-bottom:16px;flex-wrap:wrap;
+  transition:background .2s;
 }
 .marca{display:flex;align-items:center;gap:12px}
 .logo{width:44px;height:44px;flex:none}
 .nombre{font-size:1.25rem;font-weight:800;color:#fff}
-.nombre span{color:#CFE0FA}
-.tagline{font-size:.68rem;color:#B9CBEA;font-weight:700;letter-spacing:.04em;margin-top:1px}
-.ruta{font-size:.7rem;color:#B9CBEA;font-weight:700;letter-spacing:.04em}
+.nombre span{color:var(--hdr-text-soft)}
+.tagline{font-size:.68rem;color:var(--hdr-text-softer);font-weight:700;letter-spacing:.04em;margin-top:1px}
+.ruta{font-size:.7rem;color:var(--hdr-text-softer);font-weight:700;letter-spacing:.04em}
 .hdr-der{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
-.estado{display:flex;align-items:center;gap:6px;font-size:.78rem;color:#CFE0FA}
-.dot{width:8px;height:8px;border-radius:50%;background:#7C93C4;display:inline-block}
+.estado{display:flex;align-items:center;gap:6px;font-size:.78rem;color:var(--hdr-text-soft)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--hdr-dot-off);display:inline-block}
 .estado.on .dot{background:var(--green);box-shadow:0 0 8px var(--green)}
-.reloj{font-size:.82rem;color:#CFE0FA;font-variant-numeric:tabular-nums}
-.lang{display:flex;border:1px solid rgba(255,255,255,.35);border-radius:12px;overflow:hidden}
-.lang button{background:transparent;border:none;color:#CFE0FA;font-family:inherit;font-size:.78rem;font-weight:800;padding:7px 13px;cursor:pointer}
+.reloj{font-size:.82rem;color:var(--hdr-text-soft);font-variant-numeric:tabular-nums}
+.lang{display:flex;border:1px solid var(--hdr-lang-border);border-radius:12px;overflow:hidden}
+.lang button{background:transparent;border:none;color:var(--hdr-text-soft);font-family:inherit;font-size:.78rem;font-weight:800;padding:7px 13px;cursor:pointer}
 .lang button.act{background:#fff;color:var(--accent)}
+.theme-toggle{
+  display:flex;align-items:center;justify-content:center;width:32px;height:32px;
+  border:1px solid var(--hdr-lang-border);border-radius:10px;background:transparent;
+  color:var(--hdr-text-soft);font-size:.95rem;cursor:pointer;
+}
+.theme-toggle:hover{background:rgba(255,255,255,.12)}
 
 /* ── paneles ── */
 .panel{
@@ -115,7 +163,7 @@ body{
   flex:1;min-width:0;background:none;border:none;color:var(--text);
   font-family:inherit;font-size:2rem;font-weight:800;outline:none;
 }
-#monto::placeholder{color:#AEB9C8}
+#monto::placeholder{color:var(--placeholder)}
 .limpiar{
   background:none;border:none;color:var(--muted);font-family:inherit;
   font-size:.78rem;font-weight:700;cursor:pointer;white-space:nowrap;
@@ -139,9 +187,9 @@ body{
   animation:aparecer .25s ease;
 }
 @keyframes aparecer{from{opacity:.4;transform:translateY(4px)}to{opacity:1;transform:none}}
-.res-lado{border-radius:14px;padding:12px 10px;display:flex;flex-direction:column;justify-content:center}
-.res-lado:nth-child(1){background:#FCEBEB;border:1px solid #F5C9C9}
-.res-lado:nth-child(3){background:#E6F1FB;border:1px solid #BEDBF6}
+.res-lado{border-radius:14px;padding:12px 10px;display:flex;flex-direction:column;justify-content:center;transition:background .2s}
+.res-lado:nth-child(1){background:var(--res-paga-bg);border:1px solid var(--res-paga-border)}
+.res-lado:nth-child(3){background:var(--res-recibe-bg);border:1px solid var(--res-recibe-border)}
 .res-eti{font-size:.66rem;color:var(--muted);font-weight:800;text-transform:uppercase;letter-spacing:.05em}
 .res-lado:nth-child(1) .res-eti{color:var(--red-dark)}
 .res-lado:nth-child(3) .res-eti{color:var(--accent2)}
@@ -408,6 +456,15 @@ body{
 </style>
 </head>
 <body>
+<script>
+(function(){
+  try{
+    var t = localStorage.getItem("yorda_theme");
+    if(!t){ t = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"; }
+    if(t === "dark") document.documentElement.setAttribute("data-theme","dark");
+  }catch(e){}
+})();
+</script>
 
 <div class="page">
 
@@ -424,6 +481,7 @@ body{
     <div class="hdr-der">
       <div class="estado" id="estado"><span class="dot"></span><span id="estadoTxt">…</span></div>
       <div class="reloj" id="reloj">--:--:--</div>
+      <button class="theme-toggle" id="btnTheme" type="button" aria-label="Cambiar a modo oscuro">🌙</button>
       <div class="lang">
         <button id="btnEs" class="act">ES</button>
         <button id="btnPt">PT</button>
@@ -909,6 +967,25 @@ function initColapsable(headerId, bodyId){
 initColapsable("tasasHeader", "tasasBody");
 initColapsable("zonasHeader", "zonasBody");
 
+/* ── tema claro/oscuro ── */
+function aplicarTema(t){
+  if(t === "dark"){
+    document.documentElement.setAttribute("data-theme","dark");
+    $("btnTheme").textContent = "☀️";
+    $("btnTheme").setAttribute("aria-label", lang==="pt" ? "Mudar para modo claro" : "Cambiar a modo claro");
+  } else {
+    document.documentElement.removeAttribute("data-theme");
+    $("btnTheme").textContent = "🌙";
+    $("btnTheme").setAttribute("aria-label", lang==="pt" ? "Mudar para modo escuro" : "Cambiar a modo oscuro");
+  }
+  try{ localStorage.setItem("yorda_theme", t); }catch(e){}
+}
+$("btnTheme").addEventListener("click", ()=>{
+  const actual = document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
+  aplicarTema(actual === "dark" ? "light" : "dark");
+});
+aplicarTema(document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light");
+
 /* ── idioma ── */
 $("btnEs").onclick = ()=>setLang("es");
 $("btnPt").onclick = ()=>setLang("pt");
@@ -916,6 +993,7 @@ function setLang(l){
   lang = l;
   $("btnEs").classList.toggle("act", l==="es");
   $("btnPt").classList.toggle("act", l==="pt");
+  aplicarTema(document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light");
   document.querySelectorAll("[data-i]").forEach(el=>{
     const k = el.dataset.i;
     if(typeof T[l][k] === "string") el.textContent = T[l][k];
