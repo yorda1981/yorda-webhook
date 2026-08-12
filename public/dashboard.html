@@ -60,6 +60,7 @@
             <div class="stat-card"><span>Ops. Confirmadas</span><h2 id="stat-ops">—</h2></div>
             <div class="stat-card"><span>Volumen Total</span><h2 id="stat-vol">—</h2></div>
             <div class="stat-card"><span>Pendientes</span><h2 id="stat-pend" style="color: var(--yellow);">—</h2></div>
+            <div class="stat-card"><span>Completadas</span><h2 id="stat-completadas" style="color:#60a5fa;">—</h2></div>
             <div class="stat-card"><span>Cotizados Hoy</span><h2 id="stat-cotizados" style="color:#38bdf8;">—</h2></div>
             <div class="stat-card"><span>Cierres Hoy</span><h2 id="stat-cierres" style="color:var(--green);">—</h2></div>
             <div class="stat-card"><span>Conversión</span><h2 id="stat-conversion" style="color:#a78bfa;">—%</h2></div>
@@ -99,12 +100,33 @@
                             <th>Fecha</th>
                             <th>Cliente</th>
                             <th>Monto</th>
-                            <th>Tarjeta</th>
+                            <th>Tarjeta / Entrega</th>
                             <th>Tipo</th>
                             <th>Acción</th>
                         </tr>
                     </thead>
                     <tbody id="tablaPendientes">
+                        <tr><td colspan="6" style="text-align:center; padding:20px; color:#8b949e;">Conecta para ver datos</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="config-section" style="border-left: 5px solid #60a5fa;">
+            <h3 style="color: #60a5fa;">🚚 En Proceso de Entrega</h3>
+            <div class="table-wrapper">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Fecha</th>
+                            <th>Beneficiario</th>
+                            <th>Entrega</th>
+                            <th>Monto</th>
+                            <th>Tipo</th>
+                            <th>Acción</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tablaEnProceso">
                         <tr><td colspan="6" style="text-align:center; padding:20px; color:#8b949e;">Conecta para ver datos</td></tr>
                     </tbody>
                 </table>
@@ -332,6 +354,7 @@
                 document.getElementById("stat-ops").innerText      = stats.totalOperaciones || 0;
                 document.getElementById("stat-vol").innerText      = Number(stats.volumenTotal || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
                 document.getElementById("stat-pend").innerText     = stats.pendientes || 0;
+                document.getElementById("stat-completadas").innerText = stats.completadas || 0;
 
                 // Pendientes
                 const tablaPendientes = document.getElementById("tablaPendientes");
@@ -339,15 +362,44 @@
                 if (pendientes.length === 0) {
                     tablaPendientes.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#8b949e;padding:20px;">Todo al día. No hay pagos pendientes.</td></tr>';
                 } else {
-                    tablaPendientes.innerHTML = pendientes.map(op => `
+                    tablaPendientes.innerHTML = pendientes.map(op => {
+                        const esEntrega = op.tipo === "cup_efectivo" || op.tipo === "usd_efectivo";
+                        const colEntrega = esEntrega
+                            ? `<small>🚚 ${op.municipio || "-"}, ${op.provincia || "-"}</small>`
+                            : `<span style="font-family:monospace;font-size:12px;color:#8b949e;">${op.tarjeta ? "•••• " + op.tarjeta.slice(-4) : "-"}</span>`;
+                        return `
                         <tr>
                             <td>${new Date(op.created_at).toLocaleDateString("pt-BR")}<br><small>${new Date(op.created_at).toLocaleTimeString("pt-BR")}</small></td>
-                            <td><strong>${op.nombre}</strong></td>
+                            <td><strong>${op.titular || op.nombre}</strong></td>
                             <td style="color:var(--yellow);font-weight:700;">R$ ${op.monto}</td>
-                            <td style="font-family:monospace;font-size:12px;color:#8b949e;">${op.tarjeta ? "•••• " + op.tarjeta.slice(-4) : "-"}</td>
+                            <td>${colEntrega}</td>
                             <td><small>${op.tipo}</small></td>
                             <td><button class="btn-confirm" onclick="confirmar('${op.id}')">VERIFICADO</button></td>
-                        </tr>`).join("");
+                        </tr>`;
+                    }).join("");
+                }
+
+                // En proceso de entrega (pago confirmado, pendiente de completar)
+                const tablaEnProceso = document.getElementById("tablaEnProceso");
+                const enProceso = operaciones.filter(o => o.status === "confirmada");
+                if (enProceso.length === 0) {
+                    tablaEnProceso.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#8b949e;padding:20px;">No hay operaciones en proceso.</td></tr>';
+                } else {
+                    tablaEnProceso.innerHTML = enProceso.map(op => {
+                        const esEntrega = op.tipo === "cup_efectivo" || op.tipo === "usd_efectivo";
+                        const colEntrega = esEntrega
+                            ? `<small>🚚 ${op.direccion || "-"}<br>${op.municipio || "-"}, ${op.provincia || "-"}</small>`
+                            : `<span style="font-family:monospace;font-size:12px;color:#8b949e;">${op.tarjeta ? "•••• " + op.tarjeta.slice(-4) : "-"}</span>`;
+                        return `
+                        <tr>
+                            <td>${new Date(op.created_at).toLocaleDateString("pt-BR")}</td>
+                            <td><strong>${op.titular || op.nombre}</strong></td>
+                            <td>${colEntrega}</td>
+                            <td style="color:var(--yellow);font-weight:700;">R$ ${op.monto}</td>
+                            <td><small>${op.tipo}</small></td>
+                            <td><button class="btn-confirm" onclick="completar('${op.id}')">COMPLETAR</button></td>
+                        </tr>`;
+                    }).join("");
                 }
 
                 // Ranking
@@ -371,6 +423,13 @@
         async function confirmar(id) {
             if (!confirm("¿Has verificado este pago en tu cuenta bancaria?")) return;
             const res = await fetch("/admin/confirmar-operacion/" + id, { method: "POST", headers: authH() });
+            const data = await res.json();
+            if (data.success) refreshData();
+        }
+
+        async function completar(id) {
+            if (!confirm("¿Confirmas que esta operación fue completada (entrega/transferencia realizada)?")) return;
+            const res = await fetch("/admin/completar-operacion/" + id, { method: "POST", headers: authH() });
             const data = await res.json();
             if (data.success) refreshData();
         }
