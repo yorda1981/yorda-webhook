@@ -12,7 +12,7 @@ const { obtenerTodos, obtenerCliente } = require("./src/services/customer-memory
 const { obtenerTodas, confirmarOperacion, obtenerEstadisticas } = require("./src/services/operations");
 const crm = require("./src/services/crm");
 const { leerTasas } = require("./src/flows/cotizacion-flow");
-const { enviarSeguro, getAdminPhone } = require("./src/flows/shared");
+const { enviarSeguro, getAdminPhone, getPIXKey, getPIXHolder, getPIXBank, getPIXImage } = require("./src/flows/shared");
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -49,6 +49,10 @@ const MINUTOS_PAUSA = 10;
     try {
         await pool.query("ALTER TABLE customers ADD COLUMN IF NOT EXISTS saludo_pendiente BOOLEAN DEFAULT false");
     } catch (e) { console.error("⚠️ Migración saludo_pendiente:", e.message); }
+    try {
+        // Tarifa de entrega en efectivo (R$), configuración única — la usa la calculadora web.
+        await pool.query("ALTER TABLE rates ADD COLUMN IF NOT EXISTS tarifa_entrega NUMERIC DEFAULT 0");
+    } catch (e) { console.error("⚠️ Migración tarifa_entrega:", e.message); }
 })();
 
 // ─────────────────────────────────────────
@@ -246,7 +250,7 @@ app.get("/admin/tasas", adminLimiter, verificarToken, async (req, res) => {
 
 app.post("/admin/tasas", adminLimiter, verificarToken, async (req, res) => {
     try {
-        const { brl_0, brl_100, brl_500, brl_1000, usd1, usd2, mlc, efectivo } = req.body;
+        const { brl_0, brl_100, brl_500, brl_1000, usd1, usd2, mlc, efectivo, tarifa_entrega } = req.body;
         await pool.query(`
             UPDATE rates SET
                 brl_0    = COALESCE($1, brl_0),
@@ -257,9 +261,10 @@ app.post("/admin/tasas", adminLimiter, verificarToken, async (req, res) => {
                 usd2     = COALESCE($6, usd2),
                 mlc      = COALESCE($7, mlc),
                 efectivo = COALESCE($8, efectivo),
+                tarifa_entrega = COALESCE($9, tarifa_entrega),
                 updated_at = NOW()
             WHERE id = 1
-        `, [brl_0, brl_100, brl_500, brl_1000, usd1, usd2, mlc, efectivo]);
+        `, [brl_0, brl_100, brl_500, brl_1000, usd1, usd2, mlc, efectivo, tarifa_entrega]);
         res.json({ success: true });
     } catch (e) {
         console.error("❌ ERROR TASAS:", e);
@@ -354,7 +359,7 @@ app.post("/admin/oferta", adminLimiter, verificarToken, async (req, res) => {
 
 app.get("/api/tasas", async (req, res) => {
     try {
-        const r = await pool.query("SELECT brl_0, brl_100, brl_500, brl_1000, usd1, mlc, efectivo FROM rates LIMIT 1");
+        const r = await pool.query("SELECT brl_0, brl_100, brl_500, brl_1000, usd1, mlc, efectivo, tarifa_entrega FROM rates LIMIT 1");
         let oferta = null;
         try {
             const o = await pool.query("SELECT texto FROM ofertas WHERE activa = true AND (vence_at IS NULL OR vence_at > NOW()) LIMIT 1");
@@ -362,6 +367,17 @@ app.get("/api/tasas", async (req, res) => {
         } catch {}
         res.json({ ...(r.rows[0] || {}), oferta });
     } catch (e) { res.status(500).json({}); }
+});
+
+// Datos públicos de PIX (no son secretos: son los datos que el cliente necesita para pagarnos).
+// Reutiliza la configuración ya existente del bot (PIX_KEY / PIX_HOLDER_NAME / PIX_BANK / PIX_IMAGE_URL).
+app.get("/api/pix-info", (req, res) => {
+    res.json({
+        key:   getPIXKey(),
+        holder: getPIXHolder(),
+        bank:  getPIXBank(),
+        image: getPIXImage()
+    });
 });
 
 app.get("/", (req, res) => res.send("YordaBot Online ✅"));
