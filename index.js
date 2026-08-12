@@ -311,7 +311,23 @@ app.get("/admin/stats", adminLimiter, verificarToken, async (req, res) => {
 });
 
 app.get("/admin/crm/stats", adminLimiter, verificarToken, async (req, res) => {
-    try { res.json(await crm.obtenerEstadisticasCRM()); } catch (e) { res.status(500).json({ error: e.message }); }
+    try {
+        const dias = req.query.dias ? Number(req.query.dias) : 30;
+        res.json(await crm.obtenerEstadisticasCRM(dias));
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post("/admin/completar-todas-antiguas", adminLimiter, verificarToken, async (req, res) => {
+    try {
+        const r = await pool.query(`
+            UPDATE operations SET status = 'completada', completed_at = NOW()
+            WHERE status = 'confirmada'
+            RETURNING id
+        `);
+        res.json({ success: true, actualizadas: r.rows.length });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
 });
 
 app.post("/admin/confirmar-operacion/:id", adminLimiter, verificarToken, async (req, res) => {
