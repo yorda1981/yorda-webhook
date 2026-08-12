@@ -35,6 +35,17 @@ const adminLimiter = rateLimit({
     message: "Too many requests"
 });
 
+// Límite estricto de intentos de login fallidos al dashboard (independiente del límite general).
+// Solo cuenta peticiones que terminan en 401 (token incorrecto) — un token correcto nunca cuenta.
+const authAttemptLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 5,
+    skipSuccessfulRequests: true,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Demasiados intentos fallidos. Espera 15 minutos e inténtalo de nuevo." }
+});
+
 const buffers            = new Map();
 const pendingMessages    = new Map();
 const mapaLidATelefono   = new Map();
@@ -135,6 +146,7 @@ async function enPausaHumana(phone) {
 
 app.use(express.json({ limit: "10mb" }));
 app.use(express.static(path.join(__dirname, "public")));
+app.use("/admin", authAttemptLimiter);
 
 const verificarToken = (req, res, next) => {
     const authHeader = req.headers.authorization || "";
