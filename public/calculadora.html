@@ -372,6 +372,14 @@ body{
 @media (min-width:600px){
   .paso-botones.solo1{grid-template-columns:1fr}
 }
+
+/* ── paneles plegables (tocar para expandir/contraer) ── */
+.panel-titulo.toggle{cursor:pointer;user-select:none}
+.panel-titulo.toggle .chev{margin-left:auto;font-size:.85rem;color:var(--muted);transition:transform .25s ease}
+.panel-titulo.toggle .chev.open{transform:rotate(180deg)}
+.panel-titulo.toggle:active{opacity:.7}
+.colapsable{display:none}
+.colapsable.abierto{display:block;animation:aparecer .22s ease}
 </style>
 </head>
 <body>
@@ -404,8 +412,10 @@ body{
 
   <!-- ═══════ TASAS DE YORDA ═══════ -->
   <section class="panel tasas-panel">
-    <div class="panel-titulo"><span class="ico">💰</span> <span data-i="tasasTitulo">Tasas de Yorda</span> <em data-i="hoy">(Hoy)</em></div>
-    <div class="tasas-grid" id="tasasGrid"></div>
+    <div class="panel-titulo toggle" id="tasasHeader"><span class="ico">💰</span> <span data-i="tasasTitulo">Tasas de Yorda</span> <em data-i="hoy">(Hoy)</em><span class="chev open">⌄</span></div>
+    <div class="colapsable abierto" id="tasasBody">
+      <div class="tasas-grid" id="tasasGrid"></div>
+    </div>
   </section>
 
   <!-- ═══════ GRID PRINCIPAL ═══════ -->
@@ -481,9 +491,12 @@ body{
     <aside class="col-lado">
 
       <section class="panel">
-        <div class="panel-titulo"><span class="ico">🚚</span> <span data-i="zonasTitulo">Entregas disponibles</span></div>
-        <div id="zonasLista"></div>
-        <div class="lado-nota" data-i="zonasNota">Consulta la tarifa de entrega por WhatsApp.</div>
+        <div class="panel-titulo toggle" id="zonasHeader"><span class="ico">🚚</span> <span data-i="zonasTitulo">Entregas disponibles</span><span class="chev">⌄</span></div>
+        <div class="lado-nota" data-i="zonasResumen">Entregamos en el municipio cabecera de las 16 provincias. Toca para ver el listado.</div>
+        <div class="colapsable" id="zonasBody">
+          <div id="zonasLista"></div>
+          <div class="lado-nota" data-i="zonasNota">¿Otro municipio? Consulta disponibilidad por WhatsApp.</div>
+        </div>
       </section>
 
       <section class="panel">
@@ -575,10 +588,24 @@ body{
 /* ⚙️ CONFIGURACIÓN — edita aquí */
 const WHATSAPP = "5533999719702"; // solo dígitos, con código de país
 
-// Zonas de entrega en efectivo (reales)
-const ZONAS = [
-  { prov: "La Habana", items: ["Todos los municipios (excepto Habana campo)"] },
-  { prov: "Granma",    items: ["Manzanillo", "Media Luna", "Campechuela", "Niquero"] },
+// Provincias de Cuba + municipio cabecera (entrega directa) + zona (plazo de entrega)
+const PROVINCIAS = [
+  { nombre:"Pinar del Río", cabecera:"Pinar del Río", zona:"resto", municipios:["Consolación del Sur","Guane","La Palma","Los Palacios","Mantua","Minas de Matahambre","Pinar del Río","San Juan y Martínez","San Luis","Sandino","Viñales"] },
+  { nombre:"Artemisa", cabecera:"Artemisa", zona:"resto", municipios:["Alquízar","Artemisa","Bahía Honda","Bauta","Caimito","Candelaria","Guanajay","Güira de Melena","Mariel","San Antonio de los Baños","San Cristóbal"] },
+  { nombre:"La Habana", cabecera:"Plaza de la Revolución", zona:"habana", municipios:["Arroyo Naranjo","Boyeros","Centro Habana","Cerro","Cotorro","Diez de Octubre","Guanabacoa","Habana del Este","Habana Vieja","La Lisa","Marianao","Playa","Plaza de la Revolución","Regla","San Miguel del Padrón"] },
+  { nombre:"Mayabeque", cabecera:"San José de las Lajas", zona:"resto", municipios:["Batabanó","Bejucal","Güines","Jaruco","Madruga","Melena del Sur","Nueva Paz","Quivicán","San José de las Lajas","San Nicolás","Santa Cruz del Norte"] },
+  { nombre:"Matanzas", cabecera:"Matanzas", zona:"resto", municipios:["Calimete","Cárdenas","Ciénaga de Zapata","Colón","Jagüey Grande","Jovellanos","Limonar","Los Arabos","Martí","Matanzas","Pedro Betancourt","Perico","Unión de Reyes"] },
+  { nombre:"Villa Clara", cabecera:"Santa Clara", zona:"resto", municipios:["Caibarién","Camajuaní","Cifuentes","Corralillo","Encrucijada","Manicaragua","Placetas","Quemado de Güines","Ranchuelo","Remedios","Sagua la Grande","Santa Clara","Santo Domingo"] },
+  { nombre:"Cienfuegos", cabecera:"Cienfuegos", zona:"resto", municipios:["Abreus","Aguada de Pasajeros","Camarones","Cienfuegos","Cruces","Cumanayagua","Lajas","Palmira","Rodas"] },
+  { nombre:"Sancti Spíritus", cabecera:"Sancti Spíritus", zona:"resto", municipios:["Cabaiguán","Fomento","Jatibonico","La Sierpe","Sancti Spíritus","Taguasco","Trinidad","Yaguajay"] },
+  { nombre:"Ciego de Ávila", cabecera:"Ciego de Ávila", zona:"resto", municipios:["Baraguá","Bolivia","Chambas","Ciego de Ávila","Ciro Redondo","Florencia","Majagua","Morón","Primero de Enero","Venezuela"] },
+  { nombre:"Camagüey", cabecera:"Camagüey", zona:"resto", municipios:["Camagüey","Carlos Manuel de Céspedes","Esmeralda","Florida","Guáimaro","Jimaguayú","Minas","Najasa","Nuevitas","Santa Cruz del Sur","Sibanicú","Sierra de Cubitas","Vertientes"] },
+  { nombre:"Las Tunas", cabecera:"Las Tunas", zona:"resto", municipios:["Amancio","Colombia","Jesús Menéndez","Jobabo","Las Tunas","Majibacoa","Manatí","Puerto Padre"] },
+  { nombre:"Holguín", cabecera:"Holguín", zona:"resto", municipios:["Antilla","Báguano","Banes","Cacocum","Calixto García","Cueto","Frank País","Gibara","Holguín","Mayarí","Moa","Rafael Freyre","Sagua de Tánamo","Urbano Noris"] },
+  { nombre:"Granma", cabecera:"Bayamo", zona:"resto", municipios:["Bartolomé Masó","Bayamo","Buey Arriba","Campechuela","Cauto Cristo","Guisa","Jiguaní","Manzanillo","Media Luna","Niquero","Pilón","Río Cauto","Yara"] },
+  { nombre:"Santiago de Cuba", cabecera:"Santiago de Cuba", zona:"resto", municipios:["Contramaestre","Guamá","Mella","Palma Soriano","San Luis","Santiago de Cuba","Segundo Frente","Songo-La Maya","Tercer Frente"] },
+  { nombre:"Guantánamo", cabecera:"Guantánamo", zona:"resto", municipios:["Baracoa","Caimanera","El Salvador","Guantánamo","Imías","Maisí","Manuel Tames","Niceto Pérez","San Antonio del Sur","Yateras"] },
+  { nombre:"Isla de la Juventud", cabecera:"Isla de la Juventud", zona:"resto", municipios:["Isla de la Juventud"] },
 ];
 
 /* ── textos ES / PT ── */
@@ -600,7 +627,8 @@ const T = {
     compartir:"Compartir resultado", copiar:"Copiar resultado",
     historial:"Historial reciente",
     zonasTitulo:"Entregas disponibles",
-    zonasNota:"Entrega en efectivo solo en estas zonas. Consulta la tarifa por WhatsApp.",
+    zonasResumen:"Entregamos en el municipio cabecera de las 16 provincias. Toca para ver el listado.",
+    zonasNota:"¿Otro municipio? Consulta disponibilidad por WhatsApp.",
     porqueTitulo:"¿Por qué elegir Yorda?",
     pq1:"✔ Tasas actualizadas todos los días",
     pq2:"✔ Entrega el mismo día",
@@ -673,7 +701,8 @@ const T = {
     compartir:"Compartilhar resultado", copiar:"Copiar resultado",
     historial:"Histórico recente",
     zonasTitulo:"Entregas disponíveis",
-    zonasNota:"Entrega em dinheiro apenas nestas zonas. Consulte a tarifa pelo WhatsApp.",
+    zonasResumen:"Entregamos no município sede das 16 províncias. Toque para ver a lista.",
+    zonasNota:"Outro município? Consulte a disponibilidade pelo WhatsApp.",
     porqueTitulo:"Por que escolher a Yorda?",
     pq1:"✔ Taxas atualizadas todos os dias",
     pq2:"✔ Entrega no mesmo dia",
@@ -811,12 +840,23 @@ function pintarTasas(){
 
 /* ── zonas de entrega ── */
 function pintarZonas(){
-  $("zonasLista").innerHTML = ZONAS.map(z =>
-    `<div class="zona-prov">${z.prov}</div>` +
-    z.items.map(m => `<div class="zona-item"><span class="ok">✔</span>${m}</div>`).join("")
+  $("zonasLista").innerHTML = PROVINCIAS.map(p =>
+    `<div class="zona-prov">${p.nombre}</div>` +
+    `<div class="zona-item"><span class="ok">✔</span>${p.cabecera}</div>`
   ).join("");
 }
 pintarZonas();
+
+/* ── paneles plegables ── */
+function initColapsable(headerId, bodyId){
+  const header = $(headerId), body = $(bodyId);
+  header.addEventListener("click", ()=>{
+    const abierto = body.classList.toggle("abierto");
+    header.querySelector(".chev").classList.toggle("open", abierto);
+  });
+}
+initColapsable("tasasHeader", "tasasBody");
+initColapsable("zonasHeader", "zonasBody");
 
 /* ── idioma ── */
 $("btnEs").onclick = ()=>setLang("es");
@@ -1016,25 +1056,7 @@ $("btnShare").addEventListener("click", async ()=>{
    FLUJO DE SOLICITUD — Calcular → Datos → Revisar → Pagar
    ═══════════════════════════════════════════ */
 
-// Provincias de Cuba + municipio cabecera (entrega directa) + zona (plazo de entrega)
-const PROVINCIAS = [
-  { nombre:"Pinar del Río", cabecera:"Pinar del Río", zona:"resto", municipios:["Consolación del Sur","Guane","La Palma","Los Palacios","Mantua","Minas de Matahambre","Pinar del Río","San Juan y Martínez","San Luis","Sandino","Viñales"] },
-  { nombre:"Artemisa", cabecera:"Artemisa", zona:"resto", municipios:["Alquízar","Artemisa","Bahía Honda","Bauta","Caimito","Candelaria","Guanajay","Güira de Melena","Mariel","San Antonio de los Baños","San Cristóbal"] },
-  { nombre:"La Habana", cabecera:"Plaza de la Revolución", zona:"habana", municipios:["Arroyo Naranjo","Boyeros","Centro Habana","Cerro","Cotorro","Diez de Octubre","Guanabacoa","Habana del Este","Habana Vieja","La Lisa","Marianao","Playa","Plaza de la Revolución","Regla","San Miguel del Padrón"] },
-  { nombre:"Mayabeque", cabecera:"San José de las Lajas", zona:"resto", municipios:["Batabanó","Bejucal","Güines","Jaruco","Madruga","Melena del Sur","Nueva Paz","Quivicán","San José de las Lajas","San Nicolás","Santa Cruz del Norte"] },
-  { nombre:"Matanzas", cabecera:"Matanzas", zona:"resto", municipios:["Calimete","Cárdenas","Ciénaga de Zapata","Colón","Jagüey Grande","Jovellanos","Limonar","Los Arabos","Martí","Matanzas","Pedro Betancourt","Perico","Unión de Reyes"] },
-  { nombre:"Villa Clara", cabecera:"Santa Clara", zona:"resto", municipios:["Caibarién","Camajuaní","Cifuentes","Corralillo","Encrucijada","Manicaragua","Placetas","Quemado de Güines","Ranchuelo","Remedios","Sagua la Grande","Santa Clara","Santo Domingo"] },
-  { nombre:"Cienfuegos", cabecera:"Cienfuegos", zona:"resto", municipios:["Abreus","Aguada de Pasajeros","Camarones","Cienfuegos","Cruces","Cumanayagua","Lajas","Palmira","Rodas"] },
-  { nombre:"Sancti Spíritus", cabecera:"Sancti Spíritus", zona:"resto", municipios:["Cabaiguán","Fomento","Jatibonico","La Sierpe","Sancti Spíritus","Taguasco","Trinidad","Yaguajay"] },
-  { nombre:"Ciego de Ávila", cabecera:"Ciego de Ávila", zona:"resto", municipios:["Baraguá","Bolivia","Chambas","Ciego de Ávila","Ciro Redondo","Florencia","Majagua","Morón","Primero de Enero","Venezuela"] },
-  { nombre:"Camagüey", cabecera:"Camagüey", zona:"resto", municipios:["Camagüey","Carlos Manuel de Céspedes","Esmeralda","Florida","Guáimaro","Jimaguayú","Minas","Najasa","Nuevitas","Santa Cruz del Sur","Sibanicú","Sierra de Cubitas","Vertientes"] },
-  { nombre:"Las Tunas", cabecera:"Las Tunas", zona:"resto", municipios:["Amancio","Colombia","Jesús Menéndez","Jobabo","Las Tunas","Majibacoa","Manatí","Puerto Padre"] },
-  { nombre:"Holguín", cabecera:"Holguín", zona:"resto", municipios:["Antilla","Báguano","Banes","Cacocum","Calixto García","Cueto","Frank País","Gibara","Holguín","Mayarí","Moa","Rafael Freyre","Sagua de Tánamo","Urbano Noris"] },
-  { nombre:"Granma", cabecera:"Bayamo", zona:"resto", municipios:["Bartolomé Masó","Bayamo","Buey Arriba","Campechuela","Cauto Cristo","Guisa","Jiguaní","Manzanillo","Media Luna","Niquero","Pilón","Río Cauto","Yara"] },
-  { nombre:"Santiago de Cuba", cabecera:"Santiago de Cuba", zona:"resto", municipios:["Contramaestre","Guamá","Mella","Palma Soriano","San Luis","Santiago de Cuba","Segundo Frente","Songo-La Maya","Tercer Frente"] },
-  { nombre:"Guantánamo", cabecera:"Guantánamo", zona:"resto", municipios:["Baracoa","Caimanera","El Salvador","Guantánamo","Imías","Maisí","Manuel Tames","Niceto Pérez","San Antonio del Sur","Yateras"] },
-  { nombre:"Isla de la Juventud", cabecera:"Isla de la Juventud", zona:"resto", municipios:["Isla de la Juventud"] },
-];
+// Provincias de Cuba: PROVINCIAS ya está definido arriba (se usa también en el panel "Entregas disponibles")
 
 let pedido = null, paso = 1;
 
