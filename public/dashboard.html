@@ -439,14 +439,28 @@
             if (!confirm("¿Has verificado este pago en tu cuenta bancaria?")) return;
             const res = await fetch("/admin/confirmar-operacion/" + id, { method: "POST", headers: authH() });
             const data = await res.json();
-            if (data.success) refreshData();
+            if (data.success) {
+                refreshData();
+                if (data.notificado === false) {
+                    alert("✅ Operación confirmada, PERO ⚠️ no se pudo enviar el mensaje de WhatsApp al cliente. Revisa que la instancia de Z-API esté conectada, o avísale tú manualmente.");
+                }
+            } else {
+                alert("❌ Error al confirmar la operación: " + (data.error || "desconocido"));
+            }
         }
 
         async function completar(id) {
             if (!confirm("¿Confirmas que esta operación fue completada (entrega/transferencia realizada)?")) return;
             const res = await fetch("/admin/completar-operacion/" + id, { method: "POST", headers: authH() });
             const data = await res.json();
-            if (data.success) refreshData();
+            if (data.success) {
+                refreshData();
+                if (data.notificado === false) {
+                    alert("✅ Operación completada, PERO ⚠️ no se pudo enviar el mensaje de WhatsApp al cliente. Revisa que la instancia de Z-API esté conectada, o avísale tú manualmente.");
+                }
+            } else {
+                alert("❌ Error al completar la operación: " + (data.error || "desconocido"));
+            }
         }
 
         async function completarTodasAntiguas() {
