@@ -346,23 +346,22 @@ app.post("/admin/confirmar-operacion/:id", adminLimiter, verificarToken, async (
     try {
         const operacion = await confirmarOperacion(req.params.id);
         if (!operacion) return res.status(404).json({ success: false, error: "Operación no encontrada" });
-        try {
-            const esEntrega = operacion.tipo === "cup_efectivo" || operacion.tipo === "usd_efectivo";
-            const cuerpo = esEntrega
-                ? "Procederemos a coordinar su entrega en Cuba."
-                : "Procederemos a realizar la transferencia a Cuba.";
-            const notaPlazo = esEntrega
-                ? "\n\n🚚 Recuerda: la entrega puede demorar hasta 48 horas, según la demanda y disponibilidad."
-                : "";
-            await axios.post(
-                `https://api.z-api.io/instances/${process.env.ZAPI_INSTANCE}/token/${process.env.ZAPI_TOKEN}/send-text`,
-                { phone: operacion.phone, message: `✅ Recibimos su pago de R$${operacion.monto}.\n\n${cuerpo}\n\nCuando se complete le enviaremos el comprobante. 😊${notaPlazo}` },
-                { headers: { "Client-Token": process.env.ZAPI_CLIENT_TOKEN } }
-            );
-        } catch (err) {
-            console.error("❌ Error enviando WhatsApp:", err.message);
-        }
-        res.json({ success: true });
+
+        const { enviarMensaje } = require("./src/services/zapi");
+        const esEntrega = operacion.tipo === "cup_efectivo" || operacion.tipo === "usd_efectivo";
+        const cuerpo = esEntrega
+            ? "Procederemos a coordinar su entrega en Cuba."
+            : "Procederemos a realizar la transferencia a Cuba.";
+        const notaPlazo = esEntrega
+            ? "\n\n🚚 Recuerda: la entrega puede demorar hasta 48 horas, según la demanda y disponibilidad."
+            : "";
+        const notificado = await enviarMensaje(
+            operacion.phone,
+            `✅ Recibimos su pago de R$${operacion.monto}.\n\n${cuerpo}\n\nCuando se complete le enviaremos el comprobante. 😊${notaPlazo}`
+        );
+        if (!notificado) console.error(`⚠️ No se pudo notificar al cliente de la operación #${operacion.id} (phone: ${operacion.phone})`);
+
+        res.json({ success: true, notificado });
     } catch (e) {
         res.status(500).json({ success: false, error: e.message });
     }
@@ -372,20 +371,16 @@ app.post("/admin/completar-operacion/:id", adminLimiter, verificarToken, async (
     try {
         const operacion = await completarOperacion(req.params.id);
         if (!operacion) return res.status(404).json({ success: false, error: "Operación no encontrada" });
-        try {
-            const esEntrega = operacion.tipo === "cup_efectivo" || operacion.tipo === "usd_efectivo";
-            const msg = esEntrega
-                ? "🎉 ¡Tu entrega fue completada con éxito! Gracias por preferir nuestros servicios. 🇨🇺💜"
-                : "🎉 ¡Tu transferencia fue completada con éxito! Gracias por preferir nuestros servicios. 🇨🇺💜";
-            await axios.post(
-                `https://api.z-api.io/instances/${process.env.ZAPI_INSTANCE}/token/${process.env.ZAPI_TOKEN}/send-text`,
-                { phone: operacion.phone, message: msg },
-                { headers: { "Client-Token": process.env.ZAPI_CLIENT_TOKEN } }
-            );
-        } catch (err) {
-            console.error("❌ Error enviando WhatsApp:", err.message);
-        }
-        res.json({ success: true });
+
+        const { enviarMensaje } = require("./src/services/zapi");
+        const esEntrega = operacion.tipo === "cup_efectivo" || operacion.tipo === "usd_efectivo";
+        const msg = esEntrega
+            ? "🎉 ¡Tu entrega fue completada con éxito! Gracias por preferir nuestros servicios. 🇨🇺💜"
+            : "🎉 ¡Tu transferencia fue completada con éxito! Gracias por preferir nuestros servicios. 🇨🇺💜";
+        const notificado = await enviarMensaje(operacion.phone, msg);
+        if (!notificado) console.error(`⚠️ No se pudo notificar al cliente de la operación #${operacion.id} (phone: ${operacion.phone})`);
+
+        res.json({ success: true, notificado });
     } catch (e) {
         res.status(500).json({ success: false, error: e.message });
     }
