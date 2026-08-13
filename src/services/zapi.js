@@ -24,8 +24,10 @@ async function enviarMensaje(phone, message) {
       },
       timeout: 15000
     });
+    return true;
   } catch (e) {
     logger("error", "ZAPI_SEND_ERROR", { err: e.message });
+    return false;
   }
 }
 
