@@ -148,11 +148,48 @@ app.use(express.json({ limit: "10mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 app.use("/admin", authAttemptLimiter);
 
+const crypto = require("crypto");
+
+function tokensCoinciden(a, b) {
+    const bufA = Buffer.from(String(a || ""));
+    const bufB = Buffer.from(String(b || ""));
+    if (bufA.length !== bufB.length) return false;
+    return crypto.timingSafeEqual(bufA, bufB);
+}
+
 const verificarToken = (req, res, next) => {
     const authHeader = req.headers.authorization || "";
-    const token = authHeader.replace(/^Bearer\s+/i, "");
+    const token = authHeader.replace(/^Bearer\s+/i, "").trim();
     const secret = process.env.ADMIN_TOKEN?.trim();
-    if (!token || token.trim() !== secret) return res.status(401).json({ error: "No autorizado" });
+    if (!token || !secret || !tokensCoinciden(token, secret)) return res.status(401).json({ error: "No autorizado" });
+    next();
+};
+
+// ─────────────────────────────────────────
+// SEGURIDAD DEL WEBHOOK
+// Sin esto, cualquiera que conozca la URL puede simular mensajes de
+// WhatsApp (enviar spam con tu cuenta de Z-API, gastar créditos de
+// OpenAI, o crear "pedidos" falsos). Configura WEBHOOK_SECRET en tus
+// variables de entorno y agrega "?secret=TU_SECRETO" a la URL del
+// webhook en el panel de Z-API.
+//
+// Retrocompatible: si WEBHOOK_SECRET no está configurado, el webhook
+// sigue funcionando como antes (sin bloquear), pero se avisa en los
+// logs para que lo configures cuanto antes.
+// ─────────────────────────────────────────
+let avisoWebhookSecretMostrado = false;
+
+const verificarWebhookSecret = (req, res, next) => {
+    const secret = process.env.WEBHOOK_SECRET?.trim();
+    if (!secret) {
+        if (!avisoWebhookSecretMostrado) {
+            avisoWebhookSecretMostrado = true;
+            console.warn("⚠️ WEBHOOK_SECRET no configurado — /webhook acepta peticiones sin verificar su origen. Configura WEBHOOK_SECRET y agrega ?secret=... a la URL del webhook en Z-API.");
+        }
+        return next();
+    }
+    const recibido = String(req.query.secret || req.headers["x-webhook-secret"] || "");
+    if (!tokensCoinciden(recibido, secret)) return res.status(401).send("No autorizado");
     next();
 };
 
@@ -160,7 +197,7 @@ const verificarToken = (req, res, next) => {
 // WEBHOOK
 // ==========================================
 
-app.post("/webhook", webhookLimiter, async (req, res) => {
+app.post("/webhook", webhookLimiter, verificarWebhookSecret, async (req, res) => {
     res.status(200).send("OK");
     try {
         const body = req.body;
