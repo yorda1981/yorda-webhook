@@ -12,7 +12,7 @@ const { obtenerTodos, obtenerCliente } = require("./src/services/customer-memory
 const { obtenerTodas, confirmarOperacion, completarOperacion, obtenerEstadisticas } = require("./src/services/operations");
 const crm = require("./src/services/crm");
 const { leerTasas } = require("./src/flows/cotizacion-flow");
-const { esPedidoWebEntrega, procesarPedidoWebEntrega } = require("./src/flows/pedido-web-flow");
+const { esPedidoWeb, procesarPedidoWeb } = require("./src/flows/pedido-web-flow");
 const { enviarSeguro, getAdminPhone, getPIXKey, getPIXHolder, getPIXBank, getPIXImage } = require("./src/flows/shared");
 
 const app = express();
@@ -148,48 +148,11 @@ app.use(express.json({ limit: "10mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 app.use("/admin", authAttemptLimiter);
 
-const crypto = require("crypto");
-
-function tokensCoinciden(a, b) {
-    const bufA = Buffer.from(String(a || ""));
-    const bufB = Buffer.from(String(b || ""));
-    if (bufA.length !== bufB.length) return false;
-    return crypto.timingSafeEqual(bufA, bufB);
-}
-
 const verificarToken = (req, res, next) => {
     const authHeader = req.headers.authorization || "";
-    const token = authHeader.replace(/^Bearer\s+/i, "").trim();
+    const token = authHeader.replace(/^Bearer\s+/i, "");
     const secret = process.env.ADMIN_TOKEN?.trim();
-    if (!token || !secret || !tokensCoinciden(token, secret)) return res.status(401).json({ error: "No autorizado" });
-    next();
-};
-
-// ─────────────────────────────────────────
-// SEGURIDAD DEL WEBHOOK
-// Sin esto, cualquiera que conozca la URL puede simular mensajes de
-// WhatsApp (enviar spam con tu cuenta de Z-API, gastar créditos de
-// OpenAI, o crear "pedidos" falsos). Configura WEBHOOK_SECRET en tus
-// variables de entorno y agrega "?secret=TU_SECRETO" a la URL del
-// webhook en el panel de Z-API.
-//
-// Retrocompatible: si WEBHOOK_SECRET no está configurado, el webhook
-// sigue funcionando como antes (sin bloquear), pero se avisa en los
-// logs para que lo configures cuanto antes.
-// ─────────────────────────────────────────
-let avisoWebhookSecretMostrado = false;
-
-const verificarWebhookSecret = (req, res, next) => {
-    const secret = process.env.WEBHOOK_SECRET?.trim();
-    if (!secret) {
-        if (!avisoWebhookSecretMostrado) {
-            avisoWebhookSecretMostrado = true;
-            console.warn("⚠️ WEBHOOK_SECRET no configurado — /webhook acepta peticiones sin verificar su origen. Configura WEBHOOK_SECRET y agrega ?secret=... a la URL del webhook en Z-API.");
-        }
-        return next();
-    }
-    const recibido = String(req.query.secret || req.headers["x-webhook-secret"] || "");
-    if (!tokensCoinciden(recibido, secret)) return res.status(401).send("No autorizado");
+    if (!token || token.trim() !== secret) return res.status(401).json({ error: "No autorizado" });
     next();
 };
 
@@ -197,7 +160,7 @@ const verificarWebhookSecret = (req, res, next) => {
 // WEBHOOK
 // ==========================================
 
-app.post("/webhook", webhookLimiter, verificarWebhookSecret, async (req, res) => {
+app.post("/webhook", webhookLimiter, async (req, res) => {
     res.status(200).send("OK");
     try {
         const body = req.body;
@@ -276,10 +239,10 @@ app.post("/webhook", webhookLimiter, verificarWebhookSecret, async (req, res) =>
 
         if (!textMessage) return;
 
-        // Pedido de entrega generado por la calculadora web — se procesa aparte, sin pasar por GPT.
-        if (esPedidoWebEntrega(textMessage)) {
+        // Pedido generado por la calculadora web (entrega o transferencia) — se procesa aparte, sin pasar por GPT.
+        if (esPedidoWeb(textMessage)) {
             try {
-                const manejado = await procesarPedidoWebEntrega(phoneRaw, textMessage, pushName);
+                const manejado = await procesarPedidoWeb(phoneRaw, textMessage, pushName);
                 if (manejado) return;
             } catch (e) {
                 console.error("❌ Error procesando pedido web:", e.message);
