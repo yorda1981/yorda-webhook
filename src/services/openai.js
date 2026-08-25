@@ -160,6 +160,18 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         // ── Tarjeta por texto ──
         const esTarjeta = detectarTarjetaTexto(text);
         if (esTarjeta) {
+            // FIX MENSAJE DUPLICADO: si esta MISMA tarjeta ya estaba guardada y ya estamos
+            // esperando el comprobante, no hay nada nuevo que hacer — evita reenviar el PIX
+            // completo cada vez que el cliente manda otro mensaje con el mismo número
+            // (ej. lo pega 2-3 veces seguidas por error).
+            const yaGuardadaIgual = (cliente?.tarjeta === esTarjeta || cliente?.tarjeta_frecuente === esTarjeta);
+            const yaEsperandoComprobante = cliente?.estado === "aguardando_comprovante";
+            if (yaGuardadaIgual && yaEsperandoComprobante && !cliente?.comprobante_pendiente) {
+                const m = lang === "pt" ? "Já tenho esse cartão salvo ✅ Só falta o comprovante 📎" : "Ya tengo esa tarjeta guardada ✅ Solo falta el comprobante 📎";
+                await enviarSeguro(phone, m);
+                return m;
+            }
+
             await guardarTarjeta(phone, esTarjeta, null, null, cliente);
             const cli2 = await obtenerCliente(phone);
             if (cli2.comprobante_pendiente) {
@@ -286,7 +298,16 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             (!estadoBloquea && !!cliente?.estado) ||
             /enviar|mandar|envio|cotiz|transfer|pagar|monto|quant|cuant|quanto|quiero/.test(txt) ||
             esMonedaNacional;
-        if (montoValido && hayContextoBRL && !esUSD && !esMLC && !estadoBloquea)
+
+        // FIX ENVÍO NUEVO SOBRE UNO ABANDONADO: si el cliente quedó "esperando comprobante"
+        // de una operación vieja que nunca completó, y ahora escribe un monto DISTINTO,
+        // es un envío nuevo — no la misma operación. Limpiamos la sesión vieja (tarjeta,
+        // estado) para que no reaparezca la operación anterior en vez de cotizar la nueva.
+        const esEnvioNuevoSobreAbandonado = estadoBloquea && montoValido && !cliente?.comprobante_pendiente &&
+            Number(cliente?.ultimo_monto) !== valorFinal;
+        if (esEnvioNuevoSobreAbandonado) await limpiarSesion(phone);
+
+        if (montoValido && hayContextoBRL && !esUSD && !esMLC && (!estadoBloquea || esEnvioNuevoSobreAbandonado))
             return await cotizarBRL(phone, pushName, valorFinal, lang) || "";
 
         if (valorFinal && !montoValido) return "";
