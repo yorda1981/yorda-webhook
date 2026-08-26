@@ -5,6 +5,7 @@ require("dotenv").config();
 const { guardarCliente, obtenerCliente, marcarSaludoPendiente }          = require("./customer-memory");
 const { obtenerUltimaOperacion }                   = require("./operations");
 const crm                                          = require("./crm");
+const { esTarjetaDuplicada, esConsultaEntrega, esBareMontoValido, esEnvioNuevoSobreAbandonado, puedeCotizarBRL, clienteEstaOcupado } = require("./reglas-bot");
 
 // Flows
 const { detectarImagenUnificada, detectarComprobantePDF, llamarAsistente } = require("../flows/imagen-flow");
@@ -164,9 +165,8 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             // esperando el comprobante, no hay nada nuevo que hacer — evita reenviar el PIX
             // completo cada vez que el cliente manda otro mensaje con el mismo número
             // (ej. lo pega 2-3 veces seguidas por error).
-            const yaGuardadaIgual = (cliente?.tarjeta === esTarjeta || cliente?.tarjeta_frecuente === esTarjeta);
-            const yaEsperandoComprobante = cliente?.estado === "aguardando_comprovante";
-            if (yaGuardadaIgual && yaEsperandoComprobante && !cliente?.comprobante_pendiente) {
+            // Lógica en src/services/reglas-bot.js (probada en test/reglas-bot.test.js)
+            if (esTarjetaDuplicada(cliente, esTarjeta)) {
                 const m = lang === "pt" ? "Já tenho esse cartão salvo ✅ Só falta o comprovante 📎" : "Ya tengo esa tarjeta guardada ✅ Solo falta el comprobante 📎";
                 await enviarSeguro(phone, m);
                 return m;
@@ -196,11 +196,8 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         // ── Consulta sobre entrega en efectivo / municipio ──
         // Cliente pregunta por el proceso de entrega física (no está pidiendo cotización
         // todavía) — explicación breve + link de la calculadora para que haga el pedido solo.
-        const estadoOcupado = cliente?.estado === "aguardando_comprovante" || cliente?.estado === "aguardando_numero_recarga";
-        const mencionaEntrega  = /entrega|entregan|entregar|domicilio|entregam/.test(txt);
-        const mencionaEfectivo = /efectivo|cash|dinheiro|espécie|especie/.test(txt);
-        const mencionaMunicipio = /municipio|município/.test(txt);
-        if (!estadoOcupado && !montoValido && (mencionaEntrega || mencionaEfectivo || mencionaMunicipio)) {
+        // Lógica en src/services/reglas-bot.js (probada en test/reglas-bot.test.js)
+        if (esConsultaEntrega(txt, montoValido, cliente)) {
             const link = "https://yorda-webhook-production.up.railway.app/calculadora.html";
             const m = lang === "pt"
                 ? `🚚 *Entrega em dinheiro em Cuba*\n\nEntregamos direto no município sede das 16 províncias. Se for outro município, confirmamos disponibilidade por aqui mesmo.\n\n⏱️ Havana: até 24h · Demais províncias: até 48h (conforme demanda)\n\n💰 O custo da entrega é somado à parte — nunca é descontado do que seu familiar recebe.\n\nPara calcular o valor exato e fazer o pedido passo a passo, entra aqui 👇\n${link}`
@@ -220,13 +217,10 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         // ANTES: exigía montoValido, pero un número aislado como "200" (sin "reales" ni
         // "enviar" junto) nunca activa montoValido, así que el bloque nunca disparaba y
         // el mensaje quedaba sin respuesta. Ahora se calcula el número directo del texto.
-        const soloNumeroTxt   = txt.trim();
-        const bareNumero      = /^\d{2,5}$/.test(soloNumeroTxt) ? Number(soloNumeroTxt) : null;
-        const bareMontoValido = bareNumero !== null && bareNumero >= 10 && bareNumero <= 50000;
-        if (bareMontoValido) {
-            const estadoActual     = cliente?.estado;
-            const estadoBloqueaFix4 = estadoActual === "aguardando_comprovante" || estadoActual === "aguardando_numero_recarga";
-            if (!estadoBloqueaFix4) return await cotizarBRL(phone, pushName, bareNumero, lang) || "";
+        // Lógica en src/services/reglas-bot.js (probada en test/reglas-bot.test.js)
+        const bareNumero = esBareMontoValido(txt);
+        if (bareNumero !== null) {
+            if (!clienteEstaOcupado(cliente)) return await cotizarBRL(phone, pushName, bareNumero, lang) || "";
         }
 
         // FIX 5: Confirmación — verificar que NO hay monto nuevo en el mensaje
@@ -308,8 +302,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         // FIX 6: BRL→CUP — NO disparar si el cliente está esperando comprobante
         // Un cliente en aguardando_comprovante que manda un número no debe recibir cotización
         const esMonedaNacional = /moneda nacional|en cup\b|a cup\b|pesos cubanos|peso cubano/.test(txt);
-        const estadoBloquea    = cliente?.estado === "aguardando_comprovante" ||
-                                  cliente?.estado === "aguardando_numero_recarga";
+        const estadoBloquea    = clienteEstaOcupado(cliente);
         const hayContextoBRL   = valorMonetario !== null ||
             (!estadoBloquea && !!cliente?.estado) ||
             /enviar|mandar|envio|cotiz|transfer|pagar|monto|quant|cuant|quanto|quiero/.test(txt) ||
@@ -319,11 +312,10 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         // de una operación vieja que nunca completó, y ahora escribe un monto DISTINTO,
         // es un envío nuevo — no la misma operación. Limpiamos la sesión vieja (tarjeta,
         // estado) para que no reaparezca la operación anterior en vez de cotizar la nueva.
-        const esEnvioNuevoSobreAbandonado = estadoBloquea && montoValido && !cliente?.comprobante_pendiente &&
-            Number(cliente?.ultimo_monto) !== valorFinal;
-        if (esEnvioNuevoSobreAbandonado) await limpiarSesion(phone);
+        // Lógica en src/services/reglas-bot.js (probada en test/reglas-bot.test.js)
+        if (esEnvioNuevoSobreAbandonado(cliente, montoValido, valorFinal)) await limpiarSesion(phone);
 
-        if (montoValido && hayContextoBRL && !esUSD && !esMLC && (!estadoBloquea || esEnvioNuevoSobreAbandonado))
+        if (hayContextoBRL && !esUSD && !esMLC && puedeCotizarBRL(cliente, montoValido, valorFinal))
             return await cotizarBRL(phone, pushName, valorFinal, lang) || "";
 
         if (valorFinal && !montoValido) return "";
