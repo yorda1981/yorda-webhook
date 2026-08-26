@@ -193,6 +193,22 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             await enviarSeguro(phone, m); return m;
         }
 
+        // ── Consulta sobre entrega en efectivo / municipio ──
+        // Cliente pregunta por el proceso de entrega física (no está pidiendo cotización
+        // todavía) — explicación breve + link de la calculadora para que haga el pedido solo.
+        const estadoOcupado = cliente?.estado === "aguardando_comprovante" || cliente?.estado === "aguardando_numero_recarga";
+        const mencionaEntrega  = /entrega|entregan|entregar|domicilio|entregam/.test(txt);
+        const mencionaEfectivo = /efectivo|cash|dinheiro|espécie|especie/.test(txt);
+        const mencionaMunicipio = /municipio|município/.test(txt);
+        if (!estadoOcupado && !montoValido && (mencionaEntrega || mencionaEfectivo || mencionaMunicipio)) {
+            const link = "https://yorda-webhook-production.up.railway.app/calculadora.html";
+            const m = lang === "pt"
+                ? `🚚 *Entrega em dinheiro em Cuba*\n\nEntregamos direto no município sede das 16 províncias. Se for outro município, confirmamos disponibilidade por aqui mesmo.\n\n⏱️ Havana: até 24h · Demais províncias: até 48h (conforme demanda)\n\n💰 O custo da entrega é somado à parte — nunca é descontado do que seu familiar recebe.\n\nPara calcular o valor exato e fazer o pedido passo a passo, entra aqui 👇\n${link}`
+                : `🚚 *Entrega en efectivo en Cuba*\n\nEntregamos directo en el municipio cabecera de las 16 provincias. Si es otro municipio, confirmamos disponibilidad por aquí mismo.\n\n⏱️ La Habana: hasta 24h · Resto de provincias: hasta 48h (según demanda)\n\n💰 El costo de entrega se suma aparte — nunca se descuenta de lo que recibe tu familiar.\n\nPara calcular el monto exacto y hacer el pedido paso a paso, entra aquí 👇\n${link}`;
+            await enviarSeguro(phone, m);
+            return m;
+        }
+
         // ── QR ilegible ──
         if (/qr|codigo qr|no puedo escanear|no leo el qr|no consigo escanear/.test(txt)) {
             const key = getPIXKey();
