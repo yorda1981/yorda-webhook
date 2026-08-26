@@ -6,6 +6,22 @@ const { agregarOperacion, existeOperacionPendiente, obtenerPendienteCliente }   
 const { calcularOperacion }                                                        = require("../services/calculator");
 const { enviarMensaje, enviarImagen }                                              = require("../services/zapi");
 const crm                                                                          = require("../services/crm");
+const { esRecarga: esRecargaCliente }                                              = require("../services/reglas-bot");
+
+// Trae la descripción configurada para este tipo de recarga (la misma que se le
+// muestra al cliente al elegir "Nacional"/"Internacional" en recarga-flow.js) —
+// ahí es donde normalmente se especifica cuánto saldo entrega la recarga.
+// Consulta directa a la tabla en vez de importar recarga-flow.js para evitar
+// una dependencia circular (recarga-flow.js ya importa de este archivo).
+async function leerDescripcionRecarga(tipoRecarga) {
+    try {
+        const r = await pool.query("SELECT descripcion, precio FROM recargas WHERE tipo = $1 LIMIT 1", [tipoRecarga]);
+        return r.rows[0] || null;
+    } catch (e) {
+        console.error("❌ Error leyendo descripción de recarga:", e.message);
+        return null;
+    }
+}
 const {
     enviarSeguro, limpiarSesion, fmt, pick, pickL,
     getPIXKey, getPIXHolder, getPIXBank, getPIXImage, getAdminPhone,
@@ -53,7 +69,11 @@ async function enviarPIX(phone, cliente, esEs) {
         await enviarSeguro(phone, msg);
         return msg;
     }
-    const esRecarga = cliente?.tipo_favorito === "recarga_etecsa";
+    // BUG VIEJO: comparaba contra "recarga_etecsa", pero el valor real que se guarda
+    // (ver src/flows/recarga-flow.js) es "recarga_nacional" o "recarga_internacional" —
+    // por eso esRecarga nunca daba true y las recargas se trataban como remesa normal.
+    // Lógica en src/services/reglas-bot.js (probada en test/reglas-bot.test.js)
+    const esRecarga = esRecargaCliente(cliente);
     if (!esRecarga && !cliente?.tarjeta && !cliente?.tarjeta_frecuente) {
         const msg = esEs
             ? "Solo me falta la tarjeta de destino 💳\n\nEnvíame una foto o los 16 dígitos."
@@ -100,7 +120,7 @@ async function _enviarPIXFinal(phone, cliente, esEs) {
 
 async function intentarCompletarOperacion(phone, pushName, cliente, esEs) {
     if (!cliente) return false;
-    const esRecarga        = cliente.tipo_favorito === "recarga_etecsa";
+    const esRecarga        = esRecargaCliente(cliente);
     const tieneTarjeta     = !!(cliente.tarjeta || cliente.tarjeta_frecuente);
     const tieneComprobante = !!cliente.comprobante_pendiente;
 
@@ -160,7 +180,16 @@ async function intentarCompletarOperacion(phone, pushName, cliente, esEs) {
     const tipoOp   = cliente.tipo_favorito || "brl_cup";
     const totalBrl = resultado?.cup ?? resultado?.brl ?? 0;
     let lineasMonto;
-    if (tipoOp.startsWith("usd")) {
+    if (tipoOp.startsWith("recarga_")) {
+        // Las recargas no tienen tasa/CUP — es un precio fijo de la tabla `recargas`,
+        // no una operación de cambio. Antes esto caía al "else" de abajo y mostraba
+        // "Recibe: 0 CUP", que no tiene sentido para una recarga.
+        const tipoRecargaKey   = tipoOp.replace("recarga_", ""); // "nacional" | "internacional"
+        const tipoRecargaLabel = tipoRecargaKey === "nacional" ? "Nacional" : "Internacional";
+        const infoRecarga      = await leerDescripcionRecarga(tipoRecargaKey);
+        const saldoTxt         = infoRecarga?.descripcion ? `\n\n📶 ${infoRecarga.descripcion}` : "";
+        lineasMonto = `📱 Recarga ${tipoRecargaLabel}${saldoTxt}\n\n💵 Pagado: R$${cliente.ultimo_monto}`;
+    } else if (tipoOp.startsWith("usd")) {
         lineasMonto = `🇨🇺 Recibe: ${cliente.ultimo_monto} USD\n\n💵 Paga: R$${fmt(totalBrl)}`;
     } else if (tipoOp === "mlc") {
         lineasMonto = `🇨🇺 Recibe: ${cliente.ultimo_monto} MLC\n\n💵 Paga: R$${fmt(totalBrl)}`;
@@ -178,7 +207,7 @@ ${lineasMonto}
 
 🏦 Banco: ${cliente.banco_detectado || "-"}
 
-💳 Tarjeta:
+${esRecarga ? "📞 Número a recargar:" : "💳 Tarjeta:"}
 ${tarjetaFmt}
 
 👤 Titular:
