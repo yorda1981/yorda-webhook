@@ -14,11 +14,17 @@ async function leerTasas() {
     }
 }
 
-async function calcularOperacion({ tipo, valor }) {
-    const tasas = await leerTasas();
+// Lógica pura de cálculo — no toca la base de datos, así se puede probar sola
+// (ver test/calculator.test.js). calcularOperacion() de abajo es solo el que
+// lee las tasas de la DB y se las pasa a esta.
+function calcularConTasas({ tipo, valor, tasas, nivelVip }) {
     if (!tasas) return null;
-
     const monto = Number(valor);
+    const nivel = Number(nivelVip || 0);
+    const bonoVip = nivel === 3 ? Number(tasas.bono_vip_3 || 0)
+        : nivel === 2 ? Number(tasas.bono_vip_2 || 0)
+        : nivel === 1 ? Number(tasas.bono_vip_1 || 0)
+        : 0;
 
     if (tipo === "brl_cup") {
         let tasa = 0;
@@ -26,6 +32,7 @@ async function calcularOperacion({ tipo, valor }) {
         else if (monto < 500)  tasa = Number(tasas.brl_100);
         else if (monto < 1000) tasa = Number(tasas.brl_500);
         else                   tasa = Number(tasas.brl_1000);
+        tasa += bonoVip;
         return { valor: monto, tasa, cup: Math.floor(monto * tasa) };
     }
 
@@ -48,4 +55,9 @@ async function calcularOperacion({ tipo, valor }) {
     return null;
 }
 
-module.exports = { calcularOperacion };
+async function calcularOperacion({ tipo, valor, nivelVip }) {
+    const tasas = await leerTasas();
+    return calcularConTasas({ tipo, valor, tasas, nivelVip });
+}
+
+module.exports = { calcularOperacion, calcularConTasas };
