@@ -79,6 +79,28 @@ const MINUTOS_PAUSA = 10;
                 ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP
         `);
     } catch (e) { console.error("⚠️ Migración pedidos web:", e.message); }
+    try {
+        // Programa VIP por niveles (⭐/⭐⭐/⭐⭐⭐), recalculado sobre ventana móvil de 365 días.
+        // nivel_vip: 0 = no VIP, 1/2/3 = nivel actual (puede subir o bajar con el tiempo).
+        await pool.query("ALTER TABLE customers ADD COLUMN IF NOT EXISTS nivel_vip INTEGER DEFAULT 0");
+        await pool.query(`
+            ALTER TABLE rates
+                ADD COLUMN IF NOT EXISTS umbral_vip_1 NUMERIC DEFAULT 10000,
+                ADD COLUMN IF NOT EXISTS umbral_vip_2 NUMERIC DEFAULT 25000,
+                ADD COLUMN IF NOT EXISTS umbral_vip_3 NUMERIC DEFAULT 50000,
+                ADD COLUMN IF NOT EXISTS bono_vip_1 NUMERIC DEFAULT 1,
+                ADD COLUMN IF NOT EXISTS bono_vip_2 NUMERIC DEFAULT 2,
+                ADD COLUMN IF NOT EXISTS bono_vip_3 NUMERIC DEFAULT 3,
+                ADD COLUMN IF NOT EXISTS descuento_entrega_1 NUMERIC DEFAULT 50,
+                ADD COLUMN IF NOT EXISTS descuento_entrega_2 NUMERIC DEFAULT 75,
+                ADD COLUMN IF NOT EXISTS descuento_entrega_3 NUMERIC DEFAULT 100
+        `);
+        await pool.query(`
+            ALTER TABLE ofertas
+                ADD COLUMN IF NOT EXISTS texto_vip TEXT,
+                ADD COLUMN IF NOT EXISTS activa_vip BOOLEAN DEFAULT false
+        `);
+    } catch (e) { console.error("⚠️ Migración VIP por niveles:", e.message); }
 })();
 
 // ─────────────────────────────────────────
@@ -288,7 +310,12 @@ app.get("/admin/tasas", adminLimiter, verificarToken, async (req, res) => {
 
 app.post("/admin/tasas", adminLimiter, verificarToken, async (req, res) => {
     try {
-        const { brl_0, brl_100, brl_500, brl_1000, usd1, usd2, mlc, efectivo, tarifa_entrega } = req.body;
+        const {
+            brl_0, brl_100, brl_500, brl_1000, usd1, usd2, mlc, efectivo, tarifa_entrega,
+            umbral_vip_1, umbral_vip_2, umbral_vip_3,
+            bono_vip_1, bono_vip_2, bono_vip_3,
+            descuento_entrega_1, descuento_entrega_2, descuento_entrega_3
+        } = req.body;
         await pool.query(`
             UPDATE rates SET
                 brl_0    = COALESCE($1, brl_0),
@@ -300,9 +327,23 @@ app.post("/admin/tasas", adminLimiter, verificarToken, async (req, res) => {
                 mlc      = COALESCE($7, mlc),
                 efectivo = COALESCE($8, efectivo),
                 tarifa_entrega = COALESCE($9, tarifa_entrega),
+                umbral_vip_1 = COALESCE($10, umbral_vip_1),
+                umbral_vip_2 = COALESCE($11, umbral_vip_2),
+                umbral_vip_3 = COALESCE($12, umbral_vip_3),
+                bono_vip_1   = COALESCE($13, bono_vip_1),
+                bono_vip_2   = COALESCE($14, bono_vip_2),
+                bono_vip_3   = COALESCE($15, bono_vip_3),
+                descuento_entrega_1 = COALESCE($16, descuento_entrega_1),
+                descuento_entrega_2 = COALESCE($17, descuento_entrega_2),
+                descuento_entrega_3 = COALESCE($18, descuento_entrega_3),
                 updated_at = NOW()
             WHERE id = 1
-        `, [brl_0, brl_100, brl_500, brl_1000, usd1, usd2, mlc, efectivo, tarifa_entrega]);
+        `, [
+            brl_0, brl_100, brl_500, brl_1000, usd1, usd2, mlc, efectivo, tarifa_entrega,
+            umbral_vip_1, umbral_vip_2, umbral_vip_3,
+            bono_vip_1, bono_vip_2, bono_vip_3,
+            descuento_entrega_1, descuento_entrega_2, descuento_entrega_3
+        ]);
         res.json({ success: true });
     } catch (e) {
         console.error("❌ ERROR TASAS:", e);
@@ -380,6 +421,22 @@ app.post("/admin/completar-operacion/:id", adminLimiter, verificarToken, async (
         const notificado = await enviarMensaje(operacion.phone, msg);
         if (!notificado) console.error(`⚠️ No se pudo notificar al cliente de la operación #${operacion.id} (phone: ${operacion.phone})`);
 
+        // Programa VIP: recalcula el nivel (0-3) sobre los últimos 365 días. Si subió,
+        // se le avisa con el nivel nuevo. Si bajó, se actualiza en silencio (no se
+        // manda un mensaje negativo al cliente).
+        try {
+            const { nivelAnterior, nivelNuevo } = await crm.recalcularNivelVipUno(operacion.phone);
+            if (nivelNuevo > nivelAnterior) {
+                const estrellas = "⭐".repeat(nivelNuevo);
+                const mVip = `🌟 *¡Felicidades! Ahora eres cliente VIP ${estrellas} de Yorda Envíos!*\n\nDesde ahora tienes:\n💰 Tasa preferencial en tus próximas transferencias\n🚚 Descuento en tus pedidos de entrega en efectivo\n🎁 Promociones exclusivas para ti\n\n¡Gracias por confiar en nosotros! 💜🇨🇺`;
+                await enviarMensaje(operacion.phone, mVip);
+            } else if (nivelNuevo < nivelAnterior) {
+                console.log(`ℹ️ Cliente ${operacion.phone} bajó de nivel VIP: ${nivelAnterior} → ${nivelNuevo}`);
+            }
+        } catch (e) {
+            console.error("⚠️ Error recalculando nivel VIP:", e.message);
+        }
+
         res.json({ success: true, notificado });
     } catch (e) {
         res.status(500).json({ success: false, error: e.message });
@@ -423,15 +480,17 @@ app.get("/admin/oferta", adminLimiter, verificarToken, async (req, res) => {
 
 app.post("/admin/oferta", adminLimiter, verificarToken, async (req, res) => {
     try {
-        const { texto, activa, vence_at } = req.body;
+        const { texto, activa, vence_at, texto_vip, activa_vip } = req.body;
         await pool.query(`
             UPDATE ofertas SET
                 texto = $1,
                 activa = $2,
                 vence_at = $3,
+                texto_vip = $4,
+                activa_vip = $5,
                 updated_at = NOW()
             WHERE id = 1
-        `, [texto, activa, vence_at || null]);
+        `, [texto, activa, vence_at || null, texto_vip || null, !!activa_vip]);
         res.json({ success: true });
     } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
@@ -480,6 +539,29 @@ setInterval(() => {
         console.error("❌ CRM recordatorios:", e.message)
     );
 }, 15 * 60 * 1000);
+
+// Recalcular niveles VIP (⭐/⭐⭐/⭐⭐⭐) de TODOS los clientes una vez al día.
+// Ventana móvil de 365 días — esto es lo que detecta cuando alguien BAJA de
+// nivel por inactividad (no solo cuando sube al completar una operación nueva).
+// Solo avisa por WhatsApp a quien SUBIÓ; las bajadas se aplican en silencio.
+async function recalcularNivelesVipYAvisar() {
+    try {
+        const cambios = await crm.recalcularNivelesVip();
+        for (const c of cambios) {
+            if (c.nivel_nuevo > c.nivel_anterior) {
+                const estrellas = "⭐".repeat(c.nivel_nuevo);
+                const mVip = `🌟 *¡Felicidades! Ahora eres cliente VIP ${estrellas} de Yorda Envíos!*\n\nDesde ahora tienes:\n💰 Tasa preferencial en tus próximas transferencias\n🚚 Descuento en tus pedidos de entrega en efectivo\n🎁 Promociones exclusivas para ti\n\n¡Gracias por confiar en nosotros! 💜🇨🇺`;
+                await enviarMensaje(c.phone, mVip);
+            } else {
+                console.log(`ℹ️ Cliente ${c.phone} bajó de nivel VIP: ${c.nivel_anterior} → ${c.nivel_nuevo}`);
+            }
+        }
+    } catch (e) {
+        console.error("❌ CRM recalcular niveles VIP:", e.message);
+    }
+}
+setTimeout(recalcularNivelesVipYAvisar, 10 * 1000); // espera un poco a que terminen las migraciones al arrancar
+setInterval(recalcularNivelesVipYAvisar, 24 * 60 * 60 * 1000);
 
 // ══════════════════════════════════════
 // MENSAJE DIARIO DE TASAS (10:15 hora de Bahía = 13:15 UTC)
