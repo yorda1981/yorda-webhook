@@ -13,11 +13,23 @@ const {
 // HELPERS DB
 // ─────────────────────────────────────────
 
-async function leerOferta() {
+async function leerOferta(esVip) {
     try {
-        const r = await pool.query("SELECT * FROM ofertas WHERE activa = true AND (vence_at IS NULL OR vence_at > NOW()) LIMIT 1");
-        return r.rows[0]?.texto || null;
+        const r = await pool.query("SELECT * FROM ofertas LIMIT 1");
+        const row = r.rows[0];
+        if (!row) return null;
+        // Oferta exclusiva VIP tiene prioridad si está activa y el cliente es VIP (cualquier nivel)
+        if (esVip && row.activa_vip && row.texto_vip) return row.texto_vip;
+        if (row.activa && (!row.vence_at || new Date(row.vence_at) > new Date())) return row.texto || null;
+        return null;
     } catch { return null; }
+}
+
+async function nivelVipPhone(phone) {
+    try {
+        const r = await pool.query("SELECT nivel_vip FROM customers WHERE phone = $1", [phone]);
+        return Number(r.rows[0]?.nivel_vip || 0);
+    } catch { return 0; }
 }
 
 async function leerTasas() {
@@ -32,7 +44,8 @@ async function leerTasas() {
 // ─────────────────────────────────────────
 
 async function cotizarBRL(phone, pushName, valorFinal, lang) {
-    const r = await calcularOperacion({ tipo: "brl_cup", valor: valorFinal });
+    const nivelVip = await nivelVipPhone(phone);
+    const r = await calcularOperacion({ tipo: "brl_cup", valor: valorFinal, nivelVip });
     if (!r) return null;
 
     await guardarCliente({
@@ -47,10 +60,11 @@ async function cotizarBRL(phone, pushName, valorFinal, lang) {
     if (valorFinal < 100)       tip = "\n\n💡 Con R$100+ la tasa mejora.";
     else if (valorFinal < 500)  tip = "\n\n🔥 Con R$500+ la tasa sube otro escalón.";
     else if (valorFinal < 1000) tip = "\n\n🚀 Con R$1000+ obtienes la mejor tasa.";
+    const vipTip = nivelVip > 0 ? `\n\n${"⭐".repeat(nivelVip)} Tasa VIP aplicada.` : "";
 
-    const oferta    = await leerOferta();
+    const oferta    = await leerOferta(nivelVip > 0);
     const ofertaMsg = oferta ? `\n\n🔥 *OFERTA:* ${oferta}` : "";
-    const res = `💵 R$${valorFinal} = ${fmt(r.cup)} CUP 🇨🇺${tip}${ofertaMsg}\n\n${pickL(CIERRES_COT, CIERRES_COT_PT, lang)}`;
+    const res = `💵 R$${valorFinal} = ${fmt(r.cup)} CUP 🇨🇺${tip}${vipTip}${ofertaMsg}\n\n${pickL(CIERRES_COT, CIERRES_COT_PT, lang)}`;
     await enviarSeguro(phone, res);
     return res;
 }
@@ -71,7 +85,8 @@ async function cotizarUSD(phone, pushName, valorFinal, tipo, lang, esEs) {
     });
     await crm.onCotizacion(phone, lang);
 
-    const oferta    = await leerOferta();
+    const nivelVip  = await nivelVipPhone(phone);
+    const oferta    = await leerOferta(nivelVip > 0);
     const ofertaMsg = oferta ? `\n\n🔥 *OFERTA:* ${oferta}` : "";
     const res = `💵 ${valorFinal} USD = R$${fmt(r.cup)} 🇧🇷${ofertaMsg}\n\n${pickL(CIERRES_COT, CIERRES_COT_PT, lang)}`;
     await enviarSeguro(phone, res);
@@ -107,7 +122,8 @@ async function cotizarMLC(phone, pushName, valorFinal, lang) {
         await enviarSeguro(phone, msg);
         return msg;
     }
-    const oferta    = await leerOferta();
+    const nivelVip  = await nivelVipPhone(phone);
+    const oferta    = await leerOferta(nivelVip > 0);
     const ofertaMsg = oferta ? `\n\n🔥 *OFERTA:* ${oferta}` : "";
     const res = lang === "pt"
         ? `💳 ${valorFinal} MLC = R$${fmt(r.cup)} 🇧🇷${ofertaMsg}\n\n${pickL(CIERRES_COT, CIERRES_COT_PT, lang)}`
