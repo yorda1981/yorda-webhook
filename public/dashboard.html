@@ -419,7 +419,7 @@
 
                 // Ranking
                 const tbodyCli = document.getElementById("clientesTable");
-                const confirmadas = operaciones.filter(o => o.status === "confirmada");
+                const confirmadas = operaciones.filter(o => o.status === "confirmada" || o.status === "completada");
                 const ranking = listaClientes.map(c => ({
                     ...c,
                     totalReal: confirmadas.filter(o => o.phone === c.phone).reduce((acc, o) => acc + Number(o.monto), 0)
