@@ -5,7 +5,7 @@ require("dotenv").config();
 const { guardarCliente, obtenerCliente, marcarSaludoPendiente }          = require("./customer-memory");
 const { obtenerUltimaOperacion }                   = require("./operations");
 const crm                                          = require("./crm");
-const { esTarjetaDuplicada, esConsultaEntrega, esBareMontoValido, esEnvioNuevoSobreAbandonado, puedeCotizarBRL, clienteEstaOcupado } = require("./reglas-bot");
+const { esTarjetaDuplicada, esConsultaEntrega, esBareMontoValido, esEnvioNuevoSobreAbandonado, puedeCotizarBRL, clienteEstaOcupado, debeCompletarConMontoPendiente, debeConfirmarCotizacion, tieneTarjetaGuardada } = require("./reglas-bot");
 
 // Flows
 const { detectarImagenUnificada, detectarComprobantePDF, llamarAsistente } = require("../flows/imagen-flow");
@@ -151,8 +151,8 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
 
         // ── FIX LOOP (parte 2): comprobante + tarjeta ya recibidos, solo faltaba el monto ──
         // El cliente responde el monto → cerrar la operación directamente (NO cotizar de nuevo).
-        const esSoloMonto = /^\s*r?\$?\s*\d{1,6}([.,]\d{1,2})?\s*(reales|reais|brl|r\$)?\s*$/i.test(text || "");
-        if (cliente?.comprobante_pendiente && (cliente.tarjeta || cliente.tarjeta_frecuente) && montoValido && esSoloMonto) {
+        // Lógica en src/services/reglas-bot.js (probada en test/reglas-bot.test.js)
+        if (debeCompletarConMontoPendiente(cliente, montoValido, text)) {
             await guardarCliente({ phone, monto: valorFinal, tipo: cliente.tipo_favorito || "brl_cup" });
             await intentarCompletarOperacion(phone, pushName, await obtenerCliente(phone), esEs);
             return "";
@@ -225,8 +225,9 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
 
         // FIX 5: Confirmación — verificar que NO hay monto nuevo en el mensaje
         // "quiero 200 reales" no debe confirmar, debe cotizar
-        if (esConfirma && cliente?.estado === "cotizacion_realizada" && !montoValido) {
-            if (!cliente.tarjeta && !cliente.tarjeta_frecuente) {
+        // Lógica en src/services/reglas-bot.js (probada en test/reglas-bot.test.js)
+        if (debeConfirmarCotizacion(cliente, esConfirma, montoValido)) {
+            if (!tieneTarjetaGuardada(cliente)) {
                 await enviarSeguro(phone, pickL(
                     ["¡Casi listo! Solo necesito la tarjeta 💳\n\nMándame foto o los 16 dígitos."],
                     ["Quase lá! Só preciso do cartão 💳\n\nManda uma foto ou os 16 dígitos."], lang));
@@ -284,7 +285,10 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         if (/estado|mi operacion|mi envio|cuando llega|cuando llego|cuanto falta|ya llego|esta listo/.test(txt)) {
             const ultima = await obtenerUltimaOperacion(phone);
             if (!ultima) { await enviarSeguro(phone, "No encuentro operaciones registradas 🤔\n\n¿Quieres hacer un envío?"); return ""; }
-            await enviarSeguro(phone, `Tu última operación: R$${ultima.monto} — ${ultima.status === "confirmada" ? "✅ Confirmada" : "⏳ Pendiente"}`);
+            const estadoTxt = ultima.status === "completada" ? "🎉 Completada"
+                : ultima.status === "confirmada" ? "✅ Confirmada, en proceso"
+                : "⏳ Pendiente de verificar";
+            await enviarSeguro(phone, `Tu última operación: R$${ultima.monto} — ${estadoTxt}`);
             return "";
         }
 
@@ -511,4 +515,4 @@ async function preguntarCantidadUSD(phone, txt, lang, esEs) {
     await enviarSeguro(phone, m); return m;
 }
 
-module.exports = { detectarImagenUnificada, detectarComprobantePDF, procesarMensaje };
+module.exports = { detectarImagenUnificada, detectarComprobantePDF, procesarMensaje, extraerMonto, detectarTarjetaTexto };
