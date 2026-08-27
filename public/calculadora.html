@@ -1601,13 +1601,7 @@ function construirMensajeWhatsApp(){
     if(pedido.plazoTxt) l.push(pedido.plazoTxt);
   }
   if(pedido.datos.observaciones) l.push(`📝 ${pedido.datos.observaciones}`);
-  l.push("");
-  if(pedido.pixPayload){
-    l.push(lang==="pt" ? "💳 *Código PIX (copia e cole no seu banco):*" : "💳 *Código PIX (copia y pega en tu banco):*");
-    l.push(pedido.pixPayload);
-  } else {
-    l.push(`💳 ${lang==="pt"?"Pagamento":"Pago"}: PIX`);
-  }
+  l.push("", `💳 ${lang==="pt"?"Pagamento":"Pago"}: PIX`);
 
   return l.join("\n");
 }
