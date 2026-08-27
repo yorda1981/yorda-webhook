@@ -170,8 +170,8 @@ async function obtenerEstadisticas() {
     try {
         const result = await pool.query(`
             SELECT
-                COUNT(*) FILTER (WHERE status = 'confirmada') AS total,
-                COALESCE(SUM(monto) FILTER (WHERE status = 'confirmada'), 0) AS volumen,
+                COUNT(*) FILTER (WHERE status IN ('confirmada','completada')) AS total,
+                COALESCE(SUM(monto) FILTER (WHERE status IN ('confirmada','completada')), 0) AS volumen,
                 COUNT(*) FILTER (WHERE status = 'pendiente') AS pendientes,
                 COUNT(*) FILTER (WHERE status = 'completada') AS completadas
             FROM operations
