@@ -159,7 +159,7 @@ async function intentarCompletarOperacion(phone, pushName, cliente, esEs) {
     const yaExiste = await existeOperacionPendiente(phone, cliente.ultimo_monto);
     if (yaExiste) return true;
 
-    const resultado = await calcularOperacion({ tipo: cliente.tipo_favorito, valor: cliente.ultimo_monto });
+    const resultado = await calcularOperacion({ tipo: cliente.tipo_favorito, valor: cliente.ultimo_monto, nivelVip: Number(cliente.nivel_vip || 0) });
 
     await guardarCliente({ phone, comprobantePendiente: false });
     const operacion = await agregarOperacion({
