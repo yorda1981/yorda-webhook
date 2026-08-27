@@ -159,7 +159,7 @@ async function verificarYMarcarFrecuente(phone) {
         const r = await pool.query(`
             SELECT COUNT(*) AS total
             FROM operations
-            WHERE phone = $1 AND status = 'confirmada'
+            WHERE phone = $1 AND status IN ('confirmada','completada')
         `, [phone]);
         const total = Number(r.rows[0]?.total || 0);
         if (total >= 3) {
@@ -427,7 +427,7 @@ async function migrarColumnasCRM() {
             SET estado_crm = 'completado'
             WHERE estado_crm IS NULL
               AND phone IN (
-                  SELECT DISTINCT phone FROM operations WHERE status = 'confirmada'
+                  SELECT DISTINCT phone FROM operations WHERE status IN ('confirmada','completada')
               )
         `);
         await pool.query(`
