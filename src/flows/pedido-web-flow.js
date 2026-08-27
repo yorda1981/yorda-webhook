@@ -12,8 +12,17 @@
 // interpreta y sigue el flujo normal del bot (fallback seguro).
 // ─────────────────────────────────────────────────────────
 
+const pool = require("../../db");
 const { agregarOperacion, buscarPorRefWeb } = require("../services/operations");
 const { enviarSeguro } = require("./shared");
+
+// Consulta el nivel VIP (0-3) de este teléfono (para el descuento de entrega escalado).
+async function nivelVipDe(phone) {
+    try {
+        const r = await pool.query("SELECT nivel_vip FROM customers WHERE phone = $1", [phone]);
+        return Number(r.rows[0]?.nivel_vip || 0);
+    } catch { return 0; }
+}
 
 function esPedidoWeb(texto) {
     if (!texto) return false;
@@ -75,10 +84,41 @@ async function manejarEntrega(phone, texto, pushName, esEs) {
 
     const tipo = datos.moneda === "USD" ? "usd_efectivo" : "cup_efectivo";
 
+    // Beneficio VIP: descuento de entrega escalado por nivel (⭐ 50% / ⭐⭐ 75% / ⭐⭐⭐ 100%).
+    // El total que llega en "datos.monto" ya incluye la tarifa de entrega (se calculó
+    // así en la calculadora, que no sabe si el cliente es VIP porque ahí no hay
+    // identidad). Si el cliente ya tiene un nivel, se lo descontamos aquí antes de
+    // guardar la operación, y se lo avisamos en el mensaje.
+    let montoFinal = datos.monto;
+    let notaVip = "";
+    const nivel = await nivelVipDe(phone);
+    if (nivel > 0) {
+        try {
+            const rConfig = await pool.query(
+                "SELECT tarifa_entrega, descuento_entrega_1, descuento_entrega_2, descuento_entrega_3 FROM rates LIMIT 1"
+            );
+            const cfg = rConfig.rows[0] || {};
+            const tarifa = Number(cfg.tarifa_entrega || 0);
+            const descPct = nivel === 3 ? Number(cfg.descuento_entrega_3 || 0)
+                : nivel === 2 ? Number(cfg.descuento_entrega_2 || 0)
+                : Number(cfg.descuento_entrega_1 || 0);
+            const descuento = Math.round(tarifa * descPct / 100);
+            if (descuento > 0 && montoFinal > descuento) {
+                montoFinal -= descuento;
+                const estrellas = "⭐".repeat(nivel);
+                notaVip = esEs
+                    ? `\n\n${estrellas} Como cliente VIP, tienes ${descPct}% de descuento en la entrega — ya te lo aplicamos.`
+                    : `\n\n${estrellas} Como cliente VIP, você tem ${descPct}% de desconto na entrega — já aplicamos.`;
+            }
+        } catch (e) {
+            console.error("❌ Error aplicando descuento VIP de entrega:", e.message);
+        }
+    }
+
     const operacion = await agregarOperacion({
         phone,
         nombre:  pushName || datos.nombre,
-        monto:   datos.monto,
+        monto:   montoFinal,
         cup:     datos.moneda === "CUP" ? datos.montoRecibe : 0,
         titular: datos.nombre,
         tipo,
@@ -94,8 +134,8 @@ async function manejarEntrega(phone, texto, pushName, esEs) {
     if (!operacion) return false;
 
     await enviarSeguro(phone, esEs
-        ? `📩 Recibimos tu pedido #${operacion.id}. Lo estamos verificando, te avisamos en cuanto esté confirmado. 🇨🇺`
-        : `📩 Recebemos seu pedido #${operacion.id}. Estamos verificando, avisamos assim que for confirmado. 🇨🇺`
+        ? `📩 Recibimos tu pedido #${operacion.id}. Lo estamos verificando, te avisamos en cuanto esté confirmado. 🇨🇺${notaVip}`
+        : `📩 Recebemos seu pedido #${operacion.id}. Estamos verificando, avisamos assim que for confirmado. 🇨🇺${notaVip}`
     );
     return true;
 }
@@ -186,4 +226,9 @@ async function procesarPedidoWeb(phone, texto, pushName) {
     return await manejarTransferencia(phone, texto, pushName, esEs);
 }
 
-module.exports = { esPedidoWeb, procesarPedidoWeb };
+module.exports = {
+    esPedidoWeb, procesarPedidoWeb,
+    // exportados también para pruebas automáticas (test/pedido-web-flow.test.js) —
+    // son funciones puras, no tocan WhatsApp ni la base de datos
+    esEntrega, parsearPedidoEntrega, parsearPedidoTransferencia, limpiarNumero
+};
