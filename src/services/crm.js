@@ -176,6 +176,97 @@ async function verificarYMarcarFrecuente(phone) {
     }
 }
 
+/**
+ * Marcar como cliente VIP (R$10.000+ en operaciones confirmadas/completadas).
+ * Devuelve true SOLO la primera vez que cruza el umbral (para no repetir el
+ * mensaje de bienvenida VIP en cada operación futura).
+ */
+/**
+ * Recalcula el nivel VIP (0-3) de UN cliente, sobre ventana móvil de 365 días
+ * (solo cuenta operaciones confirmada/completada de los últimos 365 días —
+ * por eso el nivel puede subir O bajar con el tiempo, no es histórico total).
+ * Se usa justo después de completar una operación, para avisar al instante
+ * si el cliente subió de nivel. Devuelve { nivelAnterior, nivelNuevo }.
+ */
+async function recalcularNivelVipUno(phone) {
+    try {
+        const r = await pool.query(`
+            SELECT
+                c.nivel_vip AS nivel_anterior,
+                COALESCE((
+                    SELECT SUM(o.monto) FROM operations o
+                    WHERE o.phone = c.phone
+                      AND o.status IN ('confirmada','completada')
+                      AND o.created_at > NOW() - INTERVAL '365 days'
+                ), 0) AS total,
+                rt.umbral_vip_1, rt.umbral_vip_2, rt.umbral_vip_3
+            FROM customers c
+            CROSS JOIN (SELECT umbral_vip_1, umbral_vip_2, umbral_vip_3 FROM rates LIMIT 1) rt
+            WHERE c.phone = $1
+        `, [phone]);
+        const row = r.rows[0];
+        if (!row) return { nivelAnterior: 0, nivelNuevo: 0 };
+
+        const total = Number(row.total || 0);
+        const nivelAnterior = Number(row.nivel_anterior || 0);
+        let nivelNuevo = 0;
+        if (total >= Number(row.umbral_vip_3)) nivelNuevo = 3;
+        else if (total >= Number(row.umbral_vip_2)) nivelNuevo = 2;
+        else if (total >= Number(row.umbral_vip_1)) nivelNuevo = 1;
+
+        if (nivelNuevo !== nivelAnterior) {
+            await pool.query("UPDATE customers SET nivel_vip = $1, updated_at = NOW() WHERE phone = $2", [nivelNuevo, phone]);
+        }
+        return { nivelAnterior, nivelNuevo };
+    } catch (e) {
+        console.warn("⚠️ CRM: recalcularNivelVipUno:", e.message);
+        return { nivelAnterior: 0, nivelNuevo: 0 };
+    }
+}
+
+/**
+ * Recalcula el nivel VIP de TODOS los clientes de una sola pasada (una
+ * consulta SQL, no un loop en JS). Pensado para correr una vez al día —
+ * así se detectan también las bajadas de nivel por inactividad (un cliente
+ * que dejó de operar y sus operaciones más viejas ya salieron de la ventana
+ * de 365 días), no solo cuando completa una operación nueva.
+ * Devuelve la lista de clientes cuyo nivel cambió.
+ */
+async function recalcularNivelesVip() {
+    try {
+        const r = await pool.query(`
+            UPDATE customers c
+            SET nivel_vip = sub.nivel_nuevo, updated_at = NOW()
+            FROM (
+                SELECT
+                    cu.phone, cu.nombre, cu.nivel_vip AS nivel_anterior,
+                    CASE
+                        WHEN COALESCE(op.total,0) >= rt.umbral_vip_3 THEN 3
+                        WHEN COALESCE(op.total,0) >= rt.umbral_vip_2 THEN 2
+                        WHEN COALESCE(op.total,0) >= rt.umbral_vip_1 THEN 1
+                        ELSE 0
+                    END AS nivel_nuevo
+                FROM customers cu
+                CROSS JOIN (SELECT umbral_vip_1, umbral_vip_2, umbral_vip_3 FROM rates LIMIT 1) rt
+                LEFT JOIN (
+                    SELECT phone, SUM(monto) AS total
+                    FROM operations
+                    WHERE status IN ('confirmada','completada')
+                      AND created_at > NOW() - INTERVAL '365 days'
+                    GROUP BY phone
+                ) op ON op.phone = cu.phone
+            ) sub
+            WHERE c.phone = sub.phone
+              AND COALESCE(c.nivel_vip,0) IS DISTINCT FROM sub.nivel_nuevo
+            RETURNING c.phone, sub.nombre, sub.nivel_anterior, sub.nivel_nuevo
+        `);
+        return r.rows;
+    } catch (e) {
+        console.warn("⚠️ CRM: recalcularNivelesVip:", e.message);
+        return [];
+    }
+}
+
 // ─────────────────────────────────────────
 // REGISTRAR PRIMER CONTACTO
 // ─────────────────────────────────────────
@@ -465,6 +556,10 @@ module.exports = {
 
     // Estadísticas
     obtenerEstadisticasCRM,
+
+    // Programa VIP (por niveles ⭐/⭐⭐/⭐⭐⭐)
+    recalcularNivelVipUno,
+    recalcularNivelesVip,
 
     // Migración
     migrarColumnasCRM
