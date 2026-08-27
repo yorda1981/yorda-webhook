@@ -78,7 +78,8 @@
 
         <div class="config-section" id="seccionTasas">
             <h3>💱 Configuración de Tasas</h3>
-            <div class="grid-inputs" id="tasasForm">
+            <div id="tasasForm">
+            <div class="grid-inputs">
                 <div class="input-group"><label>Menos de 100 BRL</label><input type="number" id="brl_0" placeholder="Ej: 45"></div>
                 <div class="input-group"><label>100 - 499 BRL</label><input type="number" id="brl_100" placeholder="Ej: 50"></div>
                 <div class="input-group"><label>500 - 999 BRL</label><input type="number" id="brl_500" placeholder="Ej: 55"></div>
@@ -88,6 +89,25 @@
                 <div class="input-group"><label>MLC (Tasa CUP)</label><input type="number" step="0.01" id="mlc" placeholder="Ej: 270"></div>
                 <div class="input-group"><label>Efectivo (CUP por real)</label><input type="number" step="0.01" id="efectivo" placeholder="Ej: 115"></div>
                 <div class="input-group"><label>Tarifa de entrega (R$)</label><input type="number" step="0.01" id="tarifa_entrega" placeholder="Ej: 20"></div>
+            </div>
+
+            <h3 style="margin-top:24px; color:#facc15;">🌟 Programa VIP — por niveles</h3>
+            <p style="color:#8b949e; font-size:13px; margin-top:-10px; margin-bottom:14px;">
+                El nivel se recalcula sobre los últimos 365 días de operaciones — puede subir o bajar con el tiempo.
+            </p>
+            <div class="grid-inputs">
+                <div class="input-group"><label>⭐ Nivel 1 — Monto mínimo (R$/año)</label><input type="number" step="0.01" id="umbral_vip_1" placeholder="Ej: 10000"></div>
+                <div class="input-group"><label>⭐ Nivel 1 — Bono de tasa (CUP extra)</label><input type="number" step="0.01" id="bono_vip_1" placeholder="Ej: 1"></div>
+                <div class="input-group"><label>⭐ Nivel 1 — Descuento de entrega (%)</label><input type="number" step="1" id="descuento_entrega_1" placeholder="Ej: 50"></div>
+
+                <div class="input-group"><label>⭐⭐ Nivel 2 — Monto mínimo (R$/año)</label><input type="number" step="0.01" id="umbral_vip_2" placeholder="Ej: 25000"></div>
+                <div class="input-group"><label>⭐⭐ Nivel 2 — Bono de tasa (CUP extra)</label><input type="number" step="0.01" id="bono_vip_2" placeholder="Ej: 2"></div>
+                <div class="input-group"><label>⭐⭐ Nivel 2 — Descuento de entrega (%)</label><input type="number" step="1" id="descuento_entrega_2" placeholder="Ej: 75"></div>
+
+                <div class="input-group"><label>⭐⭐⭐ Nivel 3 — Monto mínimo (R$/año)</label><input type="number" step="0.01" id="umbral_vip_3" placeholder="Ej: 50000"></div>
+                <div class="input-group"><label>⭐⭐⭐ Nivel 3 — Bono de tasa (CUP extra)</label><input type="number" step="0.01" id="bono_vip_3" placeholder="Ej: 3"></div>
+                <div class="input-group"><label>⭐⭐⭐ Nivel 3 — Descuento de entrega (%)</label><input type="number" step="1" id="descuento_entrega_3" placeholder="Ej: 100"></div>
+            </div>
             </div>
             <button class="btn-save" id="btnSave" onclick="guardarTasas()">Guardar Cambios de Tasas</button>
         </div>
@@ -229,6 +249,15 @@
                     <input type="checkbox" id="oferta_activa" style="width:18px;height:18px;cursor:pointer;">
                     <label for="oferta_activa" style="cursor:pointer;">Oferta activa</label>
                 </div>
+                <hr style="border-color:#2d355a; margin:14px 0;">
+                <div class="input-group">
+                    <label>🌟 Oferta exclusiva VIP</label>
+                    <input type="text" id="oferta_vip_texto" placeholder="Ej: Solo para VIP: entrega gratis toda la semana!" style="background:#0b0e1a;border:1px solid #2d355a;padding:14px;border-radius:12px;color:white;font-size:14px;outline:none;">
+                </div>
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <input type="checkbox" id="oferta_vip_activa" style="width:18px;height:18px;cursor:pointer;">
+                    <label for="oferta_vip_activa" style="cursor:pointer;">Oferta VIP activa (se muestra en vez de la oferta general, solo a clientes VIP)</label>
+                </div>
                 <button class="btn-save" id="btnOferta" onclick="guardarOferta()" style="margin-top:10px;">Guardar Oferta</button>
             </div>
         </div>
@@ -287,6 +316,8 @@
                 if (d.texto) document.getElementById("oferta_texto").value = d.texto;
                 if (d.vence_at) document.getElementById("oferta_vence").value = new Date(d.vence_at).toISOString().slice(0,16);
                 document.getElementById("oferta_activa").checked = !!d.activa;
+                if (d.texto_vip) document.getElementById("oferta_vip_texto").value = d.texto_vip;
+                document.getElementById("oferta_vip_activa").checked = !!d.activa_vip;
             } catch(e) { console.error("Error cargando oferta:", e); }
         }
 
@@ -300,7 +331,9 @@
                     body: JSON.stringify({
                         texto: document.getElementById("oferta_texto").value,
                         activa: document.getElementById("oferta_activa").checked,
-                        vence_at: document.getElementById("oferta_vence").value || null
+                        vence_at: document.getElementById("oferta_vence").value || null,
+                        texto_vip: document.getElementById("oferta_vip_texto").value,
+                        activa_vip: document.getElementById("oferta_vip_activa").checked
                     })
                 });
                 const d = await res.json();
@@ -589,14 +622,18 @@
             if (slice.length === 0) {
                 tbodyCli.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#8b949e;padding:20px;">Sin clientes aún</td></tr>';
             } else {
-                tbodyCli.innerHTML = slice.map(c => `
+                tbodyCli.innerHTML = slice.map(c => {
+                    const nivel = Number(c.nivel_vip || 0);
+                    const estrellas = "⭐".repeat(nivel);
+                    return `
                     <tr>
-                        <td>${c.nombre || "Desconocido"} ${c.totalReal >= 10000 ? "⭐" : ""}</td>
+                        <td>${c.nombre || "Desconocido"} ${estrellas}</td>
                         <td style="color:#8b949e;">${c.phone ? c.phone.split("@")[0] : "-"}</td>
                         <td style="color:var(--green);font-weight:bold;">R$ ${c.totalReal.toLocaleString("pt-BR")}</td>
                         <td>${c.tipo_favorito || "-"}</td>
-                        <td>${c.totalReal >= 10000 ? '<b style="color:gold">⭐ VIP</b>' : "Estándar"}</td>
-                    </tr>`).join("");
+                        <td>${nivel > 0 ? `<b style="color:gold">${estrellas} VIP</b>` : "Estándar"}</td>
+                    </tr>`;
+                }).join("");
             }
 
             const pag = document.getElementById("paginacionClientes");
