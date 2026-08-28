@@ -5,7 +5,7 @@ require("dotenv").config();
 const { guardarCliente, obtenerCliente, marcarSaludoPendiente }          = require("./customer-memory");
 const { obtenerUltimaOperacion }                   = require("./operations");
 const crm                                          = require("./crm");
-const { esTarjetaDuplicada, esConsultaEntrega, esBareMontoValido, esEnvioNuevoSobreAbandonado, puedeCotizarBRL, clienteEstaOcupado, debeCompletarConMontoPendiente, debeConfirmarCotizacion, tieneTarjetaGuardada, esConsultaTasas, esIntencionSinMonto } = require("./reglas-bot");
+const { esTarjetaDuplicada, esConsultaEntrega, esBareMontoValido, esEnvioNuevoSobreAbandonado, puedeCotizarBRL, clienteEstaOcupado, debeCompletarConMontoPendiente, debeConfirmarCotizacion, tieneTarjetaGuardada, esConsultaTasas, esIntencionSinMonto, yaAvisoEntregaReciente } = require("./reglas-bot");
 
 // Flows
 const { detectarImagenUnificada, detectarComprobantePDF, llamarAsistente } = require("../flows/imagen-flow");
@@ -213,9 +213,18 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         // Lógica en src/services/reglas-bot.js (probada en test/reglas-bot.test.js)
         if (esConsultaEntrega(txt, montoValido, cliente)) {
             const link = "https://yorda-webhook-production.up.railway.app/calculadora.html";
-            const m = lang === "pt"
-                ? `🚚 *Entrega em dinheiro em Cuba*\n\nEntregamos direto no município sede das 16 províncias. Se for outro município, confirmamos disponibilidade por aqui mesmo.\n\n⏱️ Havana: até 24h · Demais províncias: até 48h (conforme demanda)\n\n💰 O custo da entrega é somado à parte — nunca é descontado do que seu familiar recebe.\n\nPara calcular o valor exato e fazer o pedido passo a passo, entra aqui 👇\n${link}`
-                : `🚚 *Entrega en efectivo en Cuba*\n\nEntregamos directo en el municipio cabecera de las 16 provincias. Si es otro municipio, confirmamos disponibilidad por aquí mismo.\n\n⏱️ La Habana: hasta 24h · Resto de provincias: hasta 48h (según demanda)\n\n💰 El costo de entrega se suma aparte — nunca se descuenta de lo que recibe tu familiar.\n\nPara calcular el monto exacto y hacer el pedido paso a paso, entra aquí 👇\n${link}`;
+            let m;
+            if (yaAvisoEntregaReciente(cliente)) {
+                // Ya se le mandó la explicación completa hace poco — no la repetimos entera.
+                m = lang === "pt"
+                    ? `Como te disse, entregamos direto no município sede — outros municípios a gente confirma por aqui. Para fazer o pedido: 👇\n${link}`
+                    : `Como te comenté, entregamos directo en el municipio cabecera — otros municipios los confirmamos por aquí. Para hacer el pedido: 👇\n${link}`;
+            } else {
+                m = lang === "pt"
+                    ? `🚚 *Entrega em dinheiro em Cuba*\n\nEntregamos direto no município sede das 16 províncias. Se for outro município, confirmamos disponibilidade por aqui mesmo.\n\n⏱️ Havana: até 24h · Demais províncias: até 48h (conforme demanda)\n\n💰 O custo da entrega é somado à parte — nunca é descontado do que seu familiar recebe.\n\nPara calcular o valor exato e fazer o pedido passo a passo, entra aqui 👇\n${link}`
+                    : `🚚 *Entrega en efectivo en Cuba*\n\nEntregamos directo en el municipio cabecera de las 16 provincias. Si es otro municipio, confirmamos disponibilidad por aquí mismo.\n\n⏱️ La Habana: hasta 24h · Resto de provincias: hasta 48h (según demanda)\n\n💰 El costo de entrega se suma aparte — nunca se descuenta de lo que recibe tu familiar.\n\nPara calcular el monto exacto y hacer el pedido paso a paso, entra aquí 👇\n${link}`;
+            }
+            await guardarCliente({ phone, ultimoAvisoEntrega: new Date().toISOString() });
             await enviarSeguro(phone, m);
             return m;
         }
