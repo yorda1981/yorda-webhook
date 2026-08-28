@@ -5,7 +5,7 @@ require("dotenv").config();
 const { guardarCliente, obtenerCliente, marcarSaludoPendiente }          = require("./customer-memory");
 const { obtenerUltimaOperacion }                   = require("./operations");
 const crm                                          = require("./crm");
-const { esTarjetaDuplicada, esConsultaEntrega, esBareMontoValido, esEnvioNuevoSobreAbandonado, puedeCotizarBRL, clienteEstaOcupado, debeCompletarConMontoPendiente, debeConfirmarCotizacion, tieneTarjetaGuardada } = require("./reglas-bot");
+const { esTarjetaDuplicada, esConsultaEntrega, esBareMontoValido, esEnvioNuevoSobreAbandonado, puedeCotizarBRL, clienteEstaOcupado, debeCompletarConMontoPendiente, debeConfirmarCotizacion, tieneTarjetaGuardada, esConsultaTasas, esIntencionSinMonto } = require("./reglas-bot");
 
 // Flows
 const { detectarImagenUnificada, detectarComprobantePDF, llamarAsistente } = require("../flows/imagen-flow");
@@ -292,7 +292,8 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         if (cupInv) { const r = await cotizarCUPInverso(phone, pushName, cupInv, lang); if (r) return r; }
 
         // ── Consulta tasas ──
-        if (/a cuanto|a como|tasa.*hoy|cambio.*hoy|hoy.*cambio|hoy.*tasa|cual es la tasa|como esta el cambio|como esta la tasa|cuanto vale|cuanto esta|precio.*hoy|hoy.*precio|tasa de hoy|cambio de hoy/.test(txt))
+        // Lógica en src/services/reglas-bot.js (probada en test/reglas-bot.test.js)
+        if (esConsultaTasas(txt))
             return await consultarTasas(phone) || "";
 
         // ── Estado de operación ──
@@ -339,14 +340,16 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         if (valorFinal && !montoValido) return "";
 
         // ── Cuba sin monto ──
-        if (txt.includes("cuba") && /dinero|enviar|mandar|pasar|plata|remesa/.test(txt)) {
+        if (txt.includes("cuba") && /dinero|dinheiro|enviar|mandar|pasar|passar|plata|remesa|remessa/.test(txt)) {
             const n = pushName ? `, ${pushName.split(" ")[0]}` : "";
             await enviarSeguro(phone, `¡Hola${n}! 😊\n\n¿Cuánto quieres enviar a Cuba?`); return "";
         }
 
         // ── Intención sin monto ──
-        if (/quiero enviar|necesito enviar|quiero mandar|quiero hacer (una )?(remesa|transferencia)|necesito (una )?(remesa|transferencia)/.test(txt)) {
-            await enviarSeguro(phone, "Perfecto 😊\n\n¿Cuánto deseas enviar?"); return "";
+        // Lógica en src/services/reglas-bot.js (probada en test/reglas-bot.test.js)
+        if (esIntencionSinMonto(txt)) {
+            const m = esEs ? "Perfecto 😊\n\n¿Cuánto deseas enviar?" : "Perfeito 😊\n\nQuanto você quer enviar?";
+            await enviarSeguro(phone, m); return "";
         }
 
         // ── Despedida ──
