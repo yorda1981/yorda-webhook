@@ -101,6 +101,11 @@ const MINUTOS_PAUSA = 10;
                 ADD COLUMN IF NOT EXISTS activa_vip BOOLEAN DEFAULT false
         `);
     } catch (e) { console.error("⚠️ Migración VIP por niveles:", e.message); }
+    try {
+        // Para no repetir la explicación completa de entrega si el cliente pregunta
+        // varias veces seguidas en poco tiempo.
+        await pool.query("ALTER TABLE customers ADD COLUMN IF NOT EXISTS ultimo_aviso_entrega TIMESTAMP");
+    } catch (e) { console.error("⚠️ Migración ultimo_aviso_entrega:", e.message); }
 })();
 
 // ─────────────────────────────────────────
