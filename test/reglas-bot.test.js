@@ -21,7 +21,14 @@ const {
     esBareMontoValido,
     esEnvioNuevoSobreAbandonado,
     puedeCotizarBRL,
-    clienteEstaOcupado
+    clienteEstaOcupado,
+    esRespuestaSoloMonto,
+    debeCompletarConMontoPendiente,
+    debeConfirmarCotizacion,
+    tieneTarjetaGuardada,
+    esRecarga,
+    esConsultaTasas,
+    esIntencionSinMonto
 } = require("../src/services/reglas-bot");
 
 // ── esTarjetaDuplicada (Bug: "método de pago" repetido) ──
@@ -126,4 +133,109 @@ test("estados que bloquean: aguardando_comprovante y aguardando_numero_recarga",
     assert.equal(clienteEstaOcupado({ estado: "cotizacion_realizada" }), false);
     assert.equal(clienteEstaOcupado(null), false);
     assert.equal(clienteEstaOcupado(undefined), false);
+});
+
+// ── debeCompletarConMontoPendiente (FIX LOOP parte 2) ──
+
+test("cliente con comprobante+tarjeta ya recibidos, responde solo el monto -> completa directo", () => {
+    const cliente = { comprobante_pendiente: true, tarjeta_frecuente: "9218123456789012" };
+    assert.equal(debeCompletarConMontoPendiente(cliente, true, "300"), true);
+    assert.equal(debeCompletarConMontoPendiente(cliente, true, "300 reales"), true);
+});
+
+test("mismo caso pero el mensaje NO es solo el monto (trae más texto) -> no completa así", () => {
+    const cliente = { comprobante_pendiente: true, tarjeta_frecuente: "9218123456789012" };
+    assert.equal(debeCompletarConMontoPendiente(cliente, true, "son 300 reales para mi mama"), false);
+});
+
+test("sin comprobante pendiente -> no aplica este atajo", () => {
+    const cliente = { comprobante_pendiente: false, tarjeta_frecuente: "9218123456789012" };
+    assert.equal(debeCompletarConMontoPendiente(cliente, true, "300"), false);
+});
+
+test("sin tarjeta guardada -> no aplica este atajo (falta info)", () => {
+    const cliente = { comprobante_pendiente: true };
+    assert.equal(debeCompletarConMontoPendiente(cliente, true, "300"), false);
+});
+
+// ── debeConfirmarCotizacion / tieneTarjetaGuardada (FIX 5) ──
+
+test("'dale' tras cotizar, sin monto nuevo -> confirma", () => {
+    const cliente = { estado: "cotizacion_realizada" };
+    assert.equal(debeConfirmarCotizacion(cliente, true, false), true);
+});
+
+test("'quiero 200 reales' (trae monto nuevo) -> NO confirma, debe cotizar ese monto", () => {
+    const cliente = { estado: "cotizacion_realizada" };
+    assert.equal(debeConfirmarCotizacion(cliente, true, true), false);
+});
+
+test("confirma pero el cliente NO tiene tarjeta guardada -> hay que pedirla antes", () => {
+    assert.equal(tieneTarjetaGuardada({}), false);
+    assert.equal(tieneTarjetaGuardada({ tarjeta: "9218123456789012" }), true);
+    assert.equal(tieneTarjetaGuardada({ tarjeta_frecuente: "9218123456789012" }), true);
+});
+
+// ── esRespuestaSoloMonto ──
+
+test("reconoce distintos formatos de 'solo un monto'", () => {
+    assert.equal(esRespuestaSoloMonto("300"), true);
+    assert.equal(esRespuestaSoloMonto("R$300"), true);
+    assert.equal(esRespuestaSoloMonto("300 reales"), true);
+    assert.equal(esRespuestaSoloMonto("300,50"), true);
+});
+
+test("no confunde un mensaje con más contexto como 'solo un monto'", () => {
+    assert.equal(esRespuestaSoloMonto("son 300 para mi mama"), false);
+    assert.equal(esRespuestaSoloMonto("hola"), false);
+});
+
+// ── esRecarga (bug viejo: mostraba "0 CUP" en recargas) ──
+
+test("recarga_nacional -> es recarga", () => {
+    assert.equal(esRecarga({ tipo_favorito: "recarga_nacional" }), true);
+});
+
+test("recarga_internacional -> es recarga", () => {
+    assert.equal(esRecarga({ tipo_favorito: "recarga_internacional" }), true);
+});
+
+test("brl_cup (remesa normal) -> NO es recarga", () => {
+    assert.equal(esRecarga({ tipo_favorito: "brl_cup" }), false);
+});
+
+test("sin tipo_favorito / cliente vacío -> NO es recarga, no revienta", () => {
+    assert.equal(esRecarga({}), false);
+    assert.equal(esRecarga(null), false);
+    assert.equal(esRecarga(undefined), false);
+});
+
+// ── esConsultaTasas / esIntencionSinMonto (bug: cliente en portugués sin respuesta) ──
+
+function norm(s) { return s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""); }
+
+test("PT: 'Posso passar reais' -> se reconoce como intención de enviar", () => {
+    assert.equal(esIntencionSinMonto(norm("Posso passar reais")), true);
+});
+
+test("PT: 'Qual o valor do cup' -> se reconoce como consulta de tasas", () => {
+    assert.equal(esConsultaTasas(norm("Qual o valor do cup")), true);
+});
+
+test("PT: 'Quero enviar dinheiro' -> se reconoce como intención de enviar", () => {
+    assert.equal(esIntencionSinMonto(norm("Quero enviar dinheiro")), true);
+});
+
+test("PT: 'Quanto está a taxa hoje' -> se reconoce como consulta de tasas", () => {
+    assert.equal(esConsultaTasas(norm("Quanto está a taxa hoje")), true);
+});
+
+test("ES: las frases originales en español siguen funcionando (no se rompió nada)", () => {
+    assert.equal(esIntencionSinMonto(norm("Quiero enviar dinero")), true);
+    assert.equal(esConsultaTasas(norm("A cuanto esta hoy")), true);
+});
+
+test("mensaje ambiguo sin intención clara ('Ainda não') -> no dispara ninguna de las dos (correcto, no es un pedido)", () => {
+    assert.equal(esIntencionSinMonto(norm("Ainda nao")), false);
+    assert.equal(esConsultaTasas(norm("Ainda nao")), false);
 });
