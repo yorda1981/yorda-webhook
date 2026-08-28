@@ -28,8 +28,10 @@ const {
     tieneTarjetaGuardada,
     esRecarga,
     esConsultaTasas,
-    esIntencionSinMonto
+    esIntencionSinMonto,
+    yaAvisoEntregaReciente
 } = require("../src/services/reglas-bot");
+const { gatilhos, palabrasNegocio } = require("../src/flows/shared");
 
 // ── esTarjetaDuplicada (Bug: "método de pago" repetido) ──
 
@@ -238,4 +240,55 @@ test("ES: las frases originales en español siguen funcionando (no se rompió na
 test("mensaje ambiguo sin intención clara ('Ainda não') -> no dispara ninguna de las dos (correcto, no es un pedido)", () => {
     assert.equal(esIntencionSinMonto(norm("Ainda nao")), false);
     assert.equal(esConsultaTasas(norm("Ainda nao")), false);
+});
+
+// ── Filtro de gatillo (shared.js) — bug: "Entrega em Santiago?" quedaba sin
+// respuesta porque nunca llegaba a esConsultaEntrega. Había un filtro ANTERIOR
+// (gatilhos/palabrasNegocio) que decide si el bot responde algo o se queda
+// callado, y a ese filtro le faltaban las palabras de entrega/domicilio/municipio.
+
+function normGate(s) { return s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""); }
+function pasaFiltroGatillo(txt) {
+    return gatilhos.some(g => txt.includes(normGate(g))) || palabrasNegocio.some(p => txt.includes(p));
+}
+
+test("'Entrega em Santiago?' pasa el filtro de gatillo (antes se quedaba sin respuesta)", () => {
+    assert.equal(pasaFiltroGatillo(normGate("Entrega em Santiago?")), true);
+});
+
+test("'hacen entrega a domicilio?' pasa el filtro de gatillo", () => {
+    assert.equal(pasaFiltroGatillo(normGate("hacen entrega a domicilio?")), true);
+});
+
+test("'en que municipio entregan?' pasa el filtro de gatillo", () => {
+    assert.equal(pasaFiltroGatillo(normGate("en que municipio entregan?")), true);
+});
+
+test("'Dólar em efectivo?' ya pasaba el filtro antes (por la palabra 'dolar'), sigue pasando", () => {
+    assert.equal(pasaFiltroGatillo(normGate("Dólar em efectivo?")), true);
+});
+
+test("mensaje totalmente ajeno al negocio sigue sin pasar el filtro (el filtro no se volvió demasiado permisivo)", () => {
+    assert.equal(pasaFiltroGatillo(normGate("buen dia, lindo el clima")), false);
+});
+
+// ── yaAvisoEntregaReciente (evita repetir la explicación completa seguido) ──
+
+function haceMinutos(m) { return new Date(Date.now() - m * 60000).toISOString(); }
+
+test("cliente nuevo, sin aviso previo -> no se considera reciente (manda explicación completa)", () => {
+    assert.equal(yaAvisoEntregaReciente({}), false);
+    assert.equal(yaAvisoEntregaReciente(null), false);
+});
+
+test("avisado hace 1 minuto -> se considera reciente (manda versión corta)", () => {
+    assert.equal(yaAvisoEntregaReciente({ ultimo_aviso_entrega: haceMinutos(1) }), true);
+});
+
+test("avisado hace 5 minutos (fuera de la ventana de 3 min) -> ya no es reciente", () => {
+    assert.equal(yaAvisoEntregaReciente({ ultimo_aviso_entrega: haceMinutos(5) }), false);
+});
+
+test("avisado hace 1 hora -> definitivamente no es reciente", () => {
+    assert.equal(yaAvisoEntregaReciente({ ultimo_aviso_entrega: haceMinutos(60) }), false);
 });
