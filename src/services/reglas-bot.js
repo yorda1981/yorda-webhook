@@ -39,6 +39,15 @@ function esConsultaEntrega(txt, montoValido, cliente) {
     return !clienteEstaOcupado(cliente) && !montoValido && (mencionaEntrega || mencionaEfectivo || mencionaMunicipio);
 }
 
+// Si el cliente ya recibió la explicación completa de entrega hace poco (mismos
+// minutos), no hace falta repetirle todo el texto — se le manda una versión corta.
+const MINUTOS_REPETIR_ENTREGA = 3;
+function yaAvisoEntregaReciente(cliente) {
+    if (!cliente?.ultimo_aviso_entrega) return false;
+    const minutos = (Date.now() - new Date(cliente.ultimo_aviso_entrega).getTime()) / 60000;
+    return minutos < MINUTOS_REPETIR_ENTREGA;
+}
+
 // FIX 4 — un número solo ("200", sin la palabra "reales") también cuenta
 // como monto válido para cotizar, siempre que el cliente no esté ocupado.
 function esBareMontoValido(txt) {
@@ -125,5 +134,6 @@ module.exports = {
     tieneTarjetaGuardada,
     esRecarga,
     esConsultaTasas,
-    esIntencionSinMonto
+    esIntencionSinMonto,
+    yaAvisoEntregaReciente
 };
