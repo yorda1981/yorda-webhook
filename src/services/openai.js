@@ -50,6 +50,20 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
 
         await guardarCliente({ phone, ultimaInteraccion: new Date().toISOString() });
 
+        // ── Pedido de la calculadora en proceso: el bot se queda en silencio ──
+        // Una vez que un pedido llega desde la calculadora, se maneja 100% por el
+        // dashboard (VERIFICADO/COMPLETAR) — no hace falta que el bot conversacional
+        // intervenga si el cliente manda algo más (ej. la foto del comprobante),
+        // porque su estado no tiene la info que el flujo viejo espera (monto,
+        // tarjeta, etc.) y podría responder cosas confusas.
+        if (cliente?.estado === "pedido_web_pendiente") {
+            const m = esEs
+                ? "Ya tenemos tu pedido registrado ✅ Lo estamos verificando, te avisamos por aquí en cuanto esté listo."
+                : "Já temos seu pedido registrado ✅ Estamos verificando, avisamos por aqui assim que estiver pronto.";
+            await enviarSeguro(phone, m);
+            return m;
+        }
+
         // ── Horario ──
         const horaBrasil = new Date(Date.now() - 3 * 60 * 60 * 1000).getUTCHours();
         if ((horaBrasil < 8 || horaBrasil >= 23) && !imageUrl) {
