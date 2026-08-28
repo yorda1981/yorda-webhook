@@ -421,6 +421,19 @@ app.post("/admin/completar-operacion/:id", adminLimiter, verificarToken, async (
         const notificado = await enviarMensaje(operacion.phone, msg);
         if (!notificado) console.error(`⚠️ No se pudo notificar al cliente de la operación #${operacion.id} (phone: ${operacion.phone})`);
 
+        // Si este pedido venía de la calculadora, el cliente estaba en "modo
+        // silencio" con el bot (ver openai.js). Ya se completó todo — se le
+        // quita esa marca para que pueda volver a hablar normal con el bot
+        // si hace un pedido nuevo en el futuro.
+        try {
+            await pool.query(
+                "UPDATE customers SET estado = NULL WHERE phone = $1 AND estado = 'pedido_web_pendiente'",
+                [operacion.phone]
+            );
+        } catch (e) {
+            console.error("⚠️ Error limpiando estado pedido_web_pendiente:", e.message);
+        }
+
         // Programa VIP: recalcula el nivel (0-3) sobre los últimos 365 días. Si subió,
         // se le avisa con el nivel nuevo. Si bajó, se actualiza en silencio (no se
         // manda un mensaje negativo al cliente).
