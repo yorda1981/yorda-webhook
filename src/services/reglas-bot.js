@@ -67,11 +67,63 @@ function puedeCotizarBRL(cliente, montoValido, valorFinal) {
     return esEnvioNuevoSobreAbandonado(cliente, montoValido, valorFinal);
 }
 
+// FIX LOOP (parte 2) — comprobante + tarjeta ya recibidos, solo faltaba el monto.
+// Si el texto es SOLO un número (con o sin "reales"/"r$"), se cierra la operación
+// directo en vez de volver a cotizar.
+function esRespuestaSoloMonto(text) {
+    return /^\s*r?\$?\s*\d{1,6}([.,]\d{1,2})?\s*(reales|reais|brl|r\$)?\s*$/i.test(text || "");
+}
+
+function debeCompletarConMontoPendiente(cliente, montoValido, text) {
+    return !!(
+        cliente?.comprobante_pendiente &&
+        (cliente?.tarjeta || cliente?.tarjeta_frecuente) &&
+        montoValido &&
+        esRespuestaSoloMonto(text)
+    );
+}
+
+// FIX 5 — "quiero 200 reales" no debe confirmar la cotización anterior, debe
+// cotizar el monto nuevo. Solo se trata como confirmación si NO viene un monto.
+function debeConfirmarCotizacion(cliente, esConfirma, montoValido) {
+    return !!(esConfirma && cliente?.estado === "cotizacion_realizada" && !montoValido);
+}
+
+function tieneTarjetaGuardada(cliente) {
+    return !!(cliente?.tarjeta || cliente?.tarjeta_frecuente);
+}
+
+// BUG VIEJO: esRecarga comparaba contra "recarga_etecsa" (que nunca se guarda de
+// verdad) en vez de "recarga_nacional" / "recarga_internacional" — por eso las
+// recargas se trataban como remesa normal y el mensaje mostraba "Recibe: 0 CUP".
+function esRecarga(cliente) {
+    return !!cliente?.tipo_favorito?.startsWith("recarga_");
+}
+
+// BUG VIEJO: estas 2 reglas solo reconocían frases en español — un cliente que
+// escribía en portugués ("Posso passar reais", "Qual o valor do cup") no coincidía
+// con ninguna regla y el mensaje caía en la IA de respaldo, que a veces decidía
+// quedarse en silencio. Se agregaron los equivalentes en portugués.
+function esConsultaTasas(txt) {
+    return /a cuanto|a como|tasa.*hoy|cambio.*hoy|hoy.*cambio|hoy.*tasa|cual es la tasa|como esta el cambio|como esta la tasa|cuanto vale|cuanto esta|precio.*hoy|hoy.*precio|tasa de hoy|cambio de hoy|qual o valor|qual a taxa|quanto esta|quanto está|quanto vale|taxa de hoje|cambio de hoje|hoje.*taxa|taxa.*hoje/.test(txt);
+}
+
+function esIntencionSinMonto(txt) {
+    return /quiero enviar|necesito enviar|quiero mandar|quiero hacer (una )?(remesa|transferencia)|necesito (una )?(remesa|transferencia)|posso (enviar|mandar|passar)|quero enviar|quero mandar|preciso enviar|quero fazer (uma )?(remessa|transferencia)|preciso (fazer )?(uma )?(remessa|transferencia)/.test(txt);
+}
+
 module.exports = {
     clienteEstaOcupado,
     esTarjetaDuplicada,
     esConsultaEntrega,
     esBareMontoValido,
     esEnvioNuevoSobreAbandonado,
-    puedeCotizarBRL
+    puedeCotizarBRL,
+    esRespuestaSoloMonto,
+    debeCompletarConMontoPendiente,
+    debeConfirmarCotizacion,
+    tieneTarjetaGuardada,
+    esRecarga,
+    esConsultaTasas,
+    esIntencionSinMonto
 };
