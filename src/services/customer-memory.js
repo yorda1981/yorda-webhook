@@ -1,3 +1,4 @@
+
 const pool = require("../../db");
 
 // ─────────────────────────────────────────
@@ -23,7 +24,8 @@ async function guardarCliente({
     valorComprobante    = null,
     ultimaInteraccion   = null,
     saludoEnviado       = null,   // nuevo — saludo único
-    lastResponseId      = null    // nuevo — Responses API
+    lastResponseId      = null,   // nuevo — Responses API
+    ultimoAvisoEntrega  = null    // nuevo — para no repetir la explicación de entrega seguido
 }) {
     if (!phone) return null;
 
@@ -41,18 +43,18 @@ async function guardarCliente({
                     banco_detectado, estado, fecha_estado, fecha_cotizacion,
                     fecha_pix, created_at, updated_at,
                     tarjetas, comprobante_pendiente, valor_comprobante,
-                    ultima_interaccion, saludo_enviado, last_response_id
+                    ultima_interaccion, saludo_enviado, last_response_id, ultimo_aviso_entrega
                 ) VALUES (
                     $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,
                     NOW(), NOW(),
-                    $13,$14,$15,$16,$17,$18
+                    $13,$14,$15,$16,$17,$18,$19
                 )
             `, [
                 phone, nombre, monto, tipo, banco, tarjeta, titular,
                 bancoDetectado, estado, fechaEstado, fechaCotizacion, fechaPix,
                 tarjetas ? JSON.stringify(tarjetas) : null,
                 comprobantePendiente, valorComprobante, ultimaInteraccion,
-                saludoEnviado, lastResponseId
+                saludoEnviado, lastResponseId, ultimoAvisoEntrega
             ]);
 
         } else {
@@ -75,6 +77,7 @@ async function guardarCliente({
                     ultima_interaccion   = COALESCE($16, ultima_interaccion),
                     saludo_enviado       = COALESCE($17, saludo_enviado),
                     last_response_id     = COALESCE($18, last_response_id),
+                    ultimo_aviso_entrega = COALESCE($19, ultimo_aviso_entrega),
                     updated_at           = NOW()
                 WHERE phone = $1
             `, [
@@ -82,7 +85,7 @@ async function guardarCliente({
                 bancoDetectado, estado, fechaEstado, fechaCotizacion, fechaPix,
                 tarjetas ? JSON.stringify(tarjetas) : null,
                 comprobantePendiente, valorComprobante, ultimaInteraccion,
-                saludoEnviado, lastResponseId
+                saludoEnviado, lastResponseId, ultimoAvisoEntrega
             ]);
         }
 
