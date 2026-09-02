@@ -49,7 +49,11 @@ const gatilhos = [
 ];
 
 const palabrasNegocio = [
-    "cuba","cup","usd","mlc","transferencia","remesa","pix","recarga","etecsa","tarjeta"
+    "cuba","cup","usd","mlc","transferencia","remesa","pix","recarga","etecsa","tarjeta",
+    // Entrega en efectivo — mismas palabras en español y portugués, por eso no hace
+    // falta duplicar por idioma. Antes faltaban acá y mensajes como "Entrega em
+    // Santiago?" no pasaban este filtro, quedando sin respuesta.
+    "entrega","entregar","domicilio","municipio"
 ];
 
 const triggersCubaBrasil = [
