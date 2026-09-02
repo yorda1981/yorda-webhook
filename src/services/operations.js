@@ -188,6 +188,29 @@ async function obtenerEstadisticas() {
     }
 }
 
+// =====================
+// CADUCIDAD — operaciones "pendiente" sin verificar en 24h
+// =====================
+
+async function expirarOperacionesPendientes() {
+    try {
+        const result = await pool.query(`
+            UPDATE operations
+            SET status = 'expirada', updated_at = NOW()
+            WHERE status = 'pendiente'
+              AND created_at < NOW() - INTERVAL '24 hours'
+            RETURNING id, phone, monto
+        `);
+        if (result.rows.length > 0) {
+            console.log(`⏰ ${result.rows.length} operación(es) expiradas por pasar 24h sin verificar`);
+        }
+        return result.rows;
+    } catch (err) {
+        console.error("❌ Error expirando operaciones:", err.message);
+        return [];
+    }
+}
+
 module.exports = {
     agregarOperacion,
     confirmarOperacion,
@@ -197,5 +220,6 @@ module.exports = {
     obtenerPendienteCliente,
     existeOperacionPendiente,
     buscarPorRefWeb,
-    obtenerEstadisticas
+    obtenerEstadisticas,
+    expirarOperacionesPendientes
 };
