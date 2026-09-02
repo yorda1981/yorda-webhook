@@ -9,7 +9,7 @@ const pool = require("./db");
 
 const openaiService = require("./src/services/openai");
 const { obtenerTodos, obtenerCliente } = require("./src/services/customer-memory");
-const { obtenerTodas, confirmarOperacion, completarOperacion, obtenerEstadisticas } = require("./src/services/operations");
+const { obtenerTodas, confirmarOperacion, completarOperacion, obtenerEstadisticas, expirarOperacionesPendientes } = require("./src/services/operations");
 const crm = require("./src/services/crm");
 const { leerTasas } = require("./src/flows/cotizacion-flow");
 const { esPedidoWeb, procesarPedidoWeb } = require("./src/flows/pedido-web-flow");
@@ -580,6 +580,15 @@ async function recalcularNivelesVipYAvisar() {
 }
 setTimeout(recalcularNivelesVipYAvisar, 10 * 1000); // espera un poco a que terminen las migraciones al arrancar
 setInterval(recalcularNivelesVipYAvisar, 24 * 60 * 60 * 1000);
+
+// Caducidad: operaciones "pendiente" que llevan más de 24h sin que se verifiquen
+// pasan a "expirada" — así no se quedan acumulando en el dashboard indefinidamente.
+// Corre cada hora (no una vez al día) para que la caducidad de 24h sea precisa,
+// no que espere hasta el próximo "día" del servidor.
+setTimeout(() => expirarOperacionesPendientes().catch(e => console.error("❌ Expirar operaciones:", e.message)), 15 * 1000);
+setInterval(() => {
+    expirarOperacionesPendientes().catch(e => console.error("❌ Expirar operaciones:", e.message));
+}, 60 * 60 * 1000);
 
 // ══════════════════════════════════════
 // MENSAJE DIARIO DE TASAS (10:15 hora de Bahía = 13:15 UTC)
