@@ -426,6 +426,15 @@ app.post("/admin/completar-operacion/:id", adminLimiter, verificarToken, async (
         const notificado = await enviarMensaje(operacion.phone, msg);
         if (!notificado) console.error(`⚠️ No se pudo notificar al cliente de la operación #${operacion.id} (phone: ${operacion.phone})`);
 
+        // BUG ENCONTRADO: el Embudo de Conversión siempre mostraba "Completados: 0"
+        // porque nada actualizaba estado_crm a "completado" cuando de verdad se
+        // completaba una operación desde el dashboard. Se agrega acá.
+        try {
+            await crm.actualizarEstadoCRM(operacion.phone, "completado");
+        } catch (e) {
+            console.error("⚠️ Error actualizando estado_crm a completado:", e.message);
+        }
+
         // Si este pedido venía de la calculadora, el cliente estaba en "modo
         // silencio" con el bot (ver openai.js). Ya se completó todo — se le
         // quita esa marca para que pueda volver a hablar normal con el bot
