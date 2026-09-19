@@ -816,6 +816,7 @@ const T = {
     lblNombreCompleto:"Nombre y apellidos de quien recibe", lblTelefonoReq:"Teléfono",
     lblProvincia:"Provincia", lblMunicipio:"Municipio", lblDireccion:"Dirección completa",
     lblReferencia:"Referencia de la dirección (opcional)", lblTelefonoAlt:"Teléfono alternativo (opcional)",
+    lblWhatsappCliente:"¿Llenas este pedido en nombre del cliente? Escribe aquí su WhatsApp (opcional)",
     optProvincia:"Selecciona una provincia", optMunicipio:"Selecciona un municipio",
     sepObligatorios:"Datos obligatorios", sepOpcionales:"Datos opcionales",
     entregaDisponible:"✅ Entrega disponible", entregaConfirmar:"⚠️ Disponibilidad por confirmar",
@@ -899,6 +900,7 @@ const T = {
     lblNombreCompleto:"Nome completo de quem recebe", lblTelefonoReq:"Telefone",
     lblProvincia:"Província", lblMunicipio:"Município", lblDireccion:"Endereço completo",
     lblReferencia:"Referência do endereço (opcional)", lblTelefonoAlt:"Telefone alternativo (opcional)",
+    lblWhatsappCliente:"Está preenchendo este pedido em nome do cliente? Escreva aqui o WhatsApp dele (opcional)",
     optProvincia:"Selecione uma província", optMunicipio:"Selecione um município",
     sepObligatorios:"Dados obrigatórios", sepOpcionales:"Dados opcionais",
     entregaDisponible:"✅ Entrega disponível", entregaConfirmar:"⚠️ Disponibilidade a confirmar",
@@ -1365,7 +1367,8 @@ function renderDatosForm(){
     <div class="sep-form">${t().sepOpcionales}</div>
     <div class="campo-form"><label>${t().lblReferencia}</label><input type="text" id="inReferencia" value="${pedido.datos.referencia||""}" placeholder="Ej: Casa azul frente a la farmacia"></div>
     <div class="campo-form"><label>${t().lblTelefonoAlt}</label><input type="tel" id="inTelefonoAlt" value="${pedido.datos.telefonoAlt||""}"></div>
-    <div class="campo-form"><label>${t().lblObservaciones}</label><textarea id="inObsEfe">${pedido.datos.observaciones||""}</textarea></div>`;
+    <div class="campo-form"><label>${t().lblObservaciones}</label><textarea id="inObsEfe">${pedido.datos.observaciones||""}</textarea></div>
+    <div class="campo-form"><label>${t().lblWhatsappCliente}</label><input type="tel" id="inWhatsappCliente" value="${pedido.datos.whatsappCliente||""}"></div>`;
   }
 
   $("datosForm").innerHTML = html;
@@ -1425,7 +1428,7 @@ function validarDatos(){
     pedido.datos = {
       nombreCompleto: nombre, telefono, provincia, municipio, direccion,
       referencia: $("inReferencia").value.trim(), telefonoAlt: $("inTelefonoAlt").value.trim(),
-      observaciones: $("inObsEfe").value.trim()
+      observaciones: $("inObsEfe").value.trim(), whatsappCliente: $("inWhatsappCliente").value.trim()
     };
     if(info){ pedido.entregaDisponible = info.disponible; pedido.zona = info.zona; pedido.plazoTxt = info.plazoTxt; }
   }
@@ -1596,6 +1599,7 @@ function construirMensajeWhatsApp(){
     l.push(`🏠 ${t().rDireccion}: ${pedido.datos.direccion}`);
     if(pedido.datos.referencia)   l.push(`📌 ${t().rReferencia}: ${pedido.datos.referencia}`);
     if(pedido.datos.telefonoAlt)  l.push(`📞 ${t().lblTelefonoAlt}: ${pedido.datos.telefonoAlt}`);
+    if(pedido.datos.whatsappCliente) l.push(`📲 WhatsApp cliente: ${pedido.datos.whatsappCliente}`);
     l.push("");
     l.push(`🚚 ${t().rEntrega}: ${pedido.entregaDisponible ? (lang==="pt"?"Disponível":"Disponible") : (lang==="pt"?"A confirmar":"Por confirmar")}`);
     if(pedido.plazoTxt) l.push(pedido.plazoTxt);
