@@ -68,6 +68,18 @@
                 </div>
             </div>
 
+            <div style="background:#0b0e1a;border-radius:12px;padding:14px 16px;border:1px solid #2d355a;margin-bottom:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+                <strong style="color:#14b8a6;font-size:13px;">💱 Tasa USDT (para sugerir el pago)</strong>
+                <label style="font-size:12px;color:#8b949e;">CUP por 1 USDT
+                    <input type="number" id="entTasaUsdtCup" step="any" style="display:block;background:#161b2e;border:1px solid #2d355a;padding:8px 10px;border-radius:8px;color:white;font-size:13px;outline:none;width:130px;margin-top:4px;">
+                </label>
+                <label style="font-size:12px;color:#8b949e;">USD por 1 USDT
+                    <input type="number" id="entTasaUsdtUsd" step="any" style="display:block;background:#161b2e;border:1px solid #2d355a;padding:8px 10px;border-radius:8px;color:white;font-size:13px;outline:none;width:130px;margin-top:4px;">
+                </label>
+                <button class="page-btn" style="align-self:flex-end;" onclick="guardarTasaUsdt()">💾 Guardar tasa</button>
+                <small id="entTasaUsdtInfo" style="color:#8b949e;"></small>
+            </div>
+
             <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px;" id="entFiltrosRapidos">
                 <button class="page-btn active" data-filtro="TODAS" onclick="filtrarEntregasRapido('TODAS')">TODAS</button>
                 <button class="page-btn" data-filtro="PENDIENTES" onclick="filtrarEntregasRapido('PENDIENTES')">PENDIENTES</button>
@@ -121,6 +133,7 @@
         let intervalo = null;
         let entFiltroRapido = "TODAS";
         let entDebounce = null;
+        let entregasActuales = []; // última lista cargada, para sumar montos de las seleccionadas al registrar pago
 
         function authH() {
             return { "Authorization": "Bearer " + token, "Content-Type": "application/json" };
@@ -131,7 +144,31 @@
             if (!token) return;
             if (intervalo) clearInterval(intervalo);
             cargarEntregas();
+            cargarTasaUsdt();
             intervalo = setInterval(cargarEntregas, 30000);
+        }
+
+        async function cargarTasaUsdt() {
+            try {
+                const res = await fetch("/admin/entregas/tasa-usdt", { headers: authH() });
+                const t = await res.json();
+                document.getElementById("entTasaUsdtCup").value = t.tasa_usdt_cup || "";
+                document.getElementById("entTasaUsdtUsd").value = t.tasa_usdt_usd || "";
+            } catch (e) { console.error("❌ Error cargando tasa USDT:", e); }
+        }
+
+        async function guardarTasaUsdt() {
+            const tasaCup = Number(document.getElementById("entTasaUsdtCup").value || 0);
+            const tasaUsd = Number(document.getElementById("entTasaUsdtUsd").value || 0);
+            const info = document.getElementById("entTasaUsdtInfo");
+            try {
+                const res = await fetch("/admin/entregas/tasa-usdt", {
+                    method: "POST", headers: authH(), body: JSON.stringify({ tasaCup, tasaUsd })
+                });
+                const data = await res.json();
+                info.innerText = data.success ? "✅ Guardada" : "❌ " + (data.error || "Error");
+            } catch (e) { info.innerText = "❌ Error de conexión"; }
+            setTimeout(() => { info.innerText = ""; }, 3000);
         }
 
         document.getElementById("tokenField").addEventListener("keydown", e => {
@@ -186,8 +223,9 @@
 
                 const lista = await resList.json();
                 const stats = await resStats.json();
+                entregasActuales = Array.isArray(lista) ? lista : [];
                 renderEntregasStats(stats);
-                renderTablaEntregas(Array.isArray(lista) ? lista : []);
+                renderTablaEntregas(entregasActuales);
             } catch (e) { console.error("❌ Error cargando entregas:", e); }
         }
 
@@ -294,9 +332,34 @@
                 alert("Selecciona al menos una entrega en estado PENDIENTE DE PAGO (o usa el botón PAGAR de una fila).");
                 return;
             }
-            const cantidadEnviada = prompt(`Registrar pago para ${ids.length} entrega(s).\n\nCantidad enviada (opcional):`);
+            // Suma lo que hay que pagar (por moneda) de las entregas seleccionadas
+            // y sugiere el equivalente en USDT con la tasa configurada arriba —
+            // es solo una sugerencia, se puede editar antes de confirmar.
+            const seleccionadas = entregasActuales.filter(e => ids.includes(e.id));
+            const totalCup = seleccionadas.filter(e => e.moneda === "CUP").reduce((s, e) => s + Number(e.cantidad), 0);
+            const totalUsd = seleccionadas.filter(e => e.moneda === "USD").reduce((s, e) => s + Number(e.cantidad), 0);
+            const tasaCup  = Number(document.getElementById("entTasaUsdtCup")?.value || 0);
+            const tasaUsd  = Number(document.getElementById("entTasaUsdtUsd")?.value || 0);
+
+            let sugeridoUsdt = 0;
+            if (totalCup > 0 && tasaCup > 0) sugeridoUsdt += totalCup / tasaCup;
+            if (totalUsd > 0 && tasaUsd > 0) sugeridoUsdt += totalUsd / tasaUsd;
+            sugeridoUsdt = sugeridoUsdt ? Number(sugeridoUsdt.toFixed(2)) : "";
+
+            const partes = [];
+            if (totalCup) partes.push("CUP " + totalCup.toLocaleString("es-ES"));
+            if (totalUsd) partes.push("USD " + totalUsd.toLocaleString("es-ES"));
+            const resumen = partes.length ? `Total a pagar: ${partes.join(" + ")}` : "";
+
+            const cantidadEnviada = prompt(
+                `Registrar pago para ${ids.length} entrega(s).` +
+                (resumen ? `\n${resumen}` : "") +
+                (sugeridoUsdt ? `\nSugerido: ${sugeridoUsdt} USDT (según la tasa configurada arriba — puedes cambiarlo)` : "") +
+                `\n\nCantidad enviada:`,
+                sugeridoUsdt || ""
+            );
             if (cantidadEnviada === null) return;
-            const monedaPago  = prompt("Moneda del pago (ej: USDT, USD, CUP) — opcional:") || "";
+            const monedaPago  = prompt("Moneda del pago (ej: USDT, USD, CUP) — opcional:", sugeridoUsdt ? "USDT" : "") || "";
             const fecha       = prompt("Fecha del pago (AAAA-MM-DD) — opcional, por defecto hoy:") || null;
             const txid        = prompt("TxID / referencia (opcional):") || "";
             const observacion = prompt("Observación (opcional):") || "";
