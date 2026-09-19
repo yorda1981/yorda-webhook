@@ -168,6 +168,8 @@ const MINUTOS_PAUSA = 10;
                 created_at  TIMESTAMP NOT NULL DEFAULT NOW()
             )
         `);
+        // Para no repetir el aviso de "entrega atrasada" cada vez que corre el job.
+        await pool.query("ALTER TABLE entregas ADD COLUMN IF NOT EXISTS ultimo_aviso_atraso TIMESTAMP");
     } catch (e) { console.error("⚠️ Migración CRM de Entregas:", e.message); }
 })();
 
@@ -839,6 +841,37 @@ setInterval(() => {
         enviarSaludosMatutinos().catch(e => console.error("❌ Saludos matutinos:", e.message));
     }
 }, 60 * 1000);
+
+// ══════════════════════════════════════
+// CRM DE ENTREGAS — AVISO DE ENTREGAS ATRASADAS
+// Si una entrega lleva más de 48h (2 días) en PENDIENTE, te avisa por
+// WhatsApp. NUNCA cambia el estado — solo notifica (sección 10 del CRM).
+// Si sigue pendiente al día siguiente, vuelve a avisar (no se repite antes
+// de 24h para no saturar).
+// ══════════════════════════════════════
+const HORAS_UMBRAL_ATRASO = 48;
+
+async function avisarEntregasAtrasadas() {
+    try {
+        const atrasadas = await entregasService.obtenerEntregasAtrasadasSinAvisar(HORAS_UMBRAL_ATRASO);
+        if (!atrasadas.length) return;
+
+        const lineas = atrasadas.map(e => {
+            const dias = Math.floor((Date.now() - new Date(e.created_at).getTime()) / (1000 * 60 * 60 * 24));
+            return `• ${e.codigo} — ${Number(e.cantidad).toLocaleString("es-ES")} ${e.moneda} — ${e.cliente_nombre} — pendiente hace ${dias} día(s)`;
+        });
+
+        await enviarSeguro(getAdminPhone(),
+            `⚠️ *Entregas atrasadas* (más de ${HORAS_UMBRAL_ATRASO}h pendientes):\n\n${lineas.join("\n")}`
+        );
+        await entregasService.marcarAvisoAtrasoEnviado(atrasadas.map(e => e.id));
+        console.log(`⚠️ Aviso de ${atrasadas.length} entrega(s) atrasada(s) enviado`);
+    } catch (e) {
+        console.error("❌ Error avisando entregas atrasadas:", e.message);
+    }
+}
+setTimeout(avisarEntregasAtrasadas, 30 * 1000); // espera a que terminen las migraciones al arrancar
+setInterval(avisarEntregasAtrasadas, 6 * 60 * 60 * 1000); // revisa cada 6 horas
 
 // ══════════════════════════════════════
 // NUEVO ENDPOINT CRM STATS
