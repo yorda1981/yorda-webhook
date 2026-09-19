@@ -9,7 +9,7 @@ const pool = require("./db");
 
 const openaiService = require("./src/services/openai");
 const { obtenerTodos, obtenerCliente } = require("./src/services/customer-memory");
-const { obtenerTodas, confirmarOperacion, completarOperacion, obtenerEstadisticas, expirarOperacionesPendientes } = require("./src/services/operations");
+const { obtenerTodas, confirmarOperacion, completarOperacion, obtenerEstadisticas } = require("./src/services/operations");
 const crm = require("./src/services/crm");
 const { leerTasas } = require("./src/flows/cotizacion-flow");
 const { esPedidoWeb, procesarPedidoWeb } = require("./src/flows/pedido-web-flow");
@@ -106,6 +106,68 @@ const MINUTOS_PAUSA = 10;
         // varias veces seguidas en poco tiempo.
         await pool.query("ALTER TABLE customers ADD COLUMN IF NOT EXISTS ultimo_aviso_entrega TIMESTAMP");
     } catch (e) { console.error("⚠️ Migración ultimo_aviso_entrega:", e.message); }
+    try {
+        // ─────────────────────────────────────────
+        // CRM DE ENTREGAS — separado por completo de "operations".
+        // Solo entregas de EFECTIVO (CUP/USD) viven aquí. Las
+        // transferencias siguen su flujo normal en "operations" y
+        // nunca tocan estas tablas.
+        // ─────────────────────────────────────────
+        await pool.query("CREATE SEQUENCE IF NOT EXISTS entregas_codigo_seq START WITH 1000");
+        await pool.query("CREATE SEQUENCE IF NOT EXISTS entregas_pago_codigo_seq START WITH 1");
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS entregas_pagos (
+                id               SERIAL PRIMARY KEY,
+                codigo           VARCHAR(20) UNIQUE NOT NULL,
+                cantidad_enviada NUMERIC,
+                moneda_pago      VARCHAR(20),
+                fecha            DATE,
+                txid             VARCHAR(150),
+                observacion      TEXT,
+                created_at       TIMESTAMP NOT NULL DEFAULT NOW()
+            )
+        `);
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS entregas (
+                id                SERIAL PRIMARY KEY,
+                codigo            VARCHAR(20) UNIQUE NOT NULL,
+                operation_id      INTEGER REFERENCES operations(id),
+                ref_web           VARCHAR(20),
+                phone             VARCHAR(30) NOT NULL,
+                cliente_nombre    VARCHAR(150),
+                telefono_entrega  VARCHAR(30),
+                cantidad          NUMERIC NOT NULL,
+                moneda            VARCHAR(3) NOT NULL,
+                modalidad         VARCHAR(20) NOT NULL DEFAULT 'EFECTIVO',
+                provincia         VARCHAR(60),
+                municipio         VARCHAR(60),
+                direccion         TEXT,
+                referencia        TEXT,
+                observaciones     TEXT,
+                estado_entrega    VARCHAR(20) NOT NULL DEFAULT 'PENDIENTE',
+                fecha_entrega     TIMESTAMP,
+                entregado_por     VARCHAR(100),
+                estado_pago       VARCHAR(20) NOT NULL DEFAULT 'NO_APLICA',
+                pago_id           INTEGER REFERENCES entregas_pagos(id),
+                created_at        TIMESTAMP NOT NULL DEFAULT NOW(),
+                updated_at        TIMESTAMP NOT NULL DEFAULT NOW()
+            )
+        `);
+        await pool.query("CREATE INDEX IF NOT EXISTS idx_entregas_estado_entrega ON entregas(estado_entrega)");
+        await pool.query("CREATE INDEX IF NOT EXISTS idx_entregas_estado_pago ON entregas(estado_pago)");
+        await pool.query("CREATE INDEX IF NOT EXISTS idx_entregas_phone ON entregas(phone)");
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS entregas_historial (
+                id          SERIAL PRIMARY KEY,
+                entrega_id  INTEGER NOT NULL REFERENCES entregas(id),
+                evento      TEXT NOT NULL,
+                created_at  TIMESTAMP NOT NULL DEFAULT NOW()
+            )
+        `);
+    } catch (e) { console.error("⚠️ Migración CRM de Entregas:", e.message); }
 })();
 
 // ─────────────────────────────────────────
@@ -426,15 +488,6 @@ app.post("/admin/completar-operacion/:id", adminLimiter, verificarToken, async (
         const notificado = await enviarMensaje(operacion.phone, msg);
         if (!notificado) console.error(`⚠️ No se pudo notificar al cliente de la operación #${operacion.id} (phone: ${operacion.phone})`);
 
-        // BUG ENCONTRADO: el Embudo de Conversión siempre mostraba "Completados: 0"
-        // porque nada actualizaba estado_crm a "completado" cuando de verdad se
-        // completaba una operación desde el dashboard. Se agrega acá.
-        try {
-            await crm.actualizarEstadoCRM(operacion.phone, "completado");
-        } catch (e) {
-            console.error("⚠️ Error actualizando estado_crm a completado:", e.message);
-        }
-
         // Si este pedido venía de la calculadora, el cliente estaba en "modo
         // silencio" con el bot (ver openai.js). Ya se completó todo — se le
         // quita esa marca para que pueda volver a hablar normal con el bot
@@ -589,15 +642,6 @@ async function recalcularNivelesVipYAvisar() {
 }
 setTimeout(recalcularNivelesVipYAvisar, 10 * 1000); // espera un poco a que terminen las migraciones al arrancar
 setInterval(recalcularNivelesVipYAvisar, 24 * 60 * 60 * 1000);
-
-// Caducidad: operaciones "pendiente" que llevan más de 24h sin que se verifiquen
-// pasan a "expirada" — así no se quedan acumulando en el dashboard indefinidamente.
-// Corre cada hora (no una vez al día) para que la caducidad de 24h sea precisa,
-// no que espere hasta el próximo "día" del servidor.
-setTimeout(() => expirarOperacionesPendientes().catch(e => console.error("❌ Expirar operaciones:", e.message)), 15 * 1000);
-setInterval(() => {
-    expirarOperacionesPendientes().catch(e => console.error("❌ Expirar operaciones:", e.message));
-}, 60 * 60 * 1000);
 
 // ══════════════════════════════════════
 // MENSAJE DIARIO DE TASAS (10:15 hora de Bahía = 13:15 UTC)
