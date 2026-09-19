@@ -570,6 +570,18 @@ app.post("/admin/entregas/:id/entregado", adminLimiter, verificarTokenEntregas, 
     try {
         const entrega = await entregasService.marcarEntregado(req.params.id, req.body.usuario || "Panel admin");
         if (!entrega) return res.status(404).json({ success: false, error: "Entrega no encontrada o ya no está PENDIENTE" });
+
+        // Aviso a tu número — así te enteras aunque el cambio lo haga tu
+        // compañera desde el acceso reducido (/entregas).
+        try {
+            await enviarSeguro(getAdminPhone(),
+                `✅ Entrega ${entrega.codigo} marcada como ENTREGADO.\n\n` +
+                `Cliente: ${entrega.cliente_nombre}\n` +
+                `${Number(entrega.cantidad).toLocaleString("es-ES")} ${entrega.moneda}\n\n` +
+                `💵 Pago al contacto: PENDIENTE DE PAGO`
+            );
+        } catch (e) { console.error("⚠️ No se pudo notificar entrega marcada:", e.message); }
+
         res.json({ success: true, entrega });
     } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
@@ -593,6 +605,19 @@ app.post("/admin/entregas/pago", adminLimiter, verificarTokenEntregas, async (re
         }
         const resultado = await entregasService.registrarPago(entregaIds, { cantidadEnviada, monedaPago, fecha, txid, observacion });
         if (!resultado) return res.status(500).json({ success: false, error: "No se pudo registrar el pago" });
+
+        // Aviso a tu número — mismo motivo que en "entregado": que te enteres
+        // aunque el registro lo haga tu compañera.
+        try {
+            const codigos = resultado.entregas.map(e => e.codigo).join(", ") || "—";
+            await enviarSeguro(getAdminPhone(),
+                `💵 Pago ${resultado.pago.codigo} registrado.\n\n` +
+                `Entregas incluidas: ${codigos}\n` +
+                (resultado.pago.cantidad_enviada ? `Cantidad enviada: ${resultado.pago.cantidad_enviada} ${resultado.pago.moneda_pago || ""}\n` : "") +
+                `Estado: PAGADO`
+            );
+        } catch (e) { console.error("⚠️ No se pudo notificar pago registrado:", e.message); }
+
         res.json({ success: true, ...resultado });
     } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
