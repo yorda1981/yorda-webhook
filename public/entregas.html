@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YORDA-BOT | CRM de Entregas</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root { --bg: #0b0e1a; --card: #161b33; --accent: #14b8a6; --text: #ffffff; --red: #ef4444; --green: #4ade80; --yellow: #fbbf24; }
+        body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 20px; line-height: 1.6; }
+        .container { max-width: 1100px; margin: auto; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; flex-wrap: wrap; gap: 12px; }
+        .status-badge { background: #1a2733; color: var(--green); padding: 8px 20px; border-radius: 30px; font-size: 13px; font-weight: 700; border: 1px solid #2d355a; }
+        .token-row { display: flex; gap: 8px; align-items: center; }
+        .token-row input { background: #0d1117; border: 1px solid #2d355a; color: white; padding: 8px 12px; border-radius: 8px; font-size: 13px; width: 260px; outline: none; }
+        .token-row input:focus { border-color: var(--accent); }
+        .token-row button { background: var(--accent); color: #0b0e1a; border: none; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 700; }
+        .config-section { background: var(--card); padding: 30px; border-radius: 20px; border: 1px solid #2d355a; margin-bottom: 30px; }
+        h3 { margin-top: 0; margin-bottom: 20px; }
+        .table-wrapper { overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; }
+        th { text-align: left; padding: 12px; color: #8b949e; font-size: 12px; border-bottom: 2px solid #2d355a; text-transform: uppercase; }
+        td { padding: 12px; border-bottom: 1px solid #2d355a; font-size: 14px; }
+        .btn-confirm { background: var(--green); color: #0b0e1a; border: none; padding: 8px 15px; border-radius: 8px; font-weight: bold; cursor: pointer; transition: 0.2s; }
+        .btn-confirm:hover { transform: scale(1.05); }
+        .page-btn { background: #0b0e1a; border: 1px solid #2d355a; color: #8b949e; padding: 6px 12px; border-radius: 8px; cursor: pointer; font-size: 13px; }
+        .page-btn:hover { border-color: var(--accent); color: white; }
+        .page-btn.active { background: var(--accent); border-color: var(--accent); color: #0b0e1a; font-weight:700; }
+        .badge-count { background: rgba(255,255,255,0.12); color: inherit; font-size: 13px; padding: 2px 10px; border-radius: 20px; margin-left: 6px; }
+        .btn-limpiar { background: #16a34a; color: white; border: none; padding: 8px 16px; border-radius: 8px; font-size: 12px; font-weight: 700; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <div class="container">
+
+        <div class="header">
+            <h1>📦 CRM de Entregas — Yorda Envíos</h1>
+            <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+                <div class="token-row">
+                    <input type="password" id="tokenField" placeholder="Token de acceso..." />
+                    <button onclick="conectar()">Conectar</button>
+                </div>
+                <div class="status-badge" id="statusBadge">● Desconectado</div>
+            </div>
+        </div>
+
+        <div class="config-section" style="border-left: 5px solid #14b8a6;">
+            <h3 style="color:#14b8a6;">📦 Entregas de efectivo (CUP/USD) <span class="badge-count" id="countEntregasPend">0</span></h3>
+
+            <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; margin-bottom:20px;">
+                <div style="background:#0b0e1a;border-radius:12px;padding:16px;border:1px solid #2d355a;">
+                    <div style="font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:1px;">Pendientes de entrega</div>
+                    <div style="font-size:22px;font-weight:700;color:var(--yellow);margin-top:6px;" id="ent-pend-count">—</div>
+                    <div style="font-size:12px;color:#8b949e;margin-top:4px;" id="ent-pend-totales">CUP — · USD —</div>
+                </div>
+                <div style="background:#0b0e1a;border-radius:12px;padding:16px;border:1px solid #2d355a;">
+                    <div style="font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:1px;">Entregadas · Pend. pago</div>
+                    <div style="font-size:22px;font-weight:700;color:#60a5fa;margin-top:6px;" id="ent-entregadas-count">—</div>
+                    <div style="font-size:12px;color:#8b949e;margin-top:4px;" id="ent-entregadas-totales">CUP — · USD —</div>
+                </div>
+                <div style="background:#0b0e1a;border-radius:12px;padding:16px;border:1px solid #2d355a;">
+                    <div style="font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:1px;">Pagadas</div>
+                    <div style="font-size:22px;font-weight:700;color:var(--green);margin-top:6px;" id="ent-pagadas-count">—</div>
+                </div>
+                <div style="background:#0b0e1a;border-radius:12px;padding:16px;border:1px solid #2d355a;">
+                    <div style="font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:1px;">Canceladas</div>
+                    <div style="font-size:22px;font-weight:700;color:var(--red);margin-top:6px;" id="ent-canceladas-count">—</div>
+                </div>
+            </div>
+
+            <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px;" id="entFiltrosRapidos">
+                <button class="page-btn active" data-filtro="TODAS" onclick="filtrarEntregasRapido('TODAS')">TODAS</button>
+                <button class="page-btn" data-filtro="PENDIENTES" onclick="filtrarEntregasRapido('PENDIENTES')">PENDIENTES</button>
+                <button class="page-btn" data-filtro="ENTREGADAS" onclick="filtrarEntregasRapido('ENTREGADAS')">ENTREGADAS</button>
+                <button class="page-btn" data-filtro="PENDIENTES_DE_PAGO" onclick="filtrarEntregasRapido('PENDIENTES_DE_PAGO')">PEND. DE PAGO</button>
+                <button class="page-btn" data-filtro="PAGADAS" onclick="filtrarEntregasRapido('PAGADAS')">PAGADAS</button>
+                <button class="page-btn" data-filtro="CANCELADAS" onclick="filtrarEntregasRapido('CANCELADAS')">CANCELADAS</button>
+            </div>
+
+            <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:10px; margin-bottom:14px;">
+                <input type="text" id="entBuscar" placeholder="Buscar: código, cliente, teléfono o provincia..." style="background:#0b0e1a;border:1px solid #2d355a;padding:10px 14px;border-radius:10px;color:white;font-size:13px;outline:none;" oninput="debounceCargarEntregas()">
+                <select id="entMoneda" onchange="cargarEntregas()" style="background:#0b0e1a;border:1px solid #2d355a;padding:10px 14px;border-radius:10px;color:white;font-size:13px;outline:none;">
+                    <option value="">Todas las monedas</option>
+                    <option value="CUP">CUP</option>
+                    <option value="USD">USD</option>
+                </select>
+                <button class="btn-limpiar" style="background:#14b8a6;" onclick="registrarPagoAgrupado()">💵 Registrar pago (seleccionadas)</button>
+            </div>
+
+            <div style="display:flex; gap:10px; align-items:center; margin-bottom:14px;">
+                <input type="text" id="entPagoCodigo" placeholder="Reabrir pago agrupado (ej: P-003)" style="background:#0b0e1a;border:1px solid #2d355a;padding:10px 14px;border-radius:10px;color:white;font-size:13px;outline:none; max-width:260px;">
+                <button class="page-btn" onclick="verPagoAgrupado()">🔍 Ver pago</button>
+            </div>
+
+            <div class="table-wrapper">
+                <table>
+                    <thead>
+                        <tr>
+                            <th></th>
+                            <th>Código</th>
+                            <th>Fecha</th>
+                            <th>Cliente</th>
+                            <th>Entregar</th>
+                            <th>Lugar</th>
+                            <th>Estado entrega</th>
+                            <th>Estado pago</th>
+                            <th>Acción</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tablaEntregas">
+                        <tr><td colspan="9" style="text-align:center; padding:20px; color:#8b949e;">Conecta para ver datos</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        let token = "";
+        let intervalo = null;
+        let entFiltroRapido = "TODAS";
+        let entDebounce = null;
+
+        function authH() {
+            return { "Authorization": "Bearer " + token, "Content-Type": "application/json" };
+        }
+
+        function conectar() {
+            token = document.getElementById("tokenField").value.trim();
+            if (!token) return;
+            if (intervalo) clearInterval(intervalo);
+            cargarEntregas();
+            intervalo = setInterval(cargarEntregas, 30000);
+        }
+
+        document.getElementById("tokenField").addEventListener("keydown", e => {
+            if (e.key === "Enter") conectar();
+        });
+
+        function debounceCargarEntregas() {
+            clearTimeout(entDebounce);
+            entDebounce = setTimeout(cargarEntregas, 350);
+        }
+
+        function filtrarEntregasRapido(filtro) {
+            entFiltroRapido = filtro;
+            document.querySelectorAll("#entFiltrosRapidos .page-btn").forEach(b => b.classList.toggle("active", b.dataset.filtro === filtro));
+            cargarEntregas();
+        }
+
+        function construirQueryEntregas() {
+            const params = new URLSearchParams();
+            const texto  = document.getElementById("entBuscar")?.value.trim();
+            const moneda = document.getElementById("entMoneda")?.value;
+            if (texto)  params.set("q", texto);
+            if (moneda) params.set("moneda", moneda);
+
+            if (entFiltroRapido === "PENDIENTES")          params.set("estadoEntrega", "PENDIENTE");
+            else if (entFiltroRapido === "ENTREGADAS")     params.set("estadoEntrega", "ENTREGADO");
+            else if (entFiltroRapido === "PENDIENTES_DE_PAGO") params.set("estadoPago", "PENDIENTE_DE_PAGO");
+            else if (entFiltroRapido === "PAGADAS")        params.set("estadoPago", "PAGADO");
+            else if (entFiltroRapido === "CANCELADAS")     params.set("estadoEntrega", "CANCELADO");
+
+            return params;
+        }
+
+        async function cargarEntregas() {
+            if (!token) return;
+            try {
+                const params = construirQueryEntregas();
+                const [resList, resStats] = await Promise.all([
+                    fetch("/admin/entregas?" + params.toString(), { headers: authH() }),
+                    fetch("/admin/entregas/stats", { headers: authH() })
+                ]);
+
+                if (resList.status === 401) {
+                    document.getElementById("statusBadge").innerText = "● Token inválido";
+                    document.getElementById("statusBadge").style.color = "#ef4444";
+                    clearInterval(intervalo);
+                    return;
+                }
+
+                document.getElementById("statusBadge").innerText = "● Online";
+                document.getElementById("statusBadge").style.color = "#4ade80";
+
+                const lista = await resList.json();
+                const stats = await resStats.json();
+                renderEntregasStats(stats);
+                renderTablaEntregas(Array.isArray(lista) ? lista : []);
+            } catch (e) { console.error("❌ Error cargando entregas:", e); }
+        }
+
+        function renderEntregasStats(stats) {
+            if (!stats) return;
+            const fmtNum = n => Number(n || 0).toLocaleString("es-ES");
+            document.getElementById("ent-pend-count").innerText    = stats.pendientes?.count ?? 0;
+            document.getElementById("ent-pend-totales").innerText  = `CUP ${fmtNum(stats.pendientes?.cup)} · USD ${fmtNum(stats.pendientes?.usd)}`;
+            document.getElementById("countEntregasPend").innerText = stats.pendientes?.count ?? 0;
+
+            document.getElementById("ent-entregadas-count").innerText   = stats.entregadas?.count ?? 0;
+            document.getElementById("ent-entregadas-totales").innerText = `CUP ${fmtNum(stats.entregadas?.cup)} · USD ${fmtNum(stats.entregadas?.usd)}`;
+
+            document.getElementById("ent-pagadas-count").innerText    = stats.pagadas ?? 0;
+            document.getElementById("ent-canceladas-count").innerText = stats.canceladas ?? 0;
+        }
+
+        function diasPendienteTexto(fechaCreacion) {
+            const creado = new Date(fechaCreacion);
+            const dias = Math.floor((new Date() - creado) / (1000 * 60 * 60 * 24));
+            if (dias <= 0) return "Hoy";
+            if (dias === 1) return "Pendiente hace 1 día";
+            return `Pendiente hace ${dias} días`;
+        }
+
+        function badgeEstadoEntrega(estado) {
+            const colores = { PENDIENTE: "var(--yellow)", ENTREGADO: "#60a5fa", CANCELADO: "var(--red)" };
+            return `<span style="color:${colores[estado] || "#8b949e"};font-weight:700;">${estado}</span>`;
+        }
+
+        function badgeEstadoPago(estado) {
+            const colores = { NO_APLICA: "#8b949e", PENDIENTE_DE_PAGO: "var(--yellow)", PAGADO: "var(--green)" };
+            const texto   = { NO_APLICA: "No aplica", PENDIENTE_DE_PAGO: "Pend. de pago", PAGADO: "Pagado" };
+            return `<span style="color:${colores[estado] || "#8b949e"};font-weight:700;">${texto[estado] || estado}</span>`;
+        }
+
+        function renderTablaEntregas(lista) {
+            const tbody = document.getElementById("tablaEntregas");
+            if (!lista.length) {
+                tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#8b949e;padding:20px;">No hay entregas con estos filtros.</td></tr>';
+                return;
+            }
+            tbody.innerHTML = lista.map(e => {
+                const puedePagar = e.estado_entrega === "ENTREGADO" && e.estado_pago === "PENDIENTE_DE_PAGO";
+                const checkbox   = puedePagar ? `<input type="checkbox" class="entregaCheckbox" data-id="${e.id}">` : "";
+                const lugar      = [e.provincia, e.municipio].filter(Boolean).join(", ") || "-";
+
+                let acciones;
+                if (e.estado_entrega === "PENDIENTE") {
+                    acciones = `
+                        <button class="btn-confirm" style="background:#60a5fa;" onclick="entregaMarcarEntregado(${e.id})">ENTREGADO</button>
+                        <button class="btn-confirm" style="background:var(--red);color:white;margin-left:6px;" onclick="entregaCancelar(${e.id})">CANCELAR</button>`;
+                } else if (puedePagar) {
+                    acciones = `<button class="btn-confirm" style="background:#14b8a6;" onclick="registrarPagoIndividual(${e.id})">PAGAR</button>`;
+                } else if (e.estado_pago === "PAGADO") {
+                    acciones = `<small style="color:#8b949e;">✔ pagado</small>`;
+                } else {
+                    acciones = "-";
+                }
+                acciones += `<br><button class="page-btn" style="margin-top:4px;font-size:11px;padding:4px 8px;" onclick="entregaVerHistorial(${e.id})">🕘 Historial</button>`;
+
+                const notaAtraso = e.estado_entrega === "PENDIENTE"
+                    ? `<br><small style="color:var(--yellow);">${diasPendienteTexto(e.created_at)}</small>`
+                    : "";
+
+                return `
+                <tr>
+                    <td>${checkbox}</td>
+                    <td style="font-family:monospace;font-weight:700;">${e.codigo}</td>
+                    <td>${new Date(e.created_at).toLocaleDateString("pt-BR")}${notaAtraso}</td>
+                    <td><strong>${e.cliente_nombre || "-"}</strong><br><small style="color:#8b949e;">${(e.telefono_entrega || e.phone || "").split("@")[0]}</small></td>
+                    <td style="font-weight:700;">${Number(e.cantidad).toLocaleString("es-ES")} ${e.moneda}</td>
+                    <td><small>${lugar}</small></td>
+                    <td>${badgeEstadoEntrega(e.estado_entrega)}</td>
+                    <td>${badgeEstadoPago(e.estado_pago)}</td>
+                    <td>${acciones}</td>
+                </tr>`;
+            }).join("");
+        }
+
+        async function entregaMarcarEntregado(id) {
+            if (!confirm("¿Confirmas que esta entrega ya fue realizada en Cuba?")) return;
+            try {
+                const res = await fetch(`/admin/entregas/${id}/entregado`, { method: "POST", headers: authH(), body: JSON.stringify({}) });
+                const data = await res.json();
+                if (data.success) cargarEntregas();
+                else alert("❌ Error: " + (data.error || "desconocido"));
+            } catch (e) { alert("❌ Error de conexión"); }
+        }
+
+        async function entregaCancelar(id) {
+            const motivo = prompt("Motivo de la cancelación (opcional):") || "";
+            if (!confirm("¿Confirmas cancelar esta entrega?")) return;
+            try {
+                const res = await fetch(`/admin/entregas/${id}/cancelar`, { method: "POST", headers: authH(), body: JSON.stringify({ motivo }) });
+                const data = await res.json();
+                if (data.success) cargarEntregas();
+                else alert("❌ Error: " + (data.error || "desconocido"));
+            } catch (e) { alert("❌ Error de conexión"); }
+        }
+
+        async function promptYRegistrarPago(ids) {
+            if (!ids || ids.length === 0) {
+                alert("Selecciona al menos una entrega en estado PENDIENTE DE PAGO (o usa el botón PAGAR de una fila).");
+                return;
+            }
+            const cantidadEnviada = prompt(`Registrar pago para ${ids.length} entrega(s).\n\nCantidad enviada (opcional):`);
+            if (cantidadEnviada === null) return;
+            const monedaPago  = prompt("Moneda del pago (ej: USDT, USD, CUP) — opcional:") || "";
+            const fecha       = prompt("Fecha del pago (AAAA-MM-DD) — opcional, por defecto hoy:") || null;
+            const txid        = prompt("TxID / referencia (opcional):") || "";
+            const observacion = prompt("Observación (opcional):") || "";
+
+            try {
+                const res = await fetch("/admin/entregas/pago", {
+                    method: "POST",
+                    headers: authH(),
+                    body: JSON.stringify({
+                        entregaIds: ids,
+                        cantidadEnviada: cantidadEnviada ? Number(cantidadEnviada) : null,
+                        monedaPago, fecha, txid, observacion
+                    })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    alert(`✅ Pago ${data.pago.codigo} registrado — ${data.entregas.length} entrega(s) marcada(s) como PAGADO.`);
+                    cargarEntregas();
+                } else {
+                    alert("❌ Error registrando el pago: " + (data.error || "desconocido"));
+                }
+            } catch (e) {
+                alert("❌ Error de conexión al registrar el pago");
+            }
+        }
+
+        async function registrarPagoIndividual(id) {
+            await promptYRegistrarPago([id]);
+        }
+
+        async function registrarPagoAgrupado() {
+            const ids = [...document.querySelectorAll(".entregaCheckbox:checked")].map(cb => Number(cb.dataset.id));
+            await promptYRegistrarPago(ids);
+        }
+
+        async function verPagoAgrupado() {
+            const codigo = document.getElementById("entPagoCodigo").value.trim();
+            if (!codigo) { alert("Escribe el código del pago (ej: P-003)"); return; }
+            try {
+                const res = await fetch(`/admin/entregas/pago/${encodeURIComponent(codigo)}`, { headers: authH() });
+                if (res.status === 404) { alert(`No se encontró el pago ${codigo}`); return; }
+                const pago = await res.json();
+                const detalle = pago.entregas.map(e => `• ${e.codigo} — ${Number(e.cantidad).toLocaleString("es-ES")} ${e.moneda}`).join("\n");
+                alert(
+                    `💵 Pago ${pago.codigo}\n` +
+                    (pago.cantidad_enviada ? `Cantidad enviada: ${pago.cantidad_enviada} ${pago.moneda_pago || ""}\n` : "") +
+                    (pago.fecha ? `Fecha: ${new Date(pago.fecha).toLocaleDateString("pt-BR")}\n` : "") +
+                    (pago.txid ? `TxID: ${pago.txid}\n` : "") +
+                    (pago.observacion ? `Observación: ${pago.observacion}\n` : "") +
+                    `\nEntregas incluidas (${pago.entregas.length}):\n${detalle}`
+                );
+            } catch (e) { alert("❌ Error de conexión buscando el pago"); }
+        }
+
+        async function entregaVerHistorial(id) {
+            try {
+                const res = await fetch(`/admin/entregas/${id}/historial`, { headers: authH() });
+                const hist = await res.json();
+                if (!Array.isArray(hist) || hist.length === 0) { alert("Sin historial."); return; }
+                const texto = hist.map(h => `${new Date(h.created_at).toLocaleString("pt-BR")} — ${h.evento}`).join("\n");
+                alert(`🕘 Historial:\n\n${texto}`);
+            } catch (e) { alert("❌ Error de conexión"); }
+        }
+    </script>
+</body>
+</html>
