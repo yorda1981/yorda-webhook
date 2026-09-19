@@ -11,6 +11,7 @@ const openaiService = require("./src/services/openai");
 const { obtenerTodos, obtenerCliente } = require("./src/services/customer-memory");
 const { obtenerTodas, confirmarOperacion, completarOperacion, obtenerEstadisticas } = require("./src/services/operations");
 const crm = require("./src/services/crm");
+const entregasService = require("./src/services/entregas");
 const { leerTasas } = require("./src/flows/cotizacion-flow");
 const { esPedidoWeb, procesarPedidoWeb } = require("./src/flows/pedido-web-flow");
 const { enviarSeguro, getAdminPhone, getPIXKey, getPIXHolder, getPIXBank, getPIXImage } = require("./src/flows/shared");
@@ -521,6 +522,78 @@ app.post("/admin/completar-operacion/:id", adminLimiter, verificarToken, async (
     } catch (e) {
         res.status(500).json({ success: false, error: e.message });
     }
+});
+
+// ─────────────────────────────────────────
+// CRM DE ENTREGAS — completamente separado de "operations".
+// Solo entregas de EFECTIVO (CUP/USD) viven aquí.
+// ─────────────────────────────────────────
+
+app.get("/admin/entregas", adminLimiter, verificarToken, async (req, res) => {
+    try {
+        const filtros = {
+            q:             req.query.q,
+            codigo:        req.query.codigo,
+            cliente:       req.query.cliente,
+            telefono:      req.query.telefono,
+            fechaDesde:    req.query.fechaDesde,
+            fechaHasta:    req.query.fechaHasta,
+            provincia:     req.query.provincia,
+            moneda:        req.query.moneda,
+            estadoEntrega: req.query.estadoEntrega,
+            estadoPago:    req.query.estadoPago
+        };
+        res.json(await entregasService.obtenerEntregas(filtros));
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get("/admin/entregas/stats", adminLimiter, verificarToken, async (req, res) => {
+    try { res.json(await entregasService.obtenerEstadisticasEntregas()); }
+    catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post("/admin/entregas/:id/entregado", adminLimiter, verificarToken, async (req, res) => {
+    try {
+        const entrega = await entregasService.marcarEntregado(req.params.id, req.body.usuario || "Panel admin");
+        if (!entrega) return res.status(404).json({ success: false, error: "Entrega no encontrada o ya no está PENDIENTE" });
+        res.json({ success: true, entrega });
+    } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+app.post("/admin/entregas/:id/cancelar", adminLimiter, verificarToken, async (req, res) => {
+    try {
+        const entrega = await entregasService.marcarCancelado(req.params.id, req.body.motivo || "");
+        if (!entrega) return res.status(404).json({ success: false, error: "Entrega no encontrada o ya no está PENDIENTE" });
+        res.json({ success: true, entrega });
+    } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// Pago al contacto en Cuba — individual o agrupado (varias entregas a la vez).
+// Puramente histórico: NO calcula ni convierte monedas, solo guarda lo que
+// se le pasa. Solo afecta entregas que realmente están PENDIENTE_DE_PAGO.
+app.post("/admin/entregas/pago", adminLimiter, verificarToken, async (req, res) => {
+    try {
+        const { entregaIds, cantidadEnviada, monedaPago, fecha, txid, observacion } = req.body;
+        if (!Array.isArray(entregaIds) || entregaIds.length === 0) {
+            return res.status(400).json({ success: false, error: "Debes indicar al menos una entrega (entregaIds)" });
+        }
+        const resultado = await entregasService.registrarPago(entregaIds, { cantidadEnviada, monedaPago, fecha, txid, observacion });
+        if (!resultado) return res.status(500).json({ success: false, error: "No se pudo registrar el pago" });
+        res.json({ success: true, ...resultado });
+    } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+app.get("/admin/entregas/pago/:codigo", adminLimiter, verificarToken, async (req, res) => {
+    try {
+        const pago = await entregasService.obtenerPago(req.params.codigo);
+        if (!pago) return res.status(404).json({ error: "Pago no encontrado" });
+        res.json(pago);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get("/admin/entregas/:id/historial", adminLimiter, verificarToken, async (req, res) => {
+    try { res.json(await entregasService.obtenerHistorialDe(req.params.id)); }
+    catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.get("/dashboard", (req, res) =>
