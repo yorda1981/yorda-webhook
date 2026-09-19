@@ -14,8 +14,9 @@
 
 const pool = require("../../db");
 const { agregarOperacion, buscarPorRefWeb } = require("../services/operations");
+const { agregarEntrega } = require("../services/entregas");
 const { guardarCliente } = require("../services/customer-memory");
-const { enviarSeguro } = require("./shared");
+const { enviarSeguro, getAdminPhone, getEntregaContactPhone, fmt } = require("./shared");
 
 // Consulta el nivel VIP (0-3) de este teléfono (para el descuento de entrega escalado).
 async function nivelVipDe(phone) {
@@ -102,6 +103,33 @@ function parsearPedidoEntrega(texto) {
         referencia:          referencia ? referencia.trim() : "",
         entregaDisponible:   /^disponible|^dispon[ií]vel/i.test(entregaTxt.trim())
     };
+}
+
+// Notificación interna (sección 3 del CRM de Entregas): la reciben tanto el
+// admin como el contacto encargado de las entregas en Cuba, con el MISMO
+// ID de entrega. El CRM (tabla "entregas") es la fuente oficial — WhatsApp
+// es solo el canal de aviso.
+async function notificarNuevaEntrega(entrega) {
+    const lugar = [entrega.provincia, entrega.municipio].filter(Boolean).join(", ") || "—";
+    const msg =
+        `🚨 NUEVA ENTREGA ${entrega.codigo}\n\n` +
+        `Cliente: ${entrega.cliente_nombre}\n` +
+        `Teléfono: ${entrega.telefono_entrega || entrega.phone}\n` +
+        `Entregar: ${fmt(entrega.cantidad)} ${entrega.moneda}\n` +
+        `Lugar: ${lugar}` +
+        (entrega.direccion ? `\nDirección: ${entrega.direccion}` : "") +
+        (entrega.referencia ? `\nReferencia: ${entrega.referencia}` : "") +
+        (entrega.observaciones ? `\nObservaciones: ${entrega.observaciones}` : "") +
+        `\n\nEstado: PENDIENTE`;
+
+    const destinatarios = [getAdminPhone(), getEntregaContactPhone()].filter(Boolean);
+    for (const numero of destinatarios) {
+        try {
+            await enviarSeguro(numero, msg);
+        } catch (e) {
+            console.error(`❌ Error notificando entrega ${entrega.codigo} a ${numero}:`, e.message);
+        }
+    }
 }
 
 async function manejarEntrega(phone, texto, pushName, esEs) {
@@ -199,6 +227,31 @@ async function manejarEntrega(phone, texto, pushName, esEs) {
     });
 
     if (!operacion) return false;
+
+    // CRM DE ENTREGAS — registro completamente separado de "operations",
+    // exclusivo para entregas de EFECTIVO (CUP/USD). "operationId" queda
+    // solo como referencia cruzada, nunca se lee desde el CRM de entregas.
+    // No bloquea el flujo del cliente si falla: la operación en
+    // "operations" ya quedó guardada, que es lo que el cliente ve.
+    try {
+        const entrega = await agregarEntrega({
+            operationId:      operacion.id,
+            refWeb:           datos.ref,
+            phone,
+            clienteNombre:    pushName || datos.nombre,
+            telefonoEntrega:  datos.telefono,
+            cantidad:         datos.moneda === "CUP" ? montoRecibeFinal : datos.montoRecibe,
+            moneda:           datos.moneda,
+            provincia:        datos.provincia,
+            municipio:        datos.municipio,
+            direccion:        datos.direccion,
+            referencia:       datos.referencia,
+            observaciones:    datos.entregaDisponible ? null : "Fuera de municipio cabecera — confirmar disponibilidad"
+        });
+        if (entrega) await notificarNuevaEntrega(entrega);
+    } catch (e) {
+        console.error("❌ Error creando entrega en el CRM de Entregas:", e.message);
+    }
 
     // Marca al cliente para que el bot conversacional se quede en silencio si
     // manda algo más (ver el guard en openai.js) — este pedido ya se maneja
