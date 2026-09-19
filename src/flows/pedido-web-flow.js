@@ -87,6 +87,11 @@ function parsearPedidoEntrega(texto) {
     const entregaTxt  = (texto.match(/🚚[^:]*:\s*(.+)/) || [])[1] || "";
     const pins        = [...texto.matchAll(/📍[^:]*:\s*(.+)/g)].map(m => m[1].trim());
     const telefonos   = [...texto.matchAll(/📞[^:]*:\s*(.+)/g)].map(m => m[1].trim());
+    // Campo opcional de la calculadora: cuando Yordanys llena el pedido en
+    // nombre del cliente (porque el cliente no sabe usar el formulario), acá
+    // escribe el WhatsApp real del cliente para que el pedido quede asociado
+    // a él y no al número desde el que efectivamente se mandó el mensaje.
+    const whatsappCliente = (texto.match(/📲\s*WhatsApp cliente:\s*(.+)/i) || [])[1];
 
     if (!totalMatch || !recibeMatch || !nombre || !direccion || pins.length < 2) return null;
 
@@ -101,7 +106,8 @@ function parsearPedidoEntrega(texto) {
         municipio:           pins[1],
         direccion:           direccion.trim(),
         referencia:          referencia ? referencia.trim() : "",
-        entregaDisponible:   /^disponible|^dispon[ií]vel/i.test(entregaTxt.trim())
+        entregaDisponible:   /^disponible|^dispon[ií]vel/i.test(entregaTxt.trim()),
+        whatsappCliente:     whatsappCliente ? whatsappCliente.trim().replace(/\D/g, "") : null
     };
 }
 
@@ -135,6 +141,11 @@ async function notificarNuevaEntrega(entrega) {
 async function manejarEntrega(phone, texto, pushName, esEs) {
     const datos = parsearPedidoEntrega(texto);
     if (!datos) return false; // mensaje editado/incompleto → sigue el flujo normal, sin romper nada
+
+    // Si Yordanys llenó el pedido en nombre del cliente y escribió su WhatsApp
+    // real, el pedido queda asociado a ESE número (confirmación, nivel VIP,
+    // registro) — no al número desde el que efectivamente se mandó el mensaje.
+    if (datos.whatsappCliente) phone = datos.whatsappCliente;
 
     if (datos.ref) {
         const existente = await buscarPorRefWeb(datos.ref);
@@ -210,9 +221,15 @@ async function manejarEntrega(phone, texto, pushName, esEs) {
 
     const montoFinal = nivel > 0 ? (costoOperacionFinal + tarifaEnEsteMonto) : datos.monto;
 
+    // Si el pedido quedó asociado al WhatsApp del cliente (campo "whatsappCliente"),
+    // "pushName" es el nombre del PERFIL DE WHATSAPP DE YORDANYS (quien mandó el
+    // mensaje), no el del cliente — en ese caso se usa el nombre que se escribió
+    // en el formulario en su lugar.
+    const nombreCliente = datos.whatsappCliente ? datos.nombre : (pushName || datos.nombre);
+
     const operacion = await agregarOperacion({
         phone,
-        nombre:  pushName || datos.nombre,
+        nombre:  nombreCliente,
         monto:   montoFinal,
         cup:     datos.moneda === "CUP" ? montoRecibeFinal : 0,
         titular: datos.nombre,
@@ -238,7 +255,7 @@ async function manejarEntrega(phone, texto, pushName, esEs) {
             operationId:      operacion.id,
             refWeb:           datos.ref,
             phone,
-            clienteNombre:    pushName || datos.nombre,
+            clienteNombre:    nombreCliente,
             telefonoEntrega:  datos.telefono,
             cantidad:         datos.moneda === "CUP" ? montoRecibeFinal : datos.montoRecibe,
             moneda:           datos.moneda,
