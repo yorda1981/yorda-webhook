@@ -413,6 +413,39 @@ async function marcarAvisoAtrasoEnviado(ids) {
     }
 }
 
+// =====================
+// TASA USDT (sección 6 del CRM — ayuda de cálculo)
+// =====================
+// Tasa que Yordanys o su compañera configuran ellos mismos (cuánto CUP y
+// cuánto USD equivalen a 1 USDT), SOLO para sugerir el monto en USDT al
+// registrar un pago — nunca se aplica sola ni se guarda como definitiva:
+// el campo de "cantidad enviada" en registrarPago sigue siendo editable
+// a mano, tal como pide la regla dura de "registro histórico puro".
+async function obtenerTasasUsdt() {
+    try {
+        const result = await pool.query("SELECT * FROM entregas_tasas WHERE id = 1");
+        return result.rows[0] || { tasa_usdt_cup: 0, tasa_usdt_usd: 0 };
+    } catch (err) {
+        console.error("❌ Error obteniendo tasas USDT:", err.message);
+        return { tasa_usdt_cup: 0, tasa_usdt_usd: 0 };
+    }
+}
+
+async function actualizarTasasUsdt({ tasaCup, tasaUsd }) {
+    try {
+        const result = await pool.query(`
+            UPDATE entregas_tasas
+            SET tasa_usdt_cup = $1, tasa_usdt_usd = $2, updated_at = NOW()
+            WHERE id = 1
+            RETURNING *
+        `, [Number(tasaCup || 0), Number(tasaUsd || 0)]);
+        return result.rows[0] || null;
+    } catch (err) {
+        console.error("❌ Error actualizando tasas USDT:", err.message);
+        return null;
+    }
+}
+
 module.exports = {
     agregarEntrega,
     obtenerEntregaPorId,
@@ -426,5 +459,7 @@ module.exports = {
     obtenerHistorialDe,
     obtenerEstadisticasEntregas,
     obtenerEntregasAtrasadasSinAvisar,
-    marcarAvisoAtrasoEnviado
+    marcarAvisoAtrasoEnviado,
+    obtenerTasasUsdt,
+    actualizarTasasUsdt
 };
