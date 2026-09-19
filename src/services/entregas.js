@@ -376,6 +376,43 @@ async function obtenerEstadisticasEntregas() {
     }
 }
 
+// =====================
+// AVISO DE ATRASO (sección 10 del CRM)
+// =====================
+// Detecta entregas PENDIENTE que llevan más de "horasUmbral" sin resolverse,
+// para avisar por WhatsApp. Nunca cambia el estado — eso sigue siendo
+// manual, tal como pide el documento ("no modificar automáticamente su
+// estado"). Solo trae las que no se avisaron en las últimas 24h, para no
+// mandar el mismo aviso muchas veces seguidas si el job corre cada pocas
+// horas; si sigue pendiente al día siguiente, vuelve a avisar.
+async function obtenerEntregasAtrasadasSinAvisar(horasUmbral) {
+    try {
+        const result = await pool.query(`
+            SELECT * FROM entregas
+            WHERE estado_entrega = 'PENDIENTE'
+              AND created_at < NOW() - ($1 || ' hours')::interval
+              AND (ultimo_aviso_atraso IS NULL OR ultimo_aviso_atraso < NOW() - INTERVAL '24 hours')
+            ORDER BY created_at ASC
+        `, [horasUmbral]);
+        return result.rows;
+    } catch (err) {
+        console.error("❌ Error obteniendo entregas atrasadas:", err.message);
+        return [];
+    }
+}
+
+async function marcarAvisoAtrasoEnviado(ids) {
+    if (!Array.isArray(ids) || ids.length === 0) return;
+    try {
+        await pool.query(
+            "UPDATE entregas SET ultimo_aviso_atraso = NOW() WHERE id = ANY($1::int[])",
+            [ids]
+        );
+    } catch (err) {
+        console.error("❌ Error marcando aviso de atraso:", err.message);
+    }
+}
+
 module.exports = {
     agregarEntrega,
     obtenerEntregaPorId,
@@ -387,5 +424,7 @@ module.exports = {
     registrarPago,
     obtenerPago,
     obtenerHistorialDe,
-    obtenerEstadisticasEntregas
+    obtenerEstadisticasEntregas,
+    obtenerEntregasAtrasadasSinAvisar,
+    marcarAvisoAtrasoEnviado
 };
