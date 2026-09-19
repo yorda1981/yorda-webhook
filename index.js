@@ -170,6 +170,19 @@ const MINUTOS_PAUSA = 10;
         `);
         // Para no repetir el aviso de "entrega atrasada" cada vez que corre el job.
         await pool.query("ALTER TABLE entregas ADD COLUMN IF NOT EXISTS ultimo_aviso_atraso TIMESTAMP");
+
+        // Tasa CUP/USD → USDT — la edita Yordanys o su compañera desde el propio
+        // CRM de Entregas, solo para sugerir el monto en USDT al registrar un
+        // pago (nunca se aplica sola — ver obtenerTasasUsdt en entregas.js).
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS entregas_tasas (
+                id            INTEGER PRIMARY KEY DEFAULT 1,
+                tasa_usdt_cup NUMERIC NOT NULL DEFAULT 0,
+                tasa_usdt_usd NUMERIC NOT NULL DEFAULT 0,
+                updated_at    TIMESTAMP NOT NULL DEFAULT NOW()
+            )
+        `);
+        await pool.query("INSERT INTO entregas_tasas (id) VALUES (1) ON CONFLICT (id) DO NOTHING");
     } catch (e) { console.error("⚠️ Migración CRM de Entregas:", e.message); }
 })();
 
@@ -284,6 +297,23 @@ app.post("/webhook", webhookLimiter, async (req, res) => {
         if (body.fromMe) {
             if (body.fromApi !== true) {
                 const telefonoCliente = mapaLidATelefono.get(body.chatLid);
+
+                // Muchos clientes no saben llenar la calculadora, así que el
+                // operador la llena él mismo y manda el pedido desde su propio
+                // WhatsApp, dentro del chat del cliente. Antes esto solo activaba
+                // la pausa humana y el pedido se perdía (nunca se creaba la
+                // entrega ni llegaba el aviso). Ahora, si el texto es un pedido
+                // web válido, se procesa igual que si lo mandara el cliente.
+                const textoFromMe = body.text?.message || body.body || body.caption || "";
+                if (telefonoCliente && esPedidoWeb(textoFromMe)) {
+                    try {
+                        await procesarPedidoWeb(telefonoCliente, textoFromMe, "Cliente");
+                    } catch (e) {
+                        console.error("❌ Error procesando pedido web (enviado por el operador):", e.message);
+                    }
+                    return;
+                }
+
                 if (telefonoCliente) await activarPausaHumana(telefonoCliente);
             }
             return;
@@ -635,6 +665,22 @@ app.get("/admin/entregas/pago/:codigo", adminLimiter, verificarTokenEntregas, as
 app.get("/admin/entregas/:id/historial", adminLimiter, verificarTokenEntregas, async (req, res) => {
     try { res.json(await entregasService.obtenerHistorialDe(req.params.id)); }
     catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Tasa CUP/USD → USDT — la puede ver y editar cualquiera de los dos (admin o
+// compañera) desde el propio CRM de Entregas. Solo sirve para sugerir el
+// monto en USDT al registrar un pago; nunca se aplica sola.
+app.get("/admin/entregas/tasa-usdt", adminLimiter, verificarTokenEntregas, async (req, res) => {
+    try { res.json(await entregasService.obtenerTasasUsdt()); }
+    catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post("/admin/entregas/tasa-usdt", adminLimiter, verificarTokenEntregas, async (req, res) => {
+    try {
+        const actualizado = await entregasService.actualizarTasasUsdt(req.body || {});
+        if (!actualizado) return res.status(500).json({ error: "No se pudo actualizar" });
+        res.json({ success: true, ...actualizado });
+    } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.get("/dashboard", (req, res) =>
