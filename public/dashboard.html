@@ -1,926 +1,1021 @@
-const express = require("express");
-const fs = require("fs");
-const path = require("path");
-const axios = require("axios");
-const rateLimit = require("express-rate-limit");
-require("dotenv").config();
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YORDA-BOT | Premium Admin</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root { --bg: #0b0e1a; --card: #161b33; --accent: #7c4dff; --text: #ffffff; --red: #ef4444; --green: #4ade80; --yellow: #fbbf24; }
+        body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 20px; line-height: 1.6; }
+        .container { max-width: 1100px; margin: auto; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; flex-wrap: wrap; gap: 12px; }
+        .status-badge { background: #1a2733; color: var(--green); padding: 8px 20px; border-radius: 30px; font-size: 13px; font-weight: 700; border: 1px solid #2d355a; }
+        .token-row { display: flex; gap: 8px; align-items: center; }
+        .token-row input { background: #0d1117; border: 1px solid #2d355a; color: white; padding: 8px 12px; border-radius: 8px; font-size: 13px; width: 260px; outline: none; }
+        .token-row input:focus { border-color: var(--accent); }
+        .token-row button { background: var(--accent); color: white; border: none; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 600; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 40px; }
+        .stat-card { background: var(--card); padding: 25px; border-radius: 16px; border: 1px solid #2d355a; min-width: 0; }
+        .stat-card span { font-size: 12px; color: #8b949e; text-transform: uppercase; font-weight: 700; letter-spacing: 1px; }
+        .stat-card h2 { margin: 10px 0 0; color: var(--accent); font-size: 22px; overflow-wrap: break-word; word-break: break-word; line-height: 1.25; }
+        .config-section { background: var(--card); padding: 30px; border-radius: 20px; border: 1px solid #2d355a; margin-bottom: 30px; }
+        h3 { margin-top: 0; margin-bottom: 20px; display: flex; align-items: center; gap: 10px; }
+        .table-wrapper { overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; }
+        th { text-align: left; padding: 12px; color: #8b949e; font-size: 12px; border-bottom: 2px solid #2d355a; text-transform: uppercase; }
+        td { padding: 12px; border-bottom: 1px solid #2d355a; font-size: 14px; }
+        .btn-confirm { background: var(--green); color: #0b0e1a; border: none; padding: 8px 15px; border-radius: 8px; font-weight: bold; cursor: pointer; transition: 0.2s; }
+        .btn-confirm:hover { transform: scale(1.05); }
+        .grid-inputs { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 20px; }
+        .input-group { display: flex; flex-direction: column; gap: 8px; }
+        label { font-size: 13px; color: #94a3b8; font-weight: 600; }
+        input[type="number"] { background: #0b0e1a; border: 1px solid #2d355a; padding: 14px; border-radius: 12px; color: white; font-size: 16px; outline: none; transition: 0.3s; }
+        input[type="number"]:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(124, 77, 255, 0.2); }
+        .btn-save { background: var(--accent); color: white; border: none; padding: 18px; border-radius: 15px; width: 100%; cursor: pointer; font-weight: 800; font-size: 16px; margin-top: 30px; transition: 0.3s; }
+        .btn-save:hover { opacity: 0.9; transform: translateY(-2px); }
+        .pagination { display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin-top: 16px; flex-wrap: wrap; }
+        .page-btn { background: #0b0e1a; border: 1px solid #2d355a; color: #8b949e; padding: 6px 12px; border-radius: 8px; cursor: pointer; font-size: 13px; }
+        .page-btn:hover { border-color: var(--accent); color: white; }
+        .page-btn.active { background: var(--accent); border-color: var(--accent); color: white; }
+        .page-info { font-size: 12px; color: #8b949e; }
+        .toggle-h3 { justify-content: space-between; user-select: none; }
+        .toggle-h3:hover { opacity: 0.85; }
+        .badge-count { background: rgba(255,255,255,0.12); color: inherit; font-size: 13px; padding: 2px 10px; border-radius: 20px; margin-left: 6px; }
+        .chev { font-size: 14px; transition: transform 0.2s; color: #8b949e; }
+        .chev.abierto { transform: rotate(180deg); }
+        .colapsable { display: none; }
+        .colapsable.abierto { display: block; }
+        .btn-limpiar { background: #16a34a; color: white; border: none; padding: 8px 16px; border-radius: 8px; font-size: 12px; font-weight: 700; cursor: pointer; }
+        .btn-limpiar:hover { opacity: 0.9; }
+    </style>
+</head>
+<body>
+    <div class="container">
 
-const pool = require("./db");
+        <div class="header">
+            <h1>🤖 YORDA-BOT Admin</h1>
+            <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+                <div class="token-row">
+                    <input type="password" id="tokenField" placeholder="Bearer token..." />
+                    <button onclick="conectar()">Conectar</button>
+                </div>
+                <div class="status-badge" id="statusBadge">● Desconectado</div>
+            </div>
+        </div>
 
-const openaiService = require("./src/services/openai");
-const { obtenerTodos, obtenerCliente } = require("./src/services/customer-memory");
-const { obtenerTodas, confirmarOperacion, completarOperacion, obtenerEstadisticas } = require("./src/services/operations");
-const crm = require("./src/services/crm");
-const entregasService = require("./src/services/entregas");
-const { leerTasas } = require("./src/flows/cotizacion-flow");
-const { esPedidoWeb, procesarPedidoWeb } = require("./src/flows/pedido-web-flow");
-const { enviarSeguro, getAdminPhone, getPIXKey, getPIXHolder, getPIXBank, getPIXImage } = require("./src/flows/shared");
+        <div class="stats-grid">
+            <div class="stat-card"><span>Clientes</span><h2 id="stat-clientes">—</h2></div>
+            <div class="stat-card"><span>Ops. Confirmadas</span><h2 id="stat-ops">—</h2></div>
+            <div class="stat-card"><span>Volumen Total</span><h2 id="stat-vol">—</h2></div>
+            <div class="stat-card"><span>Pendientes</span><h2 id="stat-pend" style="color: var(--yellow);">—</h2></div>
+            <div class="stat-card"><span>Completadas</span><h2 id="stat-completadas" style="color:#60a5fa;">—</h2></div>
+            <div class="stat-card"><span>Cotizados Hoy</span><h2 id="stat-cotizados" style="color:#38bdf8;">—</h2></div>
+            <div class="stat-card"><span>Cierres Hoy</span><h2 id="stat-cierres" style="color:var(--green);">—</h2></div>
+            <div class="stat-card"><span>Conversión</span><h2 id="stat-conversion" style="color:#a78bfa;">—%</h2></div>
+            <div class="stat-card"><span>Abandonos</span><h2 id="stat-abandonos" style="color:var(--red);">—</h2></div>
+        </div>
 
-const app = express();
-const PORT = process.env.PORT || 8080;
-app.set("trust proxy", 1);
+        <div class="config-section" id="seccionTasas">
+            <h3>💱 Configuración de Tasas</h3>
+            <div id="tasasForm">
+            <div class="grid-inputs">
+                <div class="input-group"><label>Menos de 100 BRL</label><input type="number" id="brl_0" placeholder="Ej: 45"></div>
+                <div class="input-group"><label>100 - 499 BRL</label><input type="number" id="brl_100" placeholder="Ej: 50"></div>
+                <div class="input-group"><label>500 - 999 BRL</label><input type="number" id="brl_500" placeholder="Ej: 55"></div>
+                <div class="input-group"><label>1000+ BRL</label><input type="number" id="brl_1000" placeholder="Ej: 60"></div>
+                <div class="input-group"><label>USD Clásica (Tasa)</label><input type="number" step="0.01" id="usd1" placeholder="Ej: 5.6"></div>
+                <div class="input-group"><label>USD Prepago (Tasa)</label><input type="number" step="0.01" id="usd2" placeholder="Ej: 5.6"></div>
+                <div class="input-group"><label>MLC (Tasa CUP)</label><input type="number" step="0.01" id="mlc" placeholder="Ej: 270"></div>
+                <div class="input-group"><label>Efectivo (CUP por real)</label><input type="number" step="0.01" id="efectivo" placeholder="Ej: 115"></div>
+                <div class="input-group"><label>Tarifa de entrega (R$)</label><input type="number" step="0.01" id="tarifa_entrega" placeholder="Ej: 20"></div>
+            </div>
 
-const webhookLimiter = rateLimit({
-    windowMs: 60 * 1000,
-    max: 120,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: "Too many requests"
-});
+            <h3 style="margin-top:24px; color:#facc15;">🌟 Programa VIP — por niveles</h3>
+            <p style="color:#8b949e; font-size:13px; margin-top:-10px; margin-bottom:14px;">
+                El nivel se recalcula sobre los últimos 365 días de operaciones — puede subir o bajar con el tiempo.
+            </p>
+            <div class="grid-inputs">
+                <div class="input-group"><label>⭐ Nivel 1 — Monto mínimo (R$/año)</label><input type="number" step="0.01" id="umbral_vip_1" placeholder="Ej: 10000"></div>
+                <div class="input-group"><label>⭐ Nivel 1 — Bono de tasa (CUP extra)</label><input type="number" step="0.01" id="bono_vip_1" placeholder="Ej: 1"></div>
+                <div class="input-group"><label>⭐ Nivel 1 — Descuento de entrega (%)</label><input type="number" step="1" id="descuento_entrega_1" placeholder="Ej: 50"></div>
 
-const adminLimiter = rateLimit({
-    windowMs: 60 * 1000,
-    max: 60,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: "Too many requests"
-});
+                <div class="input-group"><label>⭐⭐ Nivel 2 — Monto mínimo (R$/año)</label><input type="number" step="0.01" id="umbral_vip_2" placeholder="Ej: 25000"></div>
+                <div class="input-group"><label>⭐⭐ Nivel 2 — Bono de tasa (CUP extra)</label><input type="number" step="0.01" id="bono_vip_2" placeholder="Ej: 2"></div>
+                <div class="input-group"><label>⭐⭐ Nivel 2 — Descuento de entrega (%)</label><input type="number" step="1" id="descuento_entrega_2" placeholder="Ej: 75"></div>
 
-// Límite estricto de intentos de login fallidos al dashboard (independiente del límite general).
-// Solo cuenta peticiones que terminan en 401 (token incorrecto) — un token correcto nunca cuenta.
-const authAttemptLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 5,
-    skipSuccessfulRequests: true,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: "Demasiados intentos fallidos. Espera 15 minutos e inténtalo de nuevo." }
-});
+                <div class="input-group"><label>⭐⭐⭐ Nivel 3 — Monto mínimo (R$/año)</label><input type="number" step="0.01" id="umbral_vip_3" placeholder="Ej: 50000"></div>
+                <div class="input-group"><label>⭐⭐⭐ Nivel 3 — Bono de tasa (CUP extra)</label><input type="number" step="0.01" id="bono_vip_3" placeholder="Ej: 3"></div>
+                <div class="input-group"><label>⭐⭐⭐ Nivel 3 — Descuento de entrega (%)</label><input type="number" step="1" id="descuento_entrega_3" placeholder="Ej: 100"></div>
+            </div>
+            </div>
+            <button class="btn-save" id="btnSave" onclick="guardarTasas()">Guardar Cambios de Tasas</button>
+        </div>
 
-const buffers            = new Map();
-const pendingMessages    = new Map();
-const mapaLidATelefono   = new Map();
-const mensajesProcesados = new Set();
 
-const MINUTOS_PAUSA = 10;
+        <div class="config-section" style="border-left: 5px solid var(--yellow);">
+            <h3 class="toggle-h3" id="hdrPendientes" style="color: var(--yellow); cursor:pointer;">
+                <span>⏳ Operaciones Pendientes <span class="badge-count" id="countPendientes">0</span></span>
+                <span class="chev" id="chevPendientes">▾</span>
+            </h3>
+            <div class="colapsable" id="bodyPendientes">
+                <div class="table-wrapper">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Fecha</th>
+                                <th>Cliente</th>
+                                <th>Monto</th>
+                                <th>Tarjeta / Entrega</th>
+                                <th>Tipo</th>
+                                <th>Acción</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tablaPendientes">
+                            <tr><td colspan="6" style="text-align:center; padding:20px; color:#8b949e;">Conecta para ver datos</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
 
-// Migración segura: columna de tasa para envío de efectivo
-(async () => {
-    try {
-        await pool.query("ALTER TABLE rates ADD COLUMN IF NOT EXISTS efectivo NUMERIC DEFAULT 0");
-    } catch (e) { console.error("⚠️ Migración efectivo:", e.message); }
-    try {
-        await pool.query("ALTER TABLE customers ADD COLUMN IF NOT EXISTS saludo_pendiente BOOLEAN DEFAULT false");
-    } catch (e) { console.error("⚠️ Migración saludo_pendiente:", e.message); }
-    try {
-        // Tarifa de entrega en efectivo (R$), configuración única — la usa la calculadora web.
-        await pool.query("ALTER TABLE rates ADD COLUMN IF NOT EXISTS tarifa_entrega NUMERIC DEFAULT 0");
-    } catch (e) { console.error("⚠️ Migración tarifa_entrega:", e.message); }
-    try {
-        // Datos de pedidos de entrega generados desde la calculadora web.
-        await pool.query(`
-            ALTER TABLE operations
-                ADD COLUMN IF NOT EXISTS ref_web VARCHAR(20),
-                ADD COLUMN IF NOT EXISTS direccion TEXT,
-                ADD COLUMN IF NOT EXISTS provincia VARCHAR(60),
-                ADD COLUMN IF NOT EXISTS municipio VARCHAR(60),
-                ADD COLUMN IF NOT EXISTS referencia_entrega TEXT,
-                ADD COLUMN IF NOT EXISTS telefono_entrega VARCHAR(30),
-                ADD COLUMN IF NOT EXISTS entrega_disponible BOOLEAN,
-                ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP
-        `);
-    } catch (e) { console.error("⚠️ Migración pedidos web:", e.message); }
-    try {
-        // Programa VIP por niveles (⭐/⭐⭐/⭐⭐⭐), recalculado sobre ventana móvil de 365 días.
-        // nivel_vip: 0 = no VIP, 1/2/3 = nivel actual (puede subir o bajar con el tiempo).
-        await pool.query("ALTER TABLE customers ADD COLUMN IF NOT EXISTS nivel_vip INTEGER DEFAULT 0");
-        await pool.query(`
-            ALTER TABLE rates
-                ADD COLUMN IF NOT EXISTS umbral_vip_1 NUMERIC DEFAULT 10000,
-                ADD COLUMN IF NOT EXISTS umbral_vip_2 NUMERIC DEFAULT 25000,
-                ADD COLUMN IF NOT EXISTS umbral_vip_3 NUMERIC DEFAULT 50000,
-                ADD COLUMN IF NOT EXISTS bono_vip_1 NUMERIC DEFAULT 1,
-                ADD COLUMN IF NOT EXISTS bono_vip_2 NUMERIC DEFAULT 2,
-                ADD COLUMN IF NOT EXISTS bono_vip_3 NUMERIC DEFAULT 3,
-                ADD COLUMN IF NOT EXISTS descuento_entrega_1 NUMERIC DEFAULT 50,
-                ADD COLUMN IF NOT EXISTS descuento_entrega_2 NUMERIC DEFAULT 75,
-                ADD COLUMN IF NOT EXISTS descuento_entrega_3 NUMERIC DEFAULT 100
-        `);
-        await pool.query(`
-            ALTER TABLE ofertas
-                ADD COLUMN IF NOT EXISTS texto_vip TEXT,
-                ADD COLUMN IF NOT EXISTS activa_vip BOOLEAN DEFAULT false
-        `);
-    } catch (e) { console.error("⚠️ Migración VIP por niveles:", e.message); }
-    try {
-        // Para no repetir la explicación completa de entrega si el cliente pregunta
-        // varias veces seguidas en poco tiempo.
-        await pool.query("ALTER TABLE customers ADD COLUMN IF NOT EXISTS ultimo_aviso_entrega TIMESTAMP");
-    } catch (e) { console.error("⚠️ Migración ultimo_aviso_entrega:", e.message); }
-    try {
-        // ─────────────────────────────────────────
-        // CRM DE ENTREGAS — separado por completo de "operations".
-        // Solo entregas de EFECTIVO (CUP/USD) viven aquí. Las
-        // transferencias siguen su flujo normal en "operations" y
-        // nunca tocan estas tablas.
-        // ─────────────────────────────────────────
-        await pool.query("CREATE SEQUENCE IF NOT EXISTS entregas_codigo_seq START WITH 1000");
-        await pool.query("CREATE SEQUENCE IF NOT EXISTS entregas_pago_codigo_seq START WITH 1");
+        <div class="config-section" style="border-left: 5px solid #60a5fa;">
+            <h3 class="toggle-h3" id="hdrEnProceso" style="color: #60a5fa; cursor:pointer;">
+                <span>🚚 En Proceso de Entrega <span class="badge-count" id="countEnProceso">0</span></span>
+                <span class="chev" id="chevEnProceso">▾</span>
+            </h3>
+            <div class="colapsable" id="bodyEnProceso">
+                <div style="display:flex; justify-content:flex-end; margin-bottom:12px;">
+                    <button class="btn-limpiar" id="btnLimpiarAntiguas" onclick="completarTodasAntiguas()">
+                        ✅ Marcar todas como completadas (antiguas)
+                    </button>
+                </div>
+                <div class="table-wrapper">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Fecha</th>
+                                <th>Beneficiario</th>
+                                <th>Entrega</th>
+                                <th>Monto</th>
+                                <th>Tipo</th>
+                                <th>Acción</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tablaEnProceso">
+                            <tr><td colspan="6" style="text-align:center; padding:20px; color:#8b949e;">Conecta para ver datos</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
 
-        await pool.query(`
-            CREATE TABLE IF NOT EXISTS entregas_pagos (
-                id               SERIAL PRIMARY KEY,
-                codigo           VARCHAR(20) UNIQUE NOT NULL,
-                cantidad_enviada NUMERIC,
-                moneda_pago      VARCHAR(20),
-                fecha            DATE,
-                txid             VARCHAR(150),
-                observacion      TEXT,
-                created_at       TIMESTAMP NOT NULL DEFAULT NOW()
-            )
-        `);
+        <div class="config-section" style="border-left: 5px solid #14b8a6;">
+            <h3 class="toggle-h3" id="hdrEntregas" style="color:#14b8a6; cursor:pointer;">
+                <span>📦 CRM de Entregas (Efectivo) <span class="badge-count" id="countEntregasPend">0</span></span>
+                <span class="chev" id="chevEntregas">▾</span>
+            </h3>
+            <div class="colapsable abierto" id="bodyEntregas">
 
-        await pool.query(`
-            CREATE TABLE IF NOT EXISTS entregas (
-                id                SERIAL PRIMARY KEY,
-                codigo            VARCHAR(20) UNIQUE NOT NULL,
-                operation_id      INTEGER REFERENCES operations(id),
-                ref_web           VARCHAR(20),
-                phone             VARCHAR(30) NOT NULL,
-                cliente_nombre    VARCHAR(150),
-                telefono_entrega  VARCHAR(30),
-                cantidad          NUMERIC NOT NULL,
-                moneda            VARCHAR(3) NOT NULL,
-                modalidad         VARCHAR(20) NOT NULL DEFAULT 'EFECTIVO',
-                provincia         VARCHAR(60),
-                municipio         VARCHAR(60),
-                direccion         TEXT,
-                referencia        TEXT,
-                observaciones     TEXT,
-                estado_entrega    VARCHAR(20) NOT NULL DEFAULT 'PENDIENTE',
-                fecha_entrega     TIMESTAMP,
-                entregado_por     VARCHAR(100),
-                estado_pago       VARCHAR(20) NOT NULL DEFAULT 'NO_APLICA',
-                pago_id           INTEGER REFERENCES entregas_pagos(id),
-                created_at        TIMESTAMP NOT NULL DEFAULT NOW(),
-                updated_at        TIMESTAMP NOT NULL DEFAULT NOW()
-            )
-        `);
-        await pool.query("CREATE INDEX IF NOT EXISTS idx_entregas_estado_entrega ON entregas(estado_entrega)");
-        await pool.query("CREATE INDEX IF NOT EXISTS idx_entregas_estado_pago ON entregas(estado_pago)");
-        await pool.query("CREATE INDEX IF NOT EXISTS idx_entregas_phone ON entregas(phone)");
+                <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; margin-bottom:20px;">
+                    <div style="background:#0b0e1a;border-radius:12px;padding:16px;border:1px solid #2d355a;">
+                        <div style="font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:1px;">Pendientes de entrega</div>
+                        <div style="font-size:22px;font-weight:700;color:var(--yellow);margin-top:6px;" id="ent-pend-count">—</div>
+                        <div style="font-size:12px;color:#8b949e;margin-top:4px;" id="ent-pend-totales">CUP — · USD —</div>
+                    </div>
+                    <div style="background:#0b0e1a;border-radius:12px;padding:16px;border:1px solid #2d355a;">
+                        <div style="font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:1px;">Entregadas · Pend. pago</div>
+                        <div style="font-size:22px;font-weight:700;color:#60a5fa;margin-top:6px;" id="ent-entregadas-count">—</div>
+                        <div style="font-size:12px;color:#8b949e;margin-top:4px;" id="ent-entregadas-totales">CUP — · USD —</div>
+                    </div>
+                    <div style="background:#0b0e1a;border-radius:12px;padding:16px;border:1px solid #2d355a;">
+                        <div style="font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:1px;">Pagadas</div>
+                        <div style="font-size:22px;font-weight:700;color:var(--green);margin-top:6px;" id="ent-pagadas-count">—</div>
+                    </div>
+                    <div style="background:#0b0e1a;border-radius:12px;padding:16px;border:1px solid #2d355a;">
+                        <div style="font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:1px;">Canceladas</div>
+                        <div style="font-size:22px;font-weight:700;color:var(--red);margin-top:6px;" id="ent-canceladas-count">—</div>
+                    </div>
+                </div>
 
-        await pool.query(`
-            CREATE TABLE IF NOT EXISTS entregas_historial (
-                id          SERIAL PRIMARY KEY,
-                entrega_id  INTEGER NOT NULL REFERENCES entregas(id),
-                evento      TEXT NOT NULL,
-                created_at  TIMESTAMP NOT NULL DEFAULT NOW()
-            )
-        `);
-        // Para no repetir el aviso de "entrega atrasada" cada vez que corre el job.
-        await pool.query("ALTER TABLE entregas ADD COLUMN IF NOT EXISTS ultimo_aviso_atraso TIMESTAMP");
+                <div style="background:#0b0e1a;border-radius:12px;padding:14px 16px;border:1px solid #2d355a;margin-bottom:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+                    <strong style="color:#14b8a6;font-size:13px;">💱 Tasa USDT (para sugerir el pago)</strong>
+                    <label style="font-size:12px;color:#8b949e;">CUP por 1 USDT
+                        <input type="number" id="entTasaUsdtCup" step="any" style="display:block;background:#161b2e;border:1px solid #2d355a;padding:8px 10px;border-radius:8px;color:white;font-size:13px;outline:none;width:130px;margin-top:4px;">
+                    </label>
+                    <label style="font-size:12px;color:#8b949e;">USD por 1 USDT
+                        <input type="number" id="entTasaUsdtUsd" step="any" style="display:block;background:#161b2e;border:1px solid #2d355a;padding:8px 10px;border-radius:8px;color:white;font-size:13px;outline:none;width:130px;margin-top:4px;">
+                    </label>
+                    <button class="page-btn" style="align-self:flex-end;" onclick="guardarTasaUsdt()">💾 Guardar tasa</button>
+                    <small id="entTasaUsdtInfo" style="color:#8b949e;"></small>
+                </div>
 
-        // Tasa CUP/USD → USDT — la edita Yordanys o su compañera desde el propio
-        // CRM de Entregas, solo para sugerir el monto en USDT al registrar un
-        // pago (nunca se aplica sola — ver obtenerTasasUsdt en entregas.js).
-        await pool.query(`
-            CREATE TABLE IF NOT EXISTS entregas_tasas (
-                id            INTEGER PRIMARY KEY DEFAULT 1,
-                tasa_usdt_cup NUMERIC NOT NULL DEFAULT 0,
-                tasa_usdt_usd NUMERIC NOT NULL DEFAULT 0,
-                updated_at    TIMESTAMP NOT NULL DEFAULT NOW()
-            )
-        `);
-        await pool.query("INSERT INTO entregas_tasas (id) VALUES (1) ON CONFLICT (id) DO NOTHING");
-    } catch (e) { console.error("⚠️ Migración CRM de Entregas:", e.message); }
-})();
+                <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px;" id="entFiltrosRapidos">
+                    <button class="page-btn active" data-filtro="TODAS" onclick="filtrarEntregasRapido('TODAS')">TODAS</button>
+                    <button class="page-btn" data-filtro="PENDIENTES" onclick="filtrarEntregasRapido('PENDIENTES')">PENDIENTES</button>
+                    <button class="page-btn" data-filtro="ENTREGADAS" onclick="filtrarEntregasRapido('ENTREGADAS')">ENTREGADAS</button>
+                    <button class="page-btn" data-filtro="PENDIENTES_DE_PAGO" onclick="filtrarEntregasRapido('PENDIENTES_DE_PAGO')">PEND. DE PAGO</button>
+                    <button class="page-btn" data-filtro="PAGADAS" onclick="filtrarEntregasRapido('PAGADAS')">PAGADAS</button>
+                    <button class="page-btn" data-filtro="CANCELADAS" onclick="filtrarEntregasRapido('CANCELADAS')">CANCELADAS</button>
+                </div>
 
-// ─────────────────────────────────────────
-// PAUSA HUMANA — persistida en PostgreSQL
-// Sobrevive reinicios de Railway.
-// Se activa cuando el operador escribe desde
-// el WhatsApp directamente (fromMe + !fromApi).
-//
-// Optimización (28/07/2026): antes esto hacía 2-3
-// queries por CADA mensaje manual (UPDATE + SELECT +
-// INSERT). Cuando el operador manda varios mensajes
-// seguidos al mismo cliente, o hace rondas de disparos
-// a varios clientes, esto multiplicaba las queries y
-// disparó el consumo de cómputo en Neon.
-// Ahora: 1) una sola query UPSERT, y 2) una caché en
-// memoria que evita volver a tocar la DB si ya se
-// extendió la pausa de ese número hace menos de 60s.
-// ─────────────────────────────────────────
+                <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:10px; margin-bottom:14px;">
+                    <input type="text" id="entBuscar" placeholder="Buscar: código, cliente, teléfono o provincia..." style="background:#0b0e1a;border:1px solid #2d355a;padding:10px 14px;border-radius:10px;color:white;font-size:13px;outline:none;" oninput="debounceCargarEntregas()">
+                    <select id="entMoneda" onchange="cargarEntregas()" style="background:#0b0e1a;border:1px solid #2d355a;padding:10px 14px;border-radius:10px;color:white;font-size:13px;outline:none;">
+                        <option value="">Todas las monedas</option>
+                        <option value="CUP">CUP</option>
+                        <option value="USD">USD</option>
+                    </select>
+                    <button class="btn-limpiar" style="background:#14b8a6;" onclick="registrarPagoAgrupado()">💵 Registrar pago (seleccionadas)</button>
+                </div>
 
-const ULTIMA_PAUSA_CACHE = new Map(); // phone -> timestamp (ms) de la última escritura real en DB
-const DEBOUNCE_PAUSA_MS = 60 * 1000;  // no reescribir la misma pausa antes de 60s
+                <div style="display:flex; gap:10px; align-items:center; margin-bottom:14px;">
+                    <input type="text" id="entPagoCodigo" placeholder="Reabrir pago agrupado (ej: P-003)" style="background:#0b0e1a;border:1px solid #2d355a;padding:10px 14px;border-radius:10px;color:white;font-size:13px;outline:none; max-width:260px;">
+                    <button class="page-btn" onclick="verPagoAgrupado()">🔍 Ver pago</button>
+                </div>
 
-async function activarPausaHumana(phone) {
-    if (!phone) return;
-    if (!String(phone).startsWith("55")) return;
+                <div class="table-wrapper">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th></th>
+                                <th>Código</th>
+                                <th>Fecha</th>
+                                <th>Cliente</th>
+                                <th>Entregar</th>
+                                <th>Lugar</th>
+                                <th>Estado entrega</th>
+                                <th>Estado pago</th>
+                                <th>Acción</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tablaEntregas">
+                            <tr><td colspan="9" style="text-align:center; padding:20px; color:#8b949e;">Conecta para ver datos</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
 
-    const ahora = Date.now();
-    const ultima = ULTIMA_PAUSA_CACHE.get(phone);
-    if (ultima && (ahora - ultima) < DEBOUNCE_PAUSA_MS) {
-        // Ya se extendió la pausa hace poco (ráfaga de mensajes del operador
-        // al mismo cliente) — el cliente sigue silenciado igual, no hace
-        // falta volver a escribir en PostgreSQL.
-        return;
-    }
+        <div class="config-section">
+            <h3>🏆 Ranking de Clientes (Confirmados)</h3>
+            <div class="table-wrapper">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Nombre</th>
+                            <th>Teléfono</th>
+                            <th>Total Real</th>
+                            <th>Frecuencia</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="clientesTable">
+                        <tr><td colspan="5" style="text-align:center; padding:20px; color:#8b949e;">—</td></tr>
+                    </tbody>
+                </table>
+                <div class="pagination" id="paginacionClientes"></div>
+            </div>
+        </div>
 
-    try {
-        await pool.query(`
-            INSERT INTO customers (phone, pausa_hasta, created_at, updated_at)
-            VALUES ($1, NOW() + ($2 * INTERVAL '1 minute'), NOW(), NOW())
-            ON CONFLICT (phone) DO UPDATE
-            SET pausa_hasta = NOW() + ($2 * INTERVAL '1 minute'),
-                updated_at  = NOW()
-        `, [phone, MINUTOS_PAUSA]);
-        ULTIMA_PAUSA_CACHE.set(phone, ahora);
-        console.log(`⏸️ Pausa humana (PG): ${MINUTOS_PAUSA} min → ${phone}`);
-    } catch (e) {
-        console.error("❌ activarPausaHumana:", e.message);
-    }
-}
+        <div class="config-section" style="border-left: 5px solid #3b82f6;">
+            <h3 style="color:#3b82f6;">📱 Configuración de Recargas</h3>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px;" id="recargasForm">
+                <div>
+                    <h4 style="margin-bottom:12px;color:#8b949e;">🇨🇺 Nacional</h4>
+                    <div class="input-group"><label>Precio (R$)</label><input type="number" id="rec_nac_precio" placeholder="100"></div>
+                    <div class="input-group" style="margin-top:10px;"><label>Descripción</label><input type="text" id="rec_nac_desc" placeholder="2.000 CUP · 365 días"></div>
+                    <div style="display:flex;align-items:center;gap:8px;margin-top:10px;"><input type="checkbox" id="rec_nac_activa"><label for="rec_nac_activa">Activa</label></div>
+                    <button class="btn-save" onclick="guardarRecarga('nacional')" style="margin-top:12px;">Guardar Nacional</button>
+                </div>
+                <div>
+                    <h4 style="margin-bottom:12px;color:#8b949e;">🌍 Internacional</h4>
+                    <div class="input-group"><label>Precio del día (R$)</label><input type="number" id="rec_int_precio" placeholder="145"></div>
+                    <div class="input-group" style="margin-top:10px;"><label>Descripción de la promo</label><input type="text" id="rec_int_desc" placeholder="600 CUP × 6 + datos ilimitados"></div>
+                    <div style="display:flex;align-items:center;gap:8px;margin-top:10px;"><input type="checkbox" id="rec_int_activa"><label for="rec_int_activa">Activa</label></div>
+                    <button class="btn-save" onclick="guardarRecarga('internacional')" style="margin-top:12px;">Guardar Internacional</button>
+                </div>
+            </div>
+        </div>
 
-async function enPausaHumana(phone) {
-    if (!phone) return false;
-    try {
-        const r = await pool.query(
-            "SELECT pausa_hasta FROM customers WHERE phone = $1",
-            [phone]
-        );
-        if (!r.rows.length || !r.rows[0].pausa_hasta) return false;
-        return new Date(r.rows[0].pausa_hasta) > new Date();
-    } catch (e) {
-        console.error("❌ enPausaHumana:", e.message);
-        return false;   // ante la duda, dejar pasar al bot
-    }
-}
+        <div class="config-section" style="border-left: 5px solid #f59e0b;">
+            <h3 style="color:#f59e0b;">🔥 Oferta del Día</h3>
+            <div style="display:flex; flex-direction:column; gap:12px;">
+                <div class="input-group">
+                    <label>Mensaje de oferta</label>
+                    <input type="text" id="oferta_texto" placeholder="Ej: R$500+ recibe 140 CUP. Solo hoy!" style="background:#0b0e1a;border:1px solid #2d355a;padding:14px;border-radius:12px;color:white;font-size:14px;outline:none;">
+                </div>
+                <div class="input-group">
+                    <label>Válida hasta</label>
+                    <input type="datetime-local" id="oferta_vence" style="background:#0b0e1a;border:1px solid #2d355a;padding:14px;border-radius:12px;color:white;font-size:14px;outline:none;">
+                </div>
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <input type="checkbox" id="oferta_activa" style="width:18px;height:18px;cursor:pointer;">
+                    <label for="oferta_activa" style="cursor:pointer;">Oferta activa</label>
+                </div>
+                <hr style="border-color:#2d355a; margin:14px 0;">
+                <div class="input-group">
+                    <label>🌟 Oferta exclusiva VIP</label>
+                    <input type="text" id="oferta_vip_texto" placeholder="Ej: Solo para VIP: entrega gratis toda la semana!" style="background:#0b0e1a;border:1px solid #2d355a;padding:14px;border-radius:12px;color:white;font-size:14px;outline:none;">
+                </div>
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <input type="checkbox" id="oferta_vip_activa" style="width:18px;height:18px;cursor:pointer;">
+                    <label for="oferta_vip_activa" style="cursor:pointer;">Oferta VIP activa (se muestra en vez de la oferta general, solo a clientes VIP)</label>
+                </div>
+                <button class="btn-save" id="btnOferta" onclick="guardarOferta()" style="margin-top:10px;">Guardar Oferta</button>
+            </div>
+        </div>
 
-app.use(express.json({ limit: "10mb" }));
-app.use(express.static(path.join(__dirname, "public")));
-app.use("/admin", authAttemptLimiter);
+        <!-- EMBUDO CRM -->
+        <div class="config-section" style="border-left: 5px solid #a78bfa; margin-bottom: 30px;">
+            <h3 style="color:#a78bfa;">📊 Embudo de Conversión <small style="color:#8b949e;font-size:12px;font-weight:400;">· últimos 30 días</small></h3>
+            <div id="embudo" style="display:flex; flex-direction:column; gap:10px;"></div>
+            <div style="margin-top:20px; display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px;" id="crm-mini-stats">
+                <div style="background:#0b0e1a;border-radius:12px;padding:16px;border:1px solid #2d355a;">
+                    <div style="font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:1px;">Frecuentes</div>
+                    <div style="font-size:24px;font-weight:700;color:#fbbf24;margin-top:6px;" id="stat-frecuentes">—</div>
+                </div>
+                <div style="background:#0b0e1a;border-radius:12px;padding:16px;border:1px solid #2d355a;">
+                    <div style="font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:1px;">Esp. PIX</div>
+                    <div style="font-size:24px;font-weight:700;color:#38bdf8;margin-top:6px;" id="stat-esp-pix">—</div>
+                </div>
+                <div style="background:#0b0e1a;border-radius:12px;padding:16px;border:1px solid #2d355a;">
+                    <div style="font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:1px;">Esp. Comprobante</div>
+                    <div style="font-size:24px;font-weight:700;color:#f59e0b;margin-top:6px;" id="stat-esp-comp">—</div>
+                </div>
+                <div style="background:#0b0e1a;border-radius:12px;padding:16px;border:1px solid #2d355a;">
+                    <div style="font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:1px;">Nuevos Hoy</div>
+                    <div style="font-size:24px;font-weight:700;color:#4ade80;margin-top:6px;" id="stat-nuevos-hoy">—</div>
+                </div>
+            </div>
+        </div>
 
-const verificarToken = (req, res, next) => {
-    const authHeader = req.headers.authorization || "";
-    const token = authHeader.replace(/^Bearer\s+/i, "");
-    const secret = process.env.ADMIN_TOKEN?.trim();
-    if (!token || token.trim() !== secret) return res.status(401).json({ error: "No autorizado" });
-    next();
-};
+    </div>
 
-// Acceso separado y más limitado: solo para las rutas del CRM de Entregas
-// (/admin/entregas...). Pensado para dar acceso a otra persona (ej. quien
-// coordina las entregas en Cuba) sin exponerle tasas, VIP ni ofertas.
-// El token de admin normal también sigue funcionando aquí.
-const verificarTokenEntregas = (req, res, next) => {
-    const authHeader = req.headers.authorization || "";
-    const token = authHeader.replace(/^Bearer\s+/i, "").trim();
-    const secretAdmin    = process.env.ADMIN_TOKEN?.trim();
-    const secretEntregas = process.env.ENTREGAS_TOKEN?.trim();
-    const valido = token && (token === secretAdmin || (secretEntregas && token === secretEntregas));
-    if (!valido) return res.status(401).json({ error: "No autorizado" });
-    next();
-};
+    <script>
+        let token = "";
+        let intervalo = null;
 
-// ==========================================
-// WEBHOOK
-// ==========================================
-
-app.post("/webhook", webhookLimiter, async (req, res) => {
-    res.status(200).send("OK");
-    try {
-        const body = req.body;
-        if (!body) return;
-
-        const phoneRaw = body.phone || body.from;
-
-        if (body.chatLid && body.phone && body.phone.startsWith("55") && !body.fromMe) {
-            mapaLidATelefono.set(body.chatLid, body.phone);
+        function authH() {
+            return { "Authorization": "Bearer " + token, "Content-Type": "application/json" };
         }
 
-        if (body.isGroup || String(phoneRaw).includes("-group")) return;
-        if (body.isNewsletter) return;
+        async function cargarRecargas() {
+            if (!token) return;
+            try {
+                const r = await fetch("/admin/recargas", { headers: authH() });
+                const recargas = await r.json();
+                recargas.forEach(rec => {
+                    const t = rec.tipo;
+                    const pre = t === "nacional" ? "rec_nac" : "rec_int";
+                    const precioEl = document.getElementById(pre + "_precio");
+                    const descEl   = document.getElementById(pre + "_desc");
+                    const activaEl = document.getElementById(pre + "_activa");
+                    if (precioEl) precioEl.value = rec.precio || "";
+                    if (descEl)   descEl.value   = rec.descripcion || "";
+                    if (activaEl) activaEl.checked = !!rec.activa;
+                });
+            } catch(e) { console.error("Error cargando recargas:", e); }
+        }
 
-        if (body.fromMe) {
-            if (body.fromApi !== true) {
-                const telefonoCliente = mapaLidATelefono.get(body.chatLid);
+        async function guardarRecarga(tipo) {
+            const pre = tipo === "nacional" ? "rec_nac" : "rec_int";
+            try {
+                const res = await fetch("/admin/recargas/" + tipo, {
+                    method: "POST",
+                    headers: authH(),
+                    body: JSON.stringify({
+                        precio:      document.getElementById(pre + "_precio").value,
+                        descripcion: document.getElementById(pre + "_desc").value,
+                        activa:      document.getElementById(pre + "_activa").checked
+                    })
+                });
+                const d = await res.json();
+                if (d.success) alert("✅ Recarga " + tipo + " guardada");
+                else alert("❌ Error guardando");
+            } catch(e) { alert("❌ Error de conexión"); }
+        }
 
-                // Muchos clientes no saben llenar la calculadora, así que el
-                // operador la llena él mismo y manda el pedido desde su propio
-                // WhatsApp, dentro del chat del cliente. Antes esto solo activaba
-                // la pausa humana y el pedido se perdía (nunca se creaba la
-                // entrega ni llegaba el aviso). Ahora, si el texto es un pedido
-                // web válido, se procesa igual que si lo mandara el cliente.
-                const textoFromMe = body.text?.message || body.body || body.caption || "";
-                if (telefonoCliente && esPedidoWeb(textoFromMe)) {
-                    try {
-                        await procesarPedidoWeb(telefonoCliente, textoFromMe, "Cliente");
-                    } catch (e) {
-                        console.error("❌ Error procesando pedido web (enviado por el operador):", e.message);
-                    }
+        async function cargarOferta() {
+            if (!token) return;
+            try {
+                const r = await fetch("/admin/oferta", { headers: authH() });
+                const d = await r.json();
+                if (d.texto) document.getElementById("oferta_texto").value = d.texto;
+                if (d.vence_at) document.getElementById("oferta_vence").value = new Date(d.vence_at).toISOString().slice(0,16);
+                document.getElementById("oferta_activa").checked = !!d.activa;
+                if (d.texto_vip) document.getElementById("oferta_vip_texto").value = d.texto_vip;
+                document.getElementById("oferta_vip_activa").checked = !!d.activa_vip;
+            } catch(e) { console.error("Error cargando oferta:", e); }
+        }
+
+        async function guardarOferta() {
+            const btn = document.getElementById("btnOferta");
+            btn.innerText = "Guardando...";
+            try {
+                const res = await fetch("/admin/oferta", {
+                    method: "POST",
+                    headers: authH(),
+                    body: JSON.stringify({
+                        texto: document.getElementById("oferta_texto").value,
+                        activa: document.getElementById("oferta_activa").checked,
+                        vence_at: document.getElementById("oferta_vence").value || null,
+                        texto_vip: document.getElementById("oferta_vip_texto").value,
+                        activa_vip: document.getElementById("oferta_vip_activa").checked
+                    })
+                });
+                const d = await res.json();
+                if (d.success) alert("✅ Oferta guardada");
+                else alert("❌ Error guardando oferta");
+            } catch(e) { alert("❌ Error de conexión"); }
+            finally { btn.innerText = "Guardar Oferta"; }
+        }
+
+        function conectar() {
+            token = document.getElementById("tokenField").value.trim();
+            if (!token) return;
+            if (intervalo) clearInterval(intervalo);
+            refreshData();
+            cargarEntregas();
+            cargarTasaUsdt();
+            intervalo = setInterval(() => { refreshData(); cargarEntregas(); }, 30000);
+        }
+
+        document.getElementById("tokenField").addEventListener("keydown", e => {
+            if (e.key === "Enter") conectar();
+        });
+
+        async function refreshData() {
+            if (!token) return;
+            try {
+                const [resTasas, resClientes, resStats, resOps, resCrm] = await Promise.all([
+                    fetch("/admin/tasas",       { headers: authH() }),
+                    fetch("/admin/clientes",    { headers: authH() }),
+                    fetch("/admin/stats",       { headers: authH() }),
+                    fetch("/admin/operaciones", { headers: authH() }),
+                    fetch("/admin/crm/stats",   { headers: authH() })
+                ]);
+
+                if (resTasas.status === 401) {
+                    document.getElementById("statusBadge").innerText = "● Token inválido";
+                    document.getElementById("statusBadge").style.color = "#ef4444";
+                    clearInterval(intervalo);
                     return;
                 }
 
-                if (telefonoCliente) await activarPausaHumana(telefonoCliente);
+                document.getElementById("statusBadge").innerText = "● Online";
+                document.getElementById("statusBadge").style.color = "#4ade80";
+                cargarOferta();
+                cargarRecargas();
+
+                const tasas      = await resTasas.json();
+                const clientes   = await resClientes.json();
+                const stats      = await resStats.json();
+                const operaciones = await resOps.json();
+
+                // CRM Métricas
+                const crmData = resCrm.ok ? await resCrm.json() : {};
+                renderCRMStats(crmData);
+
+                // Tasas
+                Object.keys(tasas).forEach(key => {
+                    const input = document.getElementById(key);
+                    if (input && tasas[key] !== null) input.value = tasas[key];
+                });
+
+                // Stats
+                const listaClientes = Array.isArray(clientes) ? clientes : Object.values(clientes);
+                document.getElementById("stat-clientes").innerText = listaClientes.length;
+                document.getElementById("stat-ops").innerText      = stats.totalOperaciones || 0;
+                document.getElementById("stat-vol").innerText      = Number(stats.volumenTotal || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+                document.getElementById("stat-pend").innerText     = stats.pendientes || 0;
+                document.getElementById("stat-completadas").innerText = stats.completadas || 0;
+
+                // Pendientes
+                const tablaPendientes = document.getElementById("tablaPendientes");
+                const pendientes = operaciones.filter(o => o.status === "pendiente");
+                document.getElementById("countPendientes").innerText = pendientes.length;
+                if (pendientes.length === 0) {
+                    tablaPendientes.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#8b949e;padding:20px;">Todo al día. No hay pagos pendientes.</td></tr>';
+                } else {
+                    tablaPendientes.innerHTML = pendientes.map(op => {
+                        const esEntrega = op.tipo === "cup_efectivo" || op.tipo === "usd_efectivo";
+                        const colEntrega = esEntrega
+                            ? `<small>🚚 ${op.municipio || "-"}, ${op.provincia || "-"}</small>`
+                            : `<span style="font-family:monospace;font-size:12px;color:#8b949e;">${op.tarjeta ? "•••• " + op.tarjeta.slice(-4) : "-"}</span>`;
+                        return `
+                        <tr>
+                            <td>${new Date(op.created_at).toLocaleDateString("pt-BR")}<br><small>${new Date(op.created_at).toLocaleTimeString("pt-BR")}</small></td>
+                            <td><strong>${op.titular || op.nombre}</strong></td>
+                            <td style="color:var(--yellow);font-weight:700;">R$ ${op.monto}</td>
+                            <td>${colEntrega}</td>
+                            <td><small>${op.tipo}</small></td>
+                            <td><button class="btn-confirm" onclick="confirmar('${op.id}')">VERIFICADO</button></td>
+                        </tr>`;
+                    }).join("");
+                }
+
+                // En proceso de entrega (pago confirmado, pendiente de completar)
+                const tablaEnProceso = document.getElementById("tablaEnProceso");
+                const enProceso = operaciones.filter(o => o.status === "confirmada");
+                document.getElementById("countEnProceso").innerText = enProceso.length;
+                document.getElementById("btnLimpiarAntiguas").style.display = enProceso.length > 0 ? "inline-block" : "none";
+                if (enProceso.length === 0) {
+                    tablaEnProceso.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#8b949e;padding:20px;">No hay operaciones en proceso.</td></tr>';
+                } else {
+                    tablaEnProceso.innerHTML = enProceso.map(op => {
+                        const esEntrega = op.tipo === "cup_efectivo" || op.tipo === "usd_efectivo";
+                        const colEntrega = esEntrega
+                            ? `<small>🚚 ${op.direccion || "-"}<br>${op.municipio || "-"}, ${op.provincia || "-"}</small>`
+                            : `<span style="font-family:monospace;font-size:12px;color:#8b949e;">${op.tarjeta ? "•••• " + op.tarjeta.slice(-4) : "-"}</span>`;
+                        return `
+                        <tr>
+                            <td>${new Date(op.created_at).toLocaleDateString("pt-BR")}</td>
+                            <td><strong>${op.titular || op.nombre}</strong></td>
+                            <td>${colEntrega}</td>
+                            <td style="color:var(--yellow);font-weight:700;">R$ ${op.monto}</td>
+                            <td><small>${op.tipo}</small></td>
+                            <td><button class="btn-confirm" onclick="completar('${op.id}')">COMPLETAR</button></td>
+                        </tr>`;
+                    }).join("");
+                }
+
+                // Ranking
+                const tbodyCli = document.getElementById("clientesTable");
+                const confirmadas = operaciones.filter(o => o.status === "confirmada" || o.status === "completada");
+                const ranking = listaClientes.map(c => ({
+                    ...c,
+                    totalReal: confirmadas.filter(o => o.phone === c.phone).reduce((acc, o) => acc + Number(o.monto), 0)
+                })).sort((a, b) => b.totalReal - a.totalReal);
+
+                // Guardar ranking completo y paginar
+                window._rankingCompleto = ranking;
+                window._paginaActual = window._paginaActual || 1;
+                renderPagina(window._paginaActual);
+
+            } catch (e) {
+                console.error("❌ Error dashboard:", e);
             }
-            return;
         }
 
-        if (!phoneRaw || phoneRaw.includes("@lid")) return;
-        if (!phoneRaw.startsWith("55")) return;
-
-        const tiposValidos = ["ReceivedCallback", "image", "document", "audio", "video"];
-        if (!tiposValidos.includes(body.type)) return;
-
-        const messageId = body.messageId || body.id || body.zeId;
-        if (messageId && mensajesProcesados.has(messageId)) return;
-        if (messageId) {
-            mensajesProcesados.add(messageId);
-            setTimeout(() => mensajesProcesados.delete(messageId), 300000);
+        async function confirmar(id) {
+            if (!confirm("¿Has verificado este pago en tu cuenta bancaria?")) return;
+            const res = await fetch("/admin/confirmar-operacion/" + id, { method: "POST", headers: authH() });
+            const data = await res.json();
+            if (data.success) {
+                refreshData();
+                if (data.notificado === false) {
+                    alert("✅ Operación confirmada, PERO ⚠️ no se pudo enviar el mensaje de WhatsApp al cliente. Revisa que la instancia de Z-API esté conectada, o avísale tú manualmente.");
+                }
+            } else {
+                alert("❌ Error al confirmar la operación: " + (data.error || "desconocido"));
+            }
         }
 
-        const pushName = body.senderName || "Cliente";
-
-        if (await enPausaHumana(phoneRaw)) {
-            console.log(`🤫 BOT SILENCIADO PARA ${phoneRaw}`);
-            return;
+        async function completar(id) {
+            if (!confirm("¿Confirmas que esta operación fue completada (entrega/transferencia realizada)?")) return;
+            const res = await fetch("/admin/completar-operacion/" + id, { method: "POST", headers: authH() });
+            const data = await res.json();
+            if (data.success) {
+                refreshData();
+                if (data.notificado === false) {
+                    alert("✅ Operación completada, PERO ⚠️ no se pudo enviar el mensaje de WhatsApp al cliente. Revisa que la instancia de Z-API esté conectada, o avísale tú manualmente.");
+                }
+            } else {
+                alert("❌ Error al completar la operación: " + (data.error || "desconocido"));
+            }
         }
 
-        // Audio — responder que solo atendemos por texto
-        const esAudio =
-            body.messageType === "audio" ||
-            body.messageType === "ptt"   ||
-            body.type === "audio"        ||
-            body.audio;
-
-        if (esAudio) {
-            const { enviarMensaje } = require("./src/services/zapi");
-            await enviarMensaje(phoneRaw, "Hola 😊 Solo atendemos por mensaje de texto. ¿En qué te puedo ayudar?");
-            return;
-        }
-
-        const esMultimedia =
-            body.messageType === "image"    ||
-            body.messageType === "document" ||
-            body.type === "image"           ||
-            body.type === "document"        ||
-            body.image || body.document;
-
-        const textMessage = body.text?.message || body.body || body.caption || "";
-
-        if (esMultimedia) {
-            const mediaUrl = body.image?.imageUrl || body.document?.documentUrl || null;
+        async function completarTodasAntiguas() {
+            if (!confirm("Esto marcará TODAS las operaciones en proceso como completadas de una vez (sin avisar al cliente por WhatsApp). Úsalo solo para limpiar operaciones antiguas que ya se entregaron. ¿Continuar?")) return;
             try {
-                if (mediaUrl) {
-                    await openaiService.procesarMensaje(phoneRaw, textMessage || "imagen_recibida", pushName, mediaUrl);
+                const res = await fetch("/admin/completar-todas-antiguas", { method: "POST", headers: authH() });
+                const data = await res.json();
+                if (data.success) {
+                    alert(`✅ ${data.actualizadas} operación(es) marcadas como completadas.`);
+                    refreshData();
+                } else {
+                    alert("❌ Error al completar en bloque");
                 }
             } catch (e) {
-                console.error("❌ Error en multimedia:", e.message);
+                alert("❌ Error de conexión");
             }
-            return;
         }
 
-        if (!textMessage) return;
+        // ── Paneles plegables ──────────────────────
+        function toggleColapsable(hdrId, bodyId, chevId) {
+            document.getElementById(hdrId).addEventListener("click", () => {
+                const body = document.getElementById(bodyId);
+                const chev = document.getElementById(chevId);
+                body.classList.toggle("abierto");
+                chev.classList.toggle("abierto");
+            });
+        }
+        toggleColapsable("hdrPendientes", "bodyPendientes", "chevPendientes");
+        toggleColapsable("hdrEnProceso", "bodyEnProceso", "chevEnProceso");
+        toggleColapsable("hdrEntregas", "bodyEntregas", "chevEntregas");
+        // Pendientes abierto por defecto (requiere atención inmediata); En Proceso plegado (solo seguimiento)
+        document.getElementById("bodyPendientes").classList.add("abierto");
+        document.getElementById("chevPendientes").classList.add("abierto");
+        // CRM de Entregas también abierto por defecto
+        document.getElementById("chevEntregas").classList.add("abierto");
 
-        // Pedido generado por la calculadora web (entrega o transferencia) — se procesa aparte, sin pasar por GPT.
-        if (esPedidoWeb(textMessage)) {
+        // ── CRM DE ENTREGAS (efectivo) ────────────
+        let entFiltroRapido = "TODAS";
+        let entDebounce = null;
+        let entregasActuales = []; // última lista cargada, para sumar montos de las seleccionadas al registrar pago
+
+        async function cargarTasaUsdt() {
             try {
-                const manejado = await procesarPedidoWeb(phoneRaw, textMessage, pushName);
-                if (manejado) return;
-            } catch (e) {
-                console.error("❌ Error procesando pedido web:", e.message);
-            }
-            // si no se pudo interpretar (mensaje editado/incompleto), sigue el flujo normal abajo
+                const res = await fetch("/admin/entregas/tasa-usdt", { headers: authH() });
+                const t = await res.json();
+                document.getElementById("entTasaUsdtCup").value = t.tasa_usdt_cup || "";
+                document.getElementById("entTasaUsdtUsd").value = t.tasa_usdt_usd || "";
+            } catch (e) { console.error("❌ Error cargando tasa USDT:", e); }
         }
 
-        const mensajeAnterior = pendingMessages.get(phoneRaw) || "";
-        pendingMessages.set(phoneRaw, mensajeAnterior ? mensajeAnterior + "\n" + textMessage : textMessage);
-
-        if (buffers.has(phoneRaw)) clearTimeout(buffers.get(phoneRaw));
-
-        const timer = setTimeout(async () => {
-            const msgFinal = pendingMessages.get(phoneRaw);
-            if (!msgFinal) return;
+        async function guardarTasaUsdt() {
+            const tasaCup = Number(document.getElementById("entTasaUsdtCup").value || 0);
+            const tasaUsd = Number(document.getElementById("entTasaUsdtUsd").value || 0);
+            const info = document.getElementById("entTasaUsdtInfo");
             try {
-                await openaiService.procesarMensaje(phoneRaw, msgFinal, pushName);
-                pendingMessages.delete(phoneRaw);
+                const res = await fetch("/admin/entregas/tasa-usdt", {
+                    method: "POST", headers: authH(), body: JSON.stringify({ tasaCup, tasaUsd })
+                });
+                const data = await res.json();
+                info.innerText = data.success ? "✅ Guardada" : "❌ " + (data.error || "Error");
+            } catch (e) { info.innerText = "❌ Error de conexión"; }
+            setTimeout(() => { info.innerText = ""; }, 3000);
+        }
+
+        function debounceCargarEntregas() {
+            clearTimeout(entDebounce);
+            entDebounce = setTimeout(cargarEntregas, 350);
+        }
+
+        function filtrarEntregasRapido(filtro) {
+            entFiltroRapido = filtro;
+            document.querySelectorAll("#entFiltrosRapidos .page-btn").forEach(b => b.classList.toggle("active", b.dataset.filtro === filtro));
+            cargarEntregas();
+        }
+
+        function construirQueryEntregas() {
+            const params = new URLSearchParams();
+            const texto  = document.getElementById("entBuscar")?.value.trim();
+            const moneda = document.getElementById("entMoneda")?.value;
+            if (texto)  params.set("q", texto);
+            if (moneda) params.set("moneda", moneda);
+
+            if (entFiltroRapido === "PENDIENTES")          params.set("estadoEntrega", "PENDIENTE");
+            else if (entFiltroRapido === "ENTREGADAS")     params.set("estadoEntrega", "ENTREGADO");
+            else if (entFiltroRapido === "PENDIENTES_DE_PAGO") params.set("estadoPago", "PENDIENTE_DE_PAGO");
+            else if (entFiltroRapido === "PAGADAS")        params.set("estadoPago", "PAGADO");
+            else if (entFiltroRapido === "CANCELADAS")     params.set("estadoEntrega", "CANCELADO");
+
+            return params;
+        }
+
+        async function cargarEntregas() {
+            if (!token) return;
+            try {
+                const params = construirQueryEntregas();
+                const [resList, resStats] = await Promise.all([
+                    fetch("/admin/entregas?" + params.toString(), { headers: authH() }),
+                    fetch("/admin/entregas/stats", { headers: authH() })
+                ]);
+                const lista = await resList.json();
+                const stats = await resStats.json();
+                entregasActuales = Array.isArray(lista) ? lista : [];
+                renderEntregasStats(stats);
+                renderTablaEntregas(entregasActuales);
+            } catch (e) { console.error("❌ Error cargando entregas:", e); }
+        }
+
+        function renderEntregasStats(stats) {
+            if (!stats) return;
+            const fmtNum = n => Number(n || 0).toLocaleString("es-ES");
+            document.getElementById("ent-pend-count").innerText    = stats.pendientes?.count ?? 0;
+            document.getElementById("ent-pend-totales").innerText  = `CUP ${fmtNum(stats.pendientes?.cup)} · USD ${fmtNum(stats.pendientes?.usd)}`;
+            document.getElementById("countEntregasPend").innerText = stats.pendientes?.count ?? 0;
+
+            document.getElementById("ent-entregadas-count").innerText   = stats.entregadas?.count ?? 0;
+            document.getElementById("ent-entregadas-totales").innerText = `CUP ${fmtNum(stats.entregadas?.cup)} · USD ${fmtNum(stats.entregadas?.usd)}`;
+
+            document.getElementById("ent-pagadas-count").innerText    = stats.pagadas ?? 0;
+            document.getElementById("ent-canceladas-count").innerText = stats.canceladas ?? 0;
+        }
+
+        function diasPendienteTexto(fechaCreacion) {
+            const creado = new Date(fechaCreacion);
+            const dias = Math.floor((new Date() - creado) / (1000 * 60 * 60 * 24));
+            if (dias <= 0) return "Hoy";
+            if (dias === 1) return "Pendiente hace 1 día";
+            return `Pendiente hace ${dias} días`;
+        }
+
+        function badgeEstadoEntrega(estado) {
+            const colores = { PENDIENTE: "var(--yellow)", ENTREGADO: "#60a5fa", CANCELADO: "var(--red)" };
+            return `<span style="color:${colores[estado] || "#8b949e"};font-weight:700;">${estado}</span>`;
+        }
+
+        function badgeEstadoPago(estado) {
+            const colores = { NO_APLICA: "#8b949e", PENDIENTE_DE_PAGO: "var(--yellow)", PAGADO: "var(--green)" };
+            const texto   = { NO_APLICA: "No aplica", PENDIENTE_DE_PAGO: "Pend. de pago", PAGADO: "Pagado" };
+            return `<span style="color:${colores[estado] || "#8b949e"};font-weight:700;">${texto[estado] || estado}</span>`;
+        }
+
+        function renderTablaEntregas(lista) {
+            const tbody = document.getElementById("tablaEntregas");
+            if (!lista.length) {
+                tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#8b949e;padding:20px;">No hay entregas con estos filtros.</td></tr>';
+                return;
+            }
+            tbody.innerHTML = lista.map(e => {
+                const puedePagar = e.estado_entrega === "ENTREGADO" && e.estado_pago === "PENDIENTE_DE_PAGO";
+                const checkbox   = puedePagar ? `<input type="checkbox" class="entregaCheckbox" data-id="${e.id}">` : "";
+                const lugar      = [e.provincia, e.municipio].filter(Boolean).join(", ") || "-";
+
+                let acciones;
+                if (e.estado_entrega === "PENDIENTE") {
+                    acciones = `
+                        <button class="btn-confirm" style="background:#60a5fa;" onclick="entregaMarcarEntregado(${e.id})">ENTREGADO</button>
+                        <button class="btn-confirm" style="background:var(--red);color:white;margin-left:6px;" onclick="entregaCancelar(${e.id})">CANCELAR</button>`;
+                } else if (puedePagar) {
+                    acciones = `<button class="btn-confirm" style="background:#14b8a6;" onclick="registrarPagoIndividual(${e.id})">PAGAR</button>`;
+                } else if (e.estado_pago === "PAGADO") {
+                    acciones = `<small style="color:#8b949e;">✔ pagado</small>`;
+                } else {
+                    acciones = "-";
+                }
+                acciones += `<br><button class="page-btn" style="margin-top:4px;font-size:11px;padding:4px 8px;" onclick="entregaVerHistorial(${e.id})">🕘 Historial</button>`;
+
+                const notaAtraso = e.estado_entrega === "PENDIENTE"
+                    ? `<br><small style="color:var(--yellow);">${diasPendienteTexto(e.created_at)}</small>`
+                    : "";
+
+                return `
+                <tr>
+                    <td>${checkbox}</td>
+                    <td style="font-family:monospace;font-weight:700;">${e.codigo}</td>
+                    <td>${new Date(e.created_at).toLocaleDateString("pt-BR")}${notaAtraso}</td>
+                    <td><strong>${e.cliente_nombre || "-"}</strong><br><small style="color:#8b949e;">${(e.telefono_entrega || e.phone || "").split("@")[0]}</small></td>
+                    <td style="font-weight:700;">${Number(e.cantidad).toLocaleString("es-ES")} ${e.moneda}</td>
+                    <td><small>${lugar}</small></td>
+                    <td>${badgeEstadoEntrega(e.estado_entrega)}</td>
+                    <td>${badgeEstadoPago(e.estado_pago)}</td>
+                    <td>${acciones}</td>
+                </tr>`;
+            }).join("");
+        }
+
+        async function entregaMarcarEntregado(id) {
+            if (!confirm("¿Confirmas que esta entrega ya fue realizada en Cuba?")) return;
+            try {
+                const res = await fetch(`/admin/entregas/${id}/entregado`, { method: "POST", headers: authH(), body: JSON.stringify({}) });
+                const data = await res.json();
+                if (data.success) cargarEntregas();
+                else alert("❌ Error: " + (data.error || "desconocido"));
+            } catch (e) { alert("❌ Error de conexión"); }
+        }
+
+        async function entregaCancelar(id) {
+            const motivo = prompt("Motivo de la cancelación (opcional):") || "";
+            if (!confirm("¿Confirmas cancelar esta entrega?")) return;
+            try {
+                const res = await fetch(`/admin/entregas/${id}/cancelar`, { method: "POST", headers: authH(), body: JSON.stringify({ motivo }) });
+                const data = await res.json();
+                if (data.success) cargarEntregas();
+                else alert("❌ Error: " + (data.error || "desconocido"));
+            } catch (e) { alert("❌ Error de conexión"); }
+        }
+
+        // Registro de pago al contacto — puramente histórico. No calcula ni
+        // convierte nada, solo guarda lo que se ingresa.
+        async function promptYRegistrarPago(ids) {
+            if (!ids || ids.length === 0) {
+                alert("Selecciona al menos una entrega en estado PENDIENTE DE PAGO (o usa el botón PAGAR de una fila).");
+                return;
+            }
+
+            // Suma lo que hay que pagar (por moneda) de las entregas seleccionadas
+            // y sugiere el equivalente en USDT con la tasa configurada arriba —
+            // es solo una sugerencia, se puede editar antes de confirmar.
+            const seleccionadas = entregasActuales.filter(e => ids.includes(e.id));
+            const totalCup = seleccionadas.filter(e => e.moneda === "CUP").reduce((s, e) => s + Number(e.cantidad), 0);
+            const totalUsd = seleccionadas.filter(e => e.moneda === "USD").reduce((s, e) => s + Number(e.cantidad), 0);
+            const tasaCup  = Number(document.getElementById("entTasaUsdtCup")?.value || 0);
+            const tasaUsd  = Number(document.getElementById("entTasaUsdtUsd")?.value || 0);
+
+            let sugeridoUsdt = 0;
+            if (totalCup > 0 && tasaCup > 0) sugeridoUsdt += totalCup / tasaCup;
+            if (totalUsd > 0 && tasaUsd > 0) sugeridoUsdt += totalUsd / tasaUsd;
+            sugeridoUsdt = sugeridoUsdt ? Number(sugeridoUsdt.toFixed(2)) : "";
+
+            const partes = [];
+            if (totalCup) partes.push("CUP " + totalCup.toLocaleString("es-ES"));
+            if (totalUsd) partes.push("USD " + totalUsd.toLocaleString("es-ES"));
+            const resumen = partes.length ? `Total a pagar: ${partes.join(" + ")}` : "";
+
+            const cantidadEnviada = prompt(
+                `Registrar pago para ${ids.length} entrega(s).` +
+                (resumen ? `\n${resumen}` : "") +
+                (sugeridoUsdt ? `\nSugerido: ${sugeridoUsdt} USDT (según la tasa configurada arriba — puedes cambiarlo)` : "") +
+                `\n\nCantidad enviada:`,
+                sugeridoUsdt || ""
+            );
+            if (cantidadEnviada === null) return; // canceló
+            const monedaPago  = prompt("Moneda del pago (ej: USDT, USD, CUP) — opcional:", sugeridoUsdt ? "USDT" : "") || "";
+            const fecha       = prompt("Fecha del pago (AAAA-MM-DD) — opcional, por defecto hoy:") || null;
+            const txid        = prompt("TxID / referencia (opcional):") || "";
+            const observacion = prompt("Observación (opcional):") || "";
+
+            try {
+                const res = await fetch("/admin/entregas/pago", {
+                    method: "POST",
+                    headers: authH(),
+                    body: JSON.stringify({
+                        entregaIds: ids,
+                        cantidadEnviada: cantidadEnviada ? Number(cantidadEnviada) : null,
+                        monedaPago, fecha, txid, observacion
+                    })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    alert(`✅ Pago ${data.pago.codigo} registrado — ${data.entregas.length} entrega(s) marcada(s) como PAGADO.`);
+                    cargarEntregas();
+                } else {
+                    alert("❌ Error registrando el pago: " + (data.error || "desconocido"));
+                }
             } catch (e) {
-                console.error(`❌ Error OpenAI: ${e.message}`);
+                alert("❌ Error de conexión al registrar el pago");
+            }
+        }
+
+        async function registrarPagoIndividual(id) {
+            await promptYRegistrarPago([id]);
+        }
+
+        async function registrarPagoAgrupado() {
+            const ids = [...document.querySelectorAll(".entregaCheckbox:checked")].map(cb => Number(cb.dataset.id));
+            await promptYRegistrarPago(ids);
+        }
+
+        // Reabrir un pago (P-008) y ver exactamente qué entregas incluyó (sección 7 del CRM).
+        async function verPagoAgrupado() {
+            const codigo = document.getElementById("entPagoCodigo").value.trim();
+            if (!codigo) { alert("Escribe el código del pago (ej: P-003)"); return; }
+            try {
+                const res = await fetch(`/admin/entregas/pago/${encodeURIComponent(codigo)}`, { headers: authH() });
+                if (res.status === 404) { alert(`No se encontró el pago ${codigo}`); return; }
+                const pago = await res.json();
+                const detalle = pago.entregas.map(e => `• ${e.codigo} — ${Number(e.cantidad).toLocaleString("es-ES")} ${e.moneda}`).join("\n");
+                alert(
+                    `💵 Pago ${pago.codigo}\n` +
+                    (pago.cantidad_enviada ? `Cantidad enviada: ${pago.cantidad_enviada} ${pago.moneda_pago || ""}\n` : "") +
+                    (pago.fecha ? `Fecha: ${new Date(pago.fecha).toLocaleDateString("pt-BR")}\n` : "") +
+                    (pago.txid ? `TxID: ${pago.txid}\n` : "") +
+                    (pago.observacion ? `Observación: ${pago.observacion}\n` : "") +
+                    `\nEntregas incluidas (${pago.entregas.length}):\n${detalle}`
+                );
+            } catch (e) { alert("❌ Error de conexión buscando el pago"); }
+        }
+
+        // Historial de una entrega individual (sección 11 del CRM).
+        async function entregaVerHistorial(id) {
+            try {
+                const res = await fetch(`/admin/entregas/${id}/historial`, { headers: authH() });
+                const hist = await res.json();
+                if (!Array.isArray(hist) || hist.length === 0) { alert("Sin historial."); return; }
+                const texto = hist.map(h => `${new Date(h.created_at).toLocaleString("pt-BR")} — ${h.evento}`).join("\n");
+                alert(`🕘 Historial:\n\n${texto}`);
+            } catch (e) { alert("❌ Error de conexión"); }
+        }
+
+        async function guardarTasas() {
+            const btn = document.getElementById("btnSave");
+            btn.innerText = "Guardando...";
+            const data = {};
+            document.querySelectorAll("#tasasForm input").forEach(i => {
+                data[i.id] = i.value === "" ? null : Number(i.value);
+            });
+            try {
+                const res = await fetch("/admin/tasas", { method: "POST", headers: authH(), body: JSON.stringify(data) });
+                const resultado = await res.json();
+                if (resultado.success) { alert("✅ Tasas actualizadas correctamente"); refreshData(); }
+                else alert("❌ Error guardando tasas");
+            } catch (e) {
+                alert("❌ Error al guardar");
             } finally {
-                buffers.delete(phoneRaw);
+                btn.innerText = "Guardar Cambios de Tasas";
             }
-        }, 3500);
-
-        buffers.set(phoneRaw, timer);
-
-    } catch (e) {
-        console.error("❌ Error en Webhook:", e);
-    }
-});
-
-// ==========================================
-// ADMIN
-// ==========================================
-
-app.get("/admin/tasas", adminLimiter, verificarToken, async (req, res) => {
-    try {
-        const result = await pool.query("SELECT * FROM rates LIMIT 1");
-        res.json(result.rows[0] || {});
-    } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-app.post("/admin/tasas", adminLimiter, verificarToken, async (req, res) => {
-    try {
-        const {
-            brl_0, brl_100, brl_500, brl_1000, usd1, usd2, mlc, efectivo, tarifa_entrega,
-            umbral_vip_1, umbral_vip_2, umbral_vip_3,
-            bono_vip_1, bono_vip_2, bono_vip_3,
-            descuento_entrega_1, descuento_entrega_2, descuento_entrega_3
-        } = req.body;
-        await pool.query(`
-            UPDATE rates SET
-                brl_0    = COALESCE($1, brl_0),
-                brl_100  = COALESCE($2, brl_100),
-                brl_500  = COALESCE($3, brl_500),
-                brl_1000 = COALESCE($4, brl_1000),
-                usd1     = COALESCE($5, usd1),
-                usd2     = COALESCE($6, usd2),
-                mlc      = COALESCE($7, mlc),
-                efectivo = COALESCE($8, efectivo),
-                tarifa_entrega = COALESCE($9, tarifa_entrega),
-                umbral_vip_1 = COALESCE($10, umbral_vip_1),
-                umbral_vip_2 = COALESCE($11, umbral_vip_2),
-                umbral_vip_3 = COALESCE($12, umbral_vip_3),
-                bono_vip_1   = COALESCE($13, bono_vip_1),
-                bono_vip_2   = COALESCE($14, bono_vip_2),
-                bono_vip_3   = COALESCE($15, bono_vip_3),
-                descuento_entrega_1 = COALESCE($16, descuento_entrega_1),
-                descuento_entrega_2 = COALESCE($17, descuento_entrega_2),
-                descuento_entrega_3 = COALESCE($18, descuento_entrega_3),
-                updated_at = NOW()
-            WHERE id = 1
-        `, [
-            brl_0, brl_100, brl_500, brl_1000, usd1, usd2, mlc, efectivo, tarifa_entrega,
-            umbral_vip_1, umbral_vip_2, umbral_vip_3,
-            bono_vip_1, bono_vip_2, bono_vip_3,
-            descuento_entrega_1, descuento_entrega_2, descuento_entrega_3
-        ]);
-        res.json({ success: true });
-    } catch (e) {
-        console.error("❌ ERROR TASAS:", e);
-        res.status(500).json({ success: false, error: e.message });
-    }
-});
-
-app.get("/admin/clientes", adminLimiter, verificarToken, async (req, res) => {
-    try { res.json(await obtenerTodos()); } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-app.get("/admin/operaciones", adminLimiter, verificarToken, async (req, res) => {
-    try { res.json(await obtenerTodas()); } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-app.get("/admin/stats", adminLimiter, verificarToken, async (req, res) => {
-    try { res.json(await obtenerEstadisticas()); } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-app.get("/admin/crm/stats", adminLimiter, verificarToken, async (req, res) => {
-    try {
-        const dias = req.query.dias ? Number(req.query.dias) : 30;
-        res.json(await crm.obtenerEstadisticasCRM(dias));
-    } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-app.post("/admin/completar-todas-antiguas", adminLimiter, verificarToken, async (req, res) => {
-    try {
-        const r = await pool.query(`
-            UPDATE operations SET status = 'completada', completed_at = NOW()
-            WHERE status = 'confirmada'
-            RETURNING id
-        `);
-        res.json({ success: true, actualizadas: r.rows.length });
-    } catch (e) {
-        res.status(500).json({ success: false, error: e.message });
-    }
-});
-
-app.post("/admin/confirmar-operacion/:id", adminLimiter, verificarToken, async (req, res) => {
-    try {
-        const operacion = await confirmarOperacion(req.params.id);
-        if (!operacion) return res.status(404).json({ success: false, error: "Operación no encontrada" });
-
-        const { enviarMensaje } = require("./src/services/zapi");
-        const esEntrega = operacion.tipo === "cup_efectivo" || operacion.tipo === "usd_efectivo";
-        const cuerpo = esEntrega
-            ? "Procederemos a coordinar su entrega en Cuba."
-            : "Procederemos a realizar la transferencia a Cuba.";
-        const notaPlazo = esEntrega
-            ? "\n\n🚚 Recuerda: la entrega puede demorar hasta 48 horas, según la demanda y disponibilidad."
-            : "";
-        const notificado = await enviarMensaje(
-            operacion.phone,
-            `✅ Recibimos su pago de R$${operacion.monto}.\n\n${cuerpo}\n\nCuando se complete le enviaremos el comprobante. 😊${notaPlazo}`
-        );
-        if (!notificado) console.error(`⚠️ No se pudo notificar al cliente de la operación #${operacion.id} (phone: ${operacion.phone})`);
-
-        res.json({ success: true, notificado });
-    } catch (e) {
-        res.status(500).json({ success: false, error: e.message });
-    }
-});
-
-app.post("/admin/completar-operacion/:id", adminLimiter, verificarToken, async (req, res) => {
-    try {
-        const operacion = await completarOperacion(req.params.id);
-        if (!operacion) return res.status(404).json({ success: false, error: "Operación no encontrada" });
-
-        const { enviarMensaje } = require("./src/services/zapi");
-        const esEntrega = operacion.tipo === "cup_efectivo" || operacion.tipo === "usd_efectivo";
-        const msg = esEntrega
-            ? "🎉 ¡Tu entrega fue completada con éxito! Gracias por preferir nuestros servicios. 🇨🇺💜"
-            : "🎉 ¡Tu transferencia fue completada con éxito! Gracias por preferir nuestros servicios. 🇨🇺💜";
-        const notificado = await enviarMensaje(operacion.phone, msg);
-        if (!notificado) console.error(`⚠️ No se pudo notificar al cliente de la operación #${operacion.id} (phone: ${operacion.phone})`);
-
-        // Si este pedido venía de la calculadora, el cliente estaba en "modo
-        // silencio" con el bot (ver openai.js). Ya se completó todo — se le
-        // quita esa marca para que pueda volver a hablar normal con el bot
-        // si hace un pedido nuevo en el futuro.
-        try {
-            await pool.query(
-                "UPDATE customers SET estado = NULL WHERE phone = $1 AND estado = 'pedido_web_pendiente'",
-                [operacion.phone]
-            );
-        } catch (e) {
-            console.error("⚠️ Error limpiando estado pedido_web_pendiente:", e.message);
         }
 
-        // Programa VIP: recalcula el nivel (0-3) sobre los últimos 365 días. Si subió,
-        // se le avisa con el nivel nuevo. Si bajó, se actualiza en silencio (no se
-        // manda un mensaje negativo al cliente).
-        try {
-            const { nivelAnterior, nivelNuevo } = await crm.recalcularNivelVipUno(operacion.phone);
-            if (nivelNuevo > nivelAnterior) {
-                const estrellas = "⭐".repeat(nivelNuevo);
-                const mVip = `🌟 *¡Felicidades! Ahora eres cliente VIP ${estrellas} de Yorda Envíos!*\n\nDesde ahora tienes:\n💰 Tasa preferencial en tus próximas transferencias\n🚚 Descuento en tus pedidos de entrega en efectivo\n🎁 Promociones exclusivas para ti\n\n¡Gracias por confiar en nosotros! 💜🇨🇺`;
-                await enviarMensaje(operacion.phone, mVip);
-            } else if (nivelNuevo < nivelAnterior) {
-                console.log(`ℹ️ Cliente ${operacion.phone} bajó de nivel VIP: ${nivelAnterior} → ${nivelNuevo}`);
-            }
-        } catch (e) {
-            console.error("⚠️ Error recalculando nivel VIP:", e.message);
+        // ── CRM MÉTRICAS ──────────────────────────
+        function renderCRMStats(d) {
+            if (!d || !Object.keys(d).length) return;
+
+            // Cards nuevas
+            const cotizados = Number(d.cotizados || 0);
+            const cierresHoy = Number(d.cierres_hoy || 0);
+            const conv = d.conversion_pct != null ? d.conversion_pct + "%" : "—%";
+            const abandonos = Number(d.abandonos || 0);
+
+            const sc = document.getElementById("stat-cotizados");
+            const sh = document.getElementById("stat-cierres");
+            const scv = document.getElementById("stat-conversion");
+            const sa = document.getElementById("stat-abandonos");
+            if (sc) sc.innerText = cotizados;
+            if (sh) sh.innerText = cierresHoy;
+            if (scv) scv.innerText = conv;
+            if (sa) sa.innerText = abandonos;
+
+            // Mini stats
+            const sf = document.getElementById("stat-frecuentes");
+            const sp = document.getElementById("stat-esp-pix");
+            const sec = document.getElementById("stat-esp-comp");
+            const snh = document.getElementById("stat-nuevos-hoy");
+            if (sf) sf.innerText = d.frecuentes || 0;
+            if (sp) sp.innerText = d.esperando_pix || 0;
+            if (sec) sec.innerText = d.esperando_comprobante || 0;
+            // nuevos_hoy no viene del endpoint aún — mostrar nuevos totales
+            if (snh) snh.innerText = d.nuevos || 0;
+
+            // Embudo visual
+            const embudo = document.getElementById("embudo");
+            if (!embudo) return;
+
+            const etapas = [
+                { label: "🆕 Nuevos",               val: Number(d.nuevos || 0),                color: "#8b949e" },
+                { label: "💬 Cotizados",             val: Number(d.cotizados || 0),             color: "#38bdf8" },
+                { label: "💸 Esperando PIX",         val: Number(d.esperando_pix || 0),         color: "#a78bfa" },
+                { label: "📎 Esperando Comprobante", val: Number(d.esperando_comprobante || 0), color: "#f59e0b" },
+                { label: "✅ Completados",           val: Number(d.completados || 0),           color: "#4ade80" },
+                { label: "❌ Abandonos",             val: Number(d.abandonos || 0),             color: "#ef4444" },
+            ];
+
+            const maxVal = Math.max(...etapas.map(e => e.val), 1);
+
+            embudo.innerHTML = etapas.map(e => {
+                const pct = Math.round((e.val / maxVal) * 100);
+                return `
+                <div style="display:flex;align-items:center;gap:12px;">
+                    <div style="width:200px;font-size:13px;color:#94a3b8;flex-shrink:0;">${e.label}</div>
+                    <div style="flex:1;background:#0b0e1a;border-radius:8px;overflow:hidden;height:28px;border:1px solid #2d355a;">
+                        <div style="width:${pct}%;background:${e.color};height:100%;border-radius:8px;transition:width 0.6s ease;display:flex;align-items:center;padding-left:10px;">
+                            <span style="font-size:12px;font-weight:700;color:#0b0e1a;white-space:nowrap;">${e.val > 0 ? e.val : ""}</span>
+                        </div>
+                    </div>
+                    <div style="width:36px;text-align:right;font-size:13px;font-weight:700;color:${e.color};">${e.val}</div>
+                </div>`;
+            }).join("");
         }
 
-        res.json({ success: true, notificado });
-    } catch (e) {
-        res.status(500).json({ success: false, error: e.message });
-    }
-});
+        const POR_PAGINA = 10;
 
-// ─────────────────────────────────────────
-// CRM DE ENTREGAS — completamente separado de "operations".
-// Solo entregas de EFECTIVO (CUP/USD) viven aquí.
-// ─────────────────────────────────────────
+        function renderPagina(pagina) {
+            const ranking = window._rankingCompleto || [];
+            const total = ranking.length;
+            const totalPaginas = Math.ceil(total / POR_PAGINA) || 1;
+            pagina = Math.max(1, Math.min(pagina, totalPaginas));
+            window._paginaActual = pagina;
 
-app.get("/admin/entregas", adminLimiter, verificarTokenEntregas, async (req, res) => {
-    try {
-        const filtros = {
-            q:             req.query.q,
-            codigo:        req.query.codigo,
-            cliente:       req.query.cliente,
-            telefono:      req.query.telefono,
-            fechaDesde:    req.query.fechaDesde,
-            fechaHasta:    req.query.fechaHasta,
-            provincia:     req.query.provincia,
-            moneda:        req.query.moneda,
-            estadoEntrega: req.query.estadoEntrega,
-            estadoPago:    req.query.estadoPago
-        };
-        res.json(await entregasService.obtenerEntregas(filtros));
-    } catch (e) { res.status(500).json({ error: e.message }); }
-});
+            const inicio = (pagina - 1) * POR_PAGINA;
+            const slice = ranking.slice(inicio, inicio + POR_PAGINA);
 
-app.get("/admin/entregas/stats", adminLimiter, verificarTokenEntregas, async (req, res) => {
-    try { res.json(await entregasService.obtenerEstadisticasEntregas()); }
-    catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-app.post("/admin/entregas/:id/entregado", adminLimiter, verificarTokenEntregas, async (req, res) => {
-    try {
-        const entrega = await entregasService.marcarEntregado(req.params.id, req.body.usuario || "Panel admin");
-        if (!entrega) return res.status(404).json({ success: false, error: "Entrega no encontrada o ya no está PENDIENTE" });
-
-        // Aviso a tu número — así te enteras aunque el cambio lo haga tu
-        // compañera desde el acceso reducido (/entregas).
-        try {
-            await enviarSeguro(getAdminPhone(),
-                `✅ Entrega ${entrega.codigo} marcada como ENTREGADO.\n\n` +
-                `Cliente: ${entrega.cliente_nombre}\n` +
-                `${Number(entrega.cantidad).toLocaleString("es-ES")} ${entrega.moneda}\n\n` +
-                `💵 Pago al contacto: PENDIENTE DE PAGO`
-            );
-        } catch (e) { console.error("⚠️ No se pudo notificar entrega marcada:", e.message); }
-
-        res.json({ success: true, entrega });
-    } catch (e) { res.status(500).json({ success: false, error: e.message }); }
-});
-
-app.post("/admin/entregas/:id/cancelar", adminLimiter, verificarTokenEntregas, async (req, res) => {
-    try {
-        const entrega = await entregasService.marcarCancelado(req.params.id, req.body.motivo || "");
-        if (!entrega) return res.status(404).json({ success: false, error: "Entrega no encontrada o ya no está PENDIENTE" });
-        res.json({ success: true, entrega });
-    } catch (e) { res.status(500).json({ success: false, error: e.message }); }
-});
-
-// Pago al contacto en Cuba — individual o agrupado (varias entregas a la vez).
-// Puramente histórico: NO calcula ni convierte monedas, solo guarda lo que
-// se le pasa. Solo afecta entregas que realmente están PENDIENTE_DE_PAGO.
-app.post("/admin/entregas/pago", adminLimiter, verificarTokenEntregas, async (req, res) => {
-    try {
-        const { entregaIds, cantidadEnviada, monedaPago, fecha, txid, observacion } = req.body;
-        if (!Array.isArray(entregaIds) || entregaIds.length === 0) {
-            return res.status(400).json({ success: false, error: "Debes indicar al menos una entrega (entregaIds)" });
-        }
-        const resultado = await entregasService.registrarPago(entregaIds, { cantidadEnviada, monedaPago, fecha, txid, observacion });
-        if (!resultado) return res.status(500).json({ success: false, error: "No se pudo registrar el pago" });
-
-        // Aviso a tu número — mismo motivo que en "entregado": que te enteres
-        // aunque el registro lo haga tu compañera.
-        try {
-            const codigos = resultado.entregas.map(e => e.codigo).join(", ") || "—";
-            await enviarSeguro(getAdminPhone(),
-                `💵 Pago ${resultado.pago.codigo} registrado.\n\n` +
-                `Entregas incluidas: ${codigos}\n` +
-                (resultado.pago.cantidad_enviada ? `Cantidad enviada: ${resultado.pago.cantidad_enviada} ${resultado.pago.moneda_pago || ""}\n` : "") +
-                `Estado: PAGADO`
-            );
-        } catch (e) { console.error("⚠️ No se pudo notificar pago registrado:", e.message); }
-
-        res.json({ success: true, ...resultado });
-    } catch (e) { res.status(500).json({ success: false, error: e.message }); }
-});
-
-app.get("/admin/entregas/pago/:codigo", adminLimiter, verificarTokenEntregas, async (req, res) => {
-    try {
-        const pago = await entregasService.obtenerPago(req.params.codigo);
-        if (!pago) return res.status(404).json({ error: "Pago no encontrado" });
-        res.json(pago);
-    } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-app.get("/admin/entregas/:id/historial", adminLimiter, verificarTokenEntregas, async (req, res) => {
-    try { res.json(await entregasService.obtenerHistorialDe(req.params.id)); }
-    catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Tasa CUP/USD → USDT — la puede ver y editar cualquiera de los dos (admin o
-// compañera) desde el propio CRM de Entregas. Solo sirve para sugerir el
-// monto en USDT al registrar un pago; nunca se aplica sola.
-app.get("/admin/entregas/tasa-usdt", adminLimiter, verificarTokenEntregas, async (req, res) => {
-    try { res.json(await entregasService.obtenerTasasUsdt()); }
-    catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-app.post("/admin/entregas/tasa-usdt", adminLimiter, verificarTokenEntregas, async (req, res) => {
-    try {
-        const actualizado = await entregasService.actualizarTasasUsdt(req.body || {});
-        if (!actualizado) return res.status(500).json({ error: "No se pudo actualizar" });
-        res.json({ success: true, ...actualizado });
-    } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-app.get("/dashboard", (req, res) =>
-    res.sendFile(path.join(__dirname, "public", "dashboard.html"))
-);
-
-// Panel reducido, solo para el CRM de Entregas — pensado para compartir con
-// alguien que no debe ver tasas, VIP ni ofertas. Usa ENTREGAS_TOKEN (o el
-// ADMIN_TOKEN normal) contra los mismos endpoints /admin/entregas...
-app.get("/entregas", (req, res) =>
-    res.sendFile(path.join(__dirname, "public", "entregas.html"))
-);
-
-// Recargas
-app.get("/admin/recargas", adminLimiter, verificarToken, async (req, res) => {
-    try {
-        const r = await pool.query("SELECT * FROM recargas ORDER BY tipo");
-        res.json(r.rows);
-    } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-app.post("/admin/recargas/:tipo", adminLimiter, verificarToken, async (req, res) => {
-    try {
-        const { precio, descripcion, activa } = req.body;
-        await pool.query(`
-            UPDATE recargas SET
-                precio = $1,
-                descripcion = $2,
-                activa = $3,
-                updated_at = NOW()
-            WHERE tipo = $4
-        `, [precio, descripcion, activa, req.params.tipo]);
-        res.json({ success: true });
-    } catch (e) { res.status(500).json({ success: false, error: e.message }); }
-});
-
-// Oferta del día
-app.get("/admin/oferta", adminLimiter, verificarToken, async (req, res) => {
-    try {
-        const r = await pool.query("SELECT * FROM ofertas LIMIT 1");
-        res.json(r.rows[0] || {});
-    } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-app.post("/admin/oferta", adminLimiter, verificarToken, async (req, res) => {
-    try {
-        const { texto, activa, vence_at, texto_vip, activa_vip } = req.body;
-        await pool.query(`
-            UPDATE ofertas SET
-                texto = $1,
-                activa = $2,
-                vence_at = $3,
-                texto_vip = $4,
-                activa_vip = $5,
-                updated_at = NOW()
-            WHERE id = 1
-        `, [texto, activa, vence_at || null, texto_vip || null, !!activa_vip]);
-        res.json({ success: true });
-    } catch (e) { res.status(500).json({ success: false, error: e.message }); }
-});
-
-app.get("/api/tasas", async (req, res) => {
-    try {
-        const r = await pool.query("SELECT brl_0, brl_100, brl_500, brl_1000, usd1, mlc, efectivo, tarifa_entrega FROM rates LIMIT 1");
-        let oferta = null;
-        try {
-            const o = await pool.query("SELECT texto FROM ofertas WHERE activa = true AND (vence_at IS NULL OR vence_at > NOW()) LIMIT 1");
-            oferta = o.rows[0]?.texto || null;
-        } catch {}
-        res.json({ ...(r.rows[0] || {}), oferta });
-    } catch (e) { res.status(500).json({}); }
-});
-
-// Datos públicos de PIX (no son secretos: son los datos que el cliente necesita para pagarnos).
-// Reutiliza la configuración ya existente del bot (PIX_KEY / PIX_HOLDER_NAME / PIX_BANK / PIX_IMAGE_URL).
-app.get("/api/pix-info", (req, res) => {
-    res.json({
-        key:   getPIXKey(),
-        holder: getPIXHolder(),
-        bank:  getPIXBank(),
-        image: getPIXImage()
-    });
-});
-
-app.get("/", (req, res) => res.send("YordaBot Online ✅"));
-
-app.listen(PORT, () => console.log(`🚀 Servidor en puerto ${PORT}`));
-
-// ══════════════════════════════════════
-// CRM — RECORDATORIOS AUTOMÁTICOS
-// Motor en src/services/crm.js
-// 3 ondas: 30 min · 24 h · 7 días
-// ══════════════════════════════════════
-
-const { enviarMensaje } = require("./src/services/zapi");
-
-// Migrar columnas CRM al arrancar (safe: IF NOT EXISTS)
-crm.migrarColumnasCRM().catch(e => console.error("❌ CRM migración:", e.message));
-
-// Ejecutar cada 15 minutos
-setInterval(() => {
-    crm.ejecutarRecordatorios().catch(e =>
-        console.error("❌ CRM recordatorios:", e.message)
-    );
-}, 15 * 60 * 1000);
-
-// Recalcular niveles VIP (⭐/⭐⭐/⭐⭐⭐) de TODOS los clientes una vez al día.
-// Ventana móvil de 365 días — esto es lo que detecta cuando alguien BAJA de
-// nivel por inactividad (no solo cuando sube al completar una operación nueva).
-// Solo avisa por WhatsApp a quien SUBIÓ; las bajadas se aplican en silencio.
-async function recalcularNivelesVipYAvisar() {
-    try {
-        const cambios = await crm.recalcularNivelesVip();
-        for (const c of cambios) {
-            if (c.nivel_nuevo > c.nivel_anterior) {
-                const estrellas = "⭐".repeat(c.nivel_nuevo);
-                const mVip = `🌟 *¡Felicidades! Ahora eres cliente VIP ${estrellas} de Yorda Envíos!*\n\nDesde ahora tienes:\n💰 Tasa preferencial en tus próximas transferencias\n🚚 Descuento en tus pedidos de entrega en efectivo\n🎁 Promociones exclusivas para ti\n\n¡Gracias por confiar en nosotros! 💜🇨🇺`;
-                await enviarMensaje(c.phone, mVip);
+            const tbodyCli = document.getElementById("clientesTable");
+            if (slice.length === 0) {
+                tbodyCli.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#8b949e;padding:20px;">Sin clientes aún</td></tr>';
             } else {
-                console.log(`ℹ️ Cliente ${c.phone} bajó de nivel VIP: ${c.nivel_anterior} → ${c.nivel_nuevo}`);
+                tbodyCli.innerHTML = slice.map(c => {
+                    const nivel = Number(c.nivel_vip || 0);
+                    const estrellas = "⭐".repeat(nivel);
+                    return `
+                    <tr>
+                        <td>${c.nombre || "Desconocido"} ${estrellas}</td>
+                        <td style="color:#8b949e;">${c.phone ? c.phone.split("@")[0] : "-"}</td>
+                        <td style="color:var(--green);font-weight:bold;">R$ ${c.totalReal.toLocaleString("pt-BR")}</td>
+                        <td>${c.tipo_favorito || "-"}</td>
+                        <td>${nivel > 0 ? `<b style="color:gold">${estrellas} VIP</b>` : "Estándar"}</td>
+                    </tr>`;
+                }).join("");
             }
+
+            const pag = document.getElementById("paginacionClientes");
+            if (!pag) return;
+            if (totalPaginas <= 1) { pag.innerHTML = `<span class="page-info">${total} clientes</span>`; return; }
+
+            let html = `<span class="page-info">${total} clientes</span>`;
+            html += `<button class="page-btn" onclick="renderPagina(${pagina - 1})" ${pagina === 1 ? "disabled" : ""}>‹</button>`;
+            for (let i = 1; i <= totalPaginas; i++) {
+                if (i === 1 || i === totalPaginas || (i >= pagina - 1 && i <= pagina + 1)) {
+                    html += `<button class="page-btn ${i === pagina ? "active" : ""}" onclick="renderPagina(${i})">${i}</button>`;
+                } else if (i === pagina - 2 || i === pagina + 2) {
+                    html += `<span class="page-info" style="padding:0 4px">…</span>`;
+                }
+            }
+            html += `<button class="page-btn" onclick="renderPagina(${pagina + 1})" ${pagina === totalPaginas ? "disabled" : ""}>›</button>`;
+            pag.innerHTML = html;
         }
-    } catch (e) {
-        console.error("❌ CRM recalcular niveles VIP:", e.message);
-    }
-}
-setTimeout(recalcularNivelesVipYAvisar, 10 * 1000); // espera un poco a que terminen las migraciones al arrancar
-setInterval(recalcularNivelesVipYAvisar, 24 * 60 * 60 * 1000);
-
-// ══════════════════════════════════════
-// MENSAJE DIARIO DE TASAS (10:15 hora de Bahía = 13:15 UTC)
-// El bot lo envía al ADMIN para que lo reenvíe a los grupos.
-// ══════════════════════════════════════
-const LINK_CALCULADORA = "https://yorda-webhook-production.up.railway.app/calculadora.html";
-let ultimoEnvioTasas = ""; // evita reenvíos duplicados el mismo día
-
-async function armarMensajeTasas() {
-    const t = await leerTasas();
-    if (!t) return null;
-    const l = [];
-    l.push("🔥 *TASAS YORDA — HOY* 🇧🇷→🇨🇺");
-    l.push("");
-    l.push("💵 *Reales → CUP*");
-    if (t.brl_100)  l.push(`R$100+: *${Number(t.brl_100)} CUP*`);
-    if (t.brl_500)  l.push(`R$500+: *${Number(t.brl_500)} CUP*`);
-    if (t.brl_1000) l.push(`R$1000+: *${Number(t.brl_1000)} CUP*`);
-    l.push("");
-    if (Number(t.usd1) > 0)     l.push(`💳 USD tarjeta: *R$${Number(t.usd1)}*`);
-    if (Number(t.mlc) > 0)      l.push(`🪪 MLC: *R$${Number(t.mlc)}*`);
-    if (Number(t.efectivo) > 0) l.push(`💵 Efectivo: *${Number(t.efectivo)} CUP por real*`);
-    l.push("");
-    l.push("⚡ *Entrega el mismo día*");
-    l.push("📍 La Habana y Granma");
-    l.push("");
-    l.push("🧮 Calcula tu envío aquí:");
-    l.push(LINK_CALCULADORA);
-    return l.join("\n");
-}
-
-async function enviarTasasDiarias() {
-    const admin = getAdminPhone();
-    if (!admin) { console.warn("⚠️ ADMIN_PHONE no configurado — no se envían tasas diarias"); return; }
-    const msg = await armarMensajeTasas();
-    if (!msg) { console.warn("⚠️ No hay tasas para el mensaje diario"); return; }
-    await enviarSeguro(admin, msg);
-    console.log("✅ Mensaje diario de tasas enviado al admin");
-}
-
-// Revisa cada minuto; dispara una sola vez cuando son las 13:15 UTC (10:15 Bahía)
-setInterval(() => {
-    const ahora = new Date();
-    const hoyKey = ahora.toISOString().slice(0, 10); // AAAA-MM-DD (UTC)
-    if (ahora.getUTCHours() === 13 && ahora.getUTCMinutes() === 15 && ultimoEnvioTasas !== hoyKey) {
-        ultimoEnvioTasas = hoyKey;
-        enviarTasasDiarias().catch(e => console.error("❌ Tasas diarias:", e.message));
-    }
-}, 60 * 1000);
-
-// ══════════════════════════════════════
-// SALUDO MATUTINO (8:00 hora de Bahía = 11:00 UTC)
-// A quien escribió fuera de horario se le envía un saludo al abrir.
-// ══════════════════════════════════════
-const { obtenerSaludosPendientes, limpiarSaludoPendiente } = require("./src/services/customer-memory");
-let ultimoSaludo = "";
-
-async function enviarSaludosMatutinos() {
-    const pendientes = await obtenerSaludosPendientes();
-    if (!pendientes.length) return;
-    for (const c of pendientes) {
-        const nombre = c.nombre ? ` ${String(c.nombre).split(" ")[0]}` : "";
-        const msg = `¡Buenos días${nombre}! 👋 Recibimos tu mensaje pero estábamos fuera de horario. Ya estamos activos y listos para atenderte 😊 ¿En qué te podemos ayudar?`;
-        await enviarSeguro(c.phone, msg);
-        await limpiarSaludoPendiente(c.phone);
-    }
-    console.log(`✅ Saludos matutinos enviados: ${pendientes.length}`);
-}
-
-// Revisa cada minuto; dispara una sola vez a las 11:00 UTC (8:00 Bahía)
-setInterval(() => {
-    const ahora = new Date();
-    const hoyKey = ahora.toISOString().slice(0, 10);
-    if (ahora.getUTCHours() === 11 && ahora.getUTCMinutes() === 0 && ultimoSaludo !== hoyKey) {
-        ultimoSaludo = hoyKey;
-        enviarSaludosMatutinos().catch(e => console.error("❌ Saludos matutinos:", e.message));
-    }
-}, 60 * 1000);
-
-// ══════════════════════════════════════
-// CRM DE ENTREGAS — AVISO DE ENTREGAS ATRASADAS
-// Si una entrega lleva más de 48h (2 días) en PENDIENTE, te avisa por
-// WhatsApp. NUNCA cambia el estado — solo notifica (sección 10 del CRM).
-// Si sigue pendiente al día siguiente, vuelve a avisar (no se repite antes
-// de 24h para no saturar).
-// ══════════════════════════════════════
-const HORAS_UMBRAL_ATRASO = 48;
-
-async function avisarEntregasAtrasadas() {
-    try {
-        const atrasadas = await entregasService.obtenerEntregasAtrasadasSinAvisar(HORAS_UMBRAL_ATRASO);
-        if (!atrasadas.length) return;
-
-        const lineas = atrasadas.map(e => {
-            const dias = Math.floor((Date.now() - new Date(e.created_at).getTime()) / (1000 * 60 * 60 * 24));
-            return `• ${e.codigo} — ${Number(e.cantidad).toLocaleString("es-ES")} ${e.moneda} — ${e.cliente_nombre} — pendiente hace ${dias} día(s)`;
-        });
-
-        await enviarSeguro(getAdminPhone(),
-            `⚠️ *Entregas atrasadas* (más de ${HORAS_UMBRAL_ATRASO}h pendientes):\n\n${lineas.join("\n")}`
-        );
-        await entregasService.marcarAvisoAtrasoEnviado(atrasadas.map(e => e.id));
-        console.log(`⚠️ Aviso de ${atrasadas.length} entrega(s) atrasada(s) enviado`);
-    } catch (e) {
-        console.error("❌ Error avisando entregas atrasadas:", e.message);
-    }
-}
-setTimeout(avisarEntregasAtrasadas, 30 * 1000); // espera a que terminen las migraciones al arrancar
-setInterval(avisarEntregasAtrasadas, 6 * 60 * 60 * 1000); // revisa cada 6 horas
-
-// ══════════════════════════════════════
-// NUEVO ENDPOINT CRM STATS
-// ══════════════════════════════════════
-
-// (ya registrado arriba junto a /admin/stats)
+    </script>
+</body>
+</html>
