@@ -15,6 +15,7 @@ function getPIXHolder()  { return env.PIX_HOLDER_NAME || ""; }
 function getPIXBank()    { return env.PIX_BANK        || ""; }
 function getPIXImage()   { return env.PIX_IMAGE_URL   || ""; }
 function getAdminPhone() { return env.ADMIN_PHONE     || ""; }
+function getEntregaContactPhone() { return env.ENTREGA_CONTACT_PHONE || ""; }
 function getPIXAliases() {
     return (env.PIX_HOLDER_ALIASES || "").split("|").map(s => s.trim()).filter(Boolean);
 }
@@ -178,7 +179,7 @@ async function limpiarSesion(phone) { await limpiarSesionDB(phone); }
 
 module.exports = {
     DOS_HORAS,
-    getPIXKey, getPIXHolder, getPIXBank, getPIXImage, getAdminPhone, getPIXAliases,
+    getPIXKey, getPIXHolder, getPIXBank, getPIXImage, getAdminPhone, getEntregaContactPhone, getPIXAliases,
     gatilhos, palabrasNegocio, triggersCubaBrasil, confirmaOperacion,
     CIERRES_COT, CIERRES_COT_PT,
     CONFIRMA_TARJETA_SIN_MONTO, CONFIRMA_TARJETA_SIN_MONTO_PT,
