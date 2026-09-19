@@ -246,6 +246,20 @@ const verificarToken = (req, res, next) => {
     next();
 };
 
+// Acceso separado y más limitado: solo para las rutas del CRM de Entregas
+// (/admin/entregas...). Pensado para dar acceso a otra persona (ej. quien
+// coordina las entregas en Cuba) sin exponerle tasas, VIP ni ofertas.
+// El token de admin normal también sigue funcionando aquí.
+const verificarTokenEntregas = (req, res, next) => {
+    const authHeader = req.headers.authorization || "";
+    const token = authHeader.replace(/^Bearer\s+/i, "").trim();
+    const secretAdmin    = process.env.ADMIN_TOKEN?.trim();
+    const secretEntregas = process.env.ENTREGAS_TOKEN?.trim();
+    const valido = token && (token === secretAdmin || (secretEntregas && token === secretEntregas));
+    if (!valido) return res.status(401).json({ error: "No autorizado" });
+    next();
+};
+
 // ==========================================
 // WEBHOOK
 // ==========================================
@@ -529,7 +543,7 @@ app.post("/admin/completar-operacion/:id", adminLimiter, verificarToken, async (
 // Solo entregas de EFECTIVO (CUP/USD) viven aquí.
 // ─────────────────────────────────────────
 
-app.get("/admin/entregas", adminLimiter, verificarToken, async (req, res) => {
+app.get("/admin/entregas", adminLimiter, verificarTokenEntregas, async (req, res) => {
     try {
         const filtros = {
             q:             req.query.q,
@@ -547,12 +561,12 @@ app.get("/admin/entregas", adminLimiter, verificarToken, async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get("/admin/entregas/stats", adminLimiter, verificarToken, async (req, res) => {
+app.get("/admin/entregas/stats", adminLimiter, verificarTokenEntregas, async (req, res) => {
     try { res.json(await entregasService.obtenerEstadisticasEntregas()); }
     catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post("/admin/entregas/:id/entregado", adminLimiter, verificarToken, async (req, res) => {
+app.post("/admin/entregas/:id/entregado", adminLimiter, verificarTokenEntregas, async (req, res) => {
     try {
         const entrega = await entregasService.marcarEntregado(req.params.id, req.body.usuario || "Panel admin");
         if (!entrega) return res.status(404).json({ success: false, error: "Entrega no encontrada o ya no está PENDIENTE" });
@@ -560,7 +574,7 @@ app.post("/admin/entregas/:id/entregado", adminLimiter, verificarToken, async (r
     } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
-app.post("/admin/entregas/:id/cancelar", adminLimiter, verificarToken, async (req, res) => {
+app.post("/admin/entregas/:id/cancelar", adminLimiter, verificarTokenEntregas, async (req, res) => {
     try {
         const entrega = await entregasService.marcarCancelado(req.params.id, req.body.motivo || "");
         if (!entrega) return res.status(404).json({ success: false, error: "Entrega no encontrada o ya no está PENDIENTE" });
@@ -571,7 +585,7 @@ app.post("/admin/entregas/:id/cancelar", adminLimiter, verificarToken, async (re
 // Pago al contacto en Cuba — individual o agrupado (varias entregas a la vez).
 // Puramente histórico: NO calcula ni convierte monedas, solo guarda lo que
 // se le pasa. Solo afecta entregas que realmente están PENDIENTE_DE_PAGO.
-app.post("/admin/entregas/pago", adminLimiter, verificarToken, async (req, res) => {
+app.post("/admin/entregas/pago", adminLimiter, verificarTokenEntregas, async (req, res) => {
     try {
         const { entregaIds, cantidadEnviada, monedaPago, fecha, txid, observacion } = req.body;
         if (!Array.isArray(entregaIds) || entregaIds.length === 0) {
@@ -583,7 +597,7 @@ app.post("/admin/entregas/pago", adminLimiter, verificarToken, async (req, res) 
     } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
-app.get("/admin/entregas/pago/:codigo", adminLimiter, verificarToken, async (req, res) => {
+app.get("/admin/entregas/pago/:codigo", adminLimiter, verificarTokenEntregas, async (req, res) => {
     try {
         const pago = await entregasService.obtenerPago(req.params.codigo);
         if (!pago) return res.status(404).json({ error: "Pago no encontrado" });
@@ -591,13 +605,20 @@ app.get("/admin/entregas/pago/:codigo", adminLimiter, verificarToken, async (req
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get("/admin/entregas/:id/historial", adminLimiter, verificarToken, async (req, res) => {
+app.get("/admin/entregas/:id/historial", adminLimiter, verificarTokenEntregas, async (req, res) => {
     try { res.json(await entregasService.obtenerHistorialDe(req.params.id)); }
     catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.get("/dashboard", (req, res) =>
     res.sendFile(path.join(__dirname, "public", "dashboard.html"))
+);
+
+// Panel reducido, solo para el CRM de Entregas — pensado para compartir con
+// alguien que no debe ver tasas, VIP ni ofertas. Usa ENTREGAS_TOKEN (o el
+// ADMIN_TOKEN normal) contra los mismos endpoints /admin/entregas...
+app.get("/entregas", (req, res) =>
+    res.sendFile(path.join(__dirname, "public", "entregas.html"))
 );
 
 // Recargas
