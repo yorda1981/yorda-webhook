@@ -15,6 +15,8 @@ const entregasService = require("./src/services/entregas");
 const { leerTasas } = require("./src/flows/cotizacion-flow");
 const { esPedidoWeb, procesarPedidoWeb, crearEntregaManual } = require("./src/flows/pedido-web-flow");
 const { enviarSeguro, getAdminPhone, getPIXKey, getPIXHolder, getPIXBank, getPIXImage } = require("./src/flows/shared");
+const { yaFueProcesado, activarPausaHumana, enPausaHumana } = require("./src/services/webhook-guard");
+const { verificarSecretoWebhook, validarPayloadWebhook } = require("./src/middleware/webhook-security");
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -50,9 +52,6 @@ const authAttemptLimiter = rateLimit({
 const buffers            = new Map();
 const pendingMessages    = new Map();
 const mapaLidATelefono   = new Map();
-const mensajesProcesados = new Set();
-
-const MINUTOS_PAUSA = 10;
 
 // Migración segura: columna de tasa para envío de efectivo
 (async () => {
@@ -186,68 +185,9 @@ const MINUTOS_PAUSA = 10;
     } catch (e) { console.error("⚠️ Migración CRM de Entregas:", e.message); }
 })();
 
-// ─────────────────────────────────────────
-// PAUSA HUMANA — persistida en PostgreSQL
-// Sobrevive reinicios de Railway.
-// Se activa cuando el operador escribe desde
-// el WhatsApp directamente (fromMe + !fromApi).
-//
-// Optimización (28/07/2026): antes esto hacía 2-3
-// queries por CADA mensaje manual (UPDATE + SELECT +
-// INSERT). Cuando el operador manda varios mensajes
-// seguidos al mismo cliente, o hace rondas de disparos
-// a varios clientes, esto multiplicaba las queries y
-// disparó el consumo de cómputo en Neon.
-// Ahora: 1) una sola query UPSERT, y 2) una caché en
-// memoria que evita volver a tocar la DB si ya se
-// extendió la pausa de ese número hace menos de 60s.
-// ─────────────────────────────────────────
-
-const ULTIMA_PAUSA_CACHE = new Map(); // phone -> timestamp (ms) de la última escritura real en DB
-const DEBOUNCE_PAUSA_MS = 60 * 1000;  // no reescribir la misma pausa antes de 60s
-
-async function activarPausaHumana(phone) {
-    if (!phone) return;
-    if (!String(phone).startsWith("55")) return;
-
-    const ahora = Date.now();
-    const ultima = ULTIMA_PAUSA_CACHE.get(phone);
-    if (ultima && (ahora - ultima) < DEBOUNCE_PAUSA_MS) {
-        // Ya se extendió la pausa hace poco (ráfaga de mensajes del operador
-        // al mismo cliente) — el cliente sigue silenciado igual, no hace
-        // falta volver a escribir en PostgreSQL.
-        return;
-    }
-
-    try {
-        await pool.query(`
-            INSERT INTO customers (phone, pausa_hasta, created_at, updated_at)
-            VALUES ($1, NOW() + ($2 * INTERVAL '1 minute'), NOW(), NOW())
-            ON CONFLICT (phone) DO UPDATE
-            SET pausa_hasta = NOW() + ($2 * INTERVAL '1 minute'),
-                updated_at  = NOW()
-        `, [phone, MINUTOS_PAUSA]);
-        ULTIMA_PAUSA_CACHE.set(phone, ahora);
-        console.log(`⏸️ Pausa humana (PG): ${MINUTOS_PAUSA} min → ${phone}`);
-    } catch (e) {
-        console.error("❌ activarPausaHumana:", e.message);
-    }
-}
-
-async function enPausaHumana(phone) {
-    if (!phone) return false;
-    try {
-        const r = await pool.query(
-            "SELECT pausa_hasta FROM customers WHERE phone = $1",
-            [phone]
-        );
-        if (!r.rows.length || !r.rows[0].pausa_hasta) return false;
-        return new Date(r.rows[0].pausa_hasta) > new Date();
-    } catch (e) {
-        console.error("❌ enPausaHumana:", e.message);
-        return false;   // ante la duda, dejar pasar al bot
-    }
-}
+// Pausa humana (fromMe manual) y deduplicación de messageId ahora viven en
+// src/services/webhook-guard.js (mismo comportamiento, movido para poder
+// testearlo — ver test/webhook-guard.test.js).
 
 app.use(express.json({ limit: "10mb" }));
 app.use(express.static(path.join(__dirname, "public")));
@@ -279,7 +219,7 @@ const verificarTokenEntregas = (req, res, next) => {
 // WEBHOOK
 // ==========================================
 
-app.post("/webhook", webhookLimiter, async (req, res) => {
+app.post("/webhook", verificarSecretoWebhook, webhookLimiter, validarPayloadWebhook, async (req, res) => {
     res.status(200).send("OK");
     try {
         const body = req.body;
@@ -326,11 +266,7 @@ app.post("/webhook", webhookLimiter, async (req, res) => {
         if (!tiposValidos.includes(body.type)) return;
 
         const messageId = body.messageId || body.id || body.zeId;
-        if (messageId && mensajesProcesados.has(messageId)) return;
-        if (messageId) {
-            mensajesProcesados.add(messageId);
-            setTimeout(() => mensajesProcesados.delete(messageId), 300000);
-        }
+        if (yaFueProcesado(messageId)) return;
 
         const pushName = body.senderName || "Cliente";
 
