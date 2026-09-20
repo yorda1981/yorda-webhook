@@ -210,6 +210,50 @@
                     <small id="entTasaUsdtInfo" style="color:#8b949e;"></small>
                 </div>
 
+                <div style="margin-bottom:14px;">
+                    <button class="btn-limpiar" style="background:#8b5cf6;" onclick="toggleEntregaManual()">➕ Nueva entrega manual</button>
+                    <div id="panelEntregaManual" style="display:none;background:#0b0e1a;border-radius:12px;padding:16px;border:1px solid #2d355a;margin-top:10px;">
+                        <div style="font-size:12px;color:#8b949e;margin-bottom:10px;">Para cuando el cliente no sabe llenar la calculadora — esto crea el pedido directo, sin pasar por WhatsApp.</div>
+                        <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:10px;">
+                            <label style="font-size:12px;color:#8b949e;">WhatsApp del cliente *
+                                <input type="tel" id="manWhatsapp" style="display:block;width:100%;background:#161b2e;border:1px solid #2d355a;padding:8px 10px;border-radius:8px;color:white;margin-top:4px;">
+                            </label>
+                            <label style="font-size:12px;color:#8b949e;">Nombre del cliente *
+                                <input type="text" id="manNombre" style="display:block;width:100%;background:#161b2e;border:1px solid #2d355a;padding:8px 10px;border-radius:8px;color:white;margin-top:4px;">
+                            </label>
+                            <label style="font-size:12px;color:#8b949e;">Total pagado (R$) *
+                                <input type="number" id="manMontoBRL" step="any" style="display:block;width:100%;background:#161b2e;border:1px solid #2d355a;padding:8px 10px;border-radius:8px;color:white;margin-top:4px;">
+                            </label>
+                            <label style="font-size:12px;color:#8b949e;">Cantidad a entregar *
+                                <input type="number" id="manCantidad" step="any" style="display:block;width:100%;background:#161b2e;border:1px solid #2d355a;padding:8px 10px;border-radius:8px;color:white;margin-top:4px;">
+                            </label>
+                            <label style="font-size:12px;color:#8b949e;">Moneda *
+                                <select id="manMoneda" style="display:block;width:100%;background:#161b2e;border:1px solid #2d355a;padding:8px 10px;border-radius:8px;color:white;margin-top:4px;">
+                                    <option value="CUP">CUP</option>
+                                    <option value="USD">USD</option>
+                                </select>
+                            </label>
+                            <label style="font-size:12px;color:#8b949e;">Provincia
+                                <input type="text" id="manProvincia" style="display:block;width:100%;background:#161b2e;border:1px solid #2d355a;padding:8px 10px;border-radius:8px;color:white;margin-top:4px;">
+                            </label>
+                            <label style="font-size:12px;color:#8b949e;">Municipio
+                                <input type="text" id="manMunicipio" style="display:block;width:100%;background:#161b2e;border:1px solid #2d355a;padding:8px 10px;border-radius:8px;color:white;margin-top:4px;">
+                            </label>
+                            <label style="font-size:12px;color:#8b949e;">Teléfono de entrega en Cuba
+                                <input type="tel" id="manTelefonoEntrega" style="display:block;width:100%;background:#161b2e;border:1px solid #2d355a;padding:8px 10px;border-radius:8px;color:white;margin-top:4px;">
+                            </label>
+                            <label style="font-size:12px;color:#8b949e;grid-column:1/-1;">Dirección
+                                <input type="text" id="manDireccion" style="display:block;width:100%;background:#161b2e;border:1px solid #2d355a;padding:8px 10px;border-radius:8px;color:white;margin-top:4px;">
+                            </label>
+                            <label style="font-size:12px;color:#8b949e;grid-column:1/-1;">Referencia / Observaciones
+                                <input type="text" id="manReferencia" style="display:block;width:100%;background:#161b2e;border:1px solid #2d355a;padding:8px 10px;border-radius:8px;color:white;margin-top:4px;">
+                            </label>
+                        </div>
+                        <button class="btn-limpiar" style="background:#14b8a6;margin-top:12px;" onclick="crearEntregaManualForm()">✅ Crear entrega</button>
+                        <small id="manEntregaInfo" style="color:#8b949e;margin-left:8px;"></small>
+                    </div>
+                </div>
+
                 <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px;" id="entFiltrosRapidos">
                     <button class="page-btn active" data-filtro="TODAS" onclick="filtrarEntregasRapido('TODAS')">TODAS</button>
                     <button class="page-btn" data-filtro="PENDIENTES" onclick="filtrarEntregasRapido('PENDIENTES')">PENDIENTES</button>
@@ -632,6 +676,49 @@
                 document.getElementById("entTasaUsdtCup").value = t.tasa_usdt_cup || "";
                 document.getElementById("entTasaUsdtUsd").value = t.tasa_usdt_usd || "";
             } catch (e) { console.error("❌ Error cargando tasa USDT:", e); }
+        }
+
+        function toggleEntregaManual() {
+            const panel = document.getElementById("panelEntregaManual");
+            panel.style.display = panel.style.display === "none" ? "block" : "none";
+        }
+
+        async function crearEntregaManualForm() {
+            const info = document.getElementById("manEntregaInfo");
+            const datos = {
+                telefonoCliente:  document.getElementById("manWhatsapp").value.trim(),
+                clienteNombre:    document.getElementById("manNombre").value.trim(),
+                montoBRL:         document.getElementById("manMontoBRL").value,
+                cantidad:         document.getElementById("manCantidad").value,
+                moneda:           document.getElementById("manMoneda").value,
+                provincia:        document.getElementById("manProvincia").value.trim(),
+                municipio:        document.getElementById("manMunicipio").value.trim(),
+                direccion:        document.getElementById("manDireccion").value.trim(),
+                referencia:       document.getElementById("manReferencia").value.trim(),
+                telefonoEntrega:  document.getElementById("manTelefonoEntrega").value.trim()
+            };
+            if (!datos.telefonoCliente || !datos.clienteNombre || !datos.montoBRL || !datos.cantidad) {
+                info.style.color = "var(--red)";
+                info.innerText = "Faltan campos obligatorios (*)";
+                return;
+            }
+            try {
+                const res = await fetch("/admin/entregas/manual", { method: "POST", headers: authH(), body: JSON.stringify(datos) });
+                const data = await res.json();
+                if (data.success) {
+                    info.style.color = "var(--green)";
+                    info.innerText = `✅ Entrega ${data.entrega?.codigo || ""} creada`;
+                    ["manWhatsapp","manNombre","manMontoBRL","manCantidad","manProvincia","manMunicipio","manDireccion","manReferencia","manTelefonoEntrega"]
+                        .forEach(id => document.getElementById(id).value = "");
+                    cargarEntregas();
+                } else {
+                    info.style.color = "var(--red)";
+                    info.innerText = "❌ " + (data.error || "Error desconocido");
+                }
+            } catch (e) {
+                info.style.color = "var(--red)";
+                info.innerText = "❌ Error de conexión";
+            }
         }
 
         async function guardarTasaUsdt() {
