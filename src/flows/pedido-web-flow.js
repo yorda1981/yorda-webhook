@@ -393,6 +393,68 @@ async function manejarTransferencia(phone, texto, pushName, esEs) {
     return true;
 }
 
+// ── CREACIÓN MANUAL (desde el dashboard, sin pasar por WhatsApp) ──────────
+// Cuando el cliente no sabe llenar la calculadora, Yordanys ingresa los
+// datos directamente en el CRM. Esto NO depende de ningún mensaje de
+// WhatsApp — evita el problema de que un pedido "mandado a uno mismo" no
+// se pueda identificar de forma confiable (ver fromMe en index.js).
+async function crearEntregaManual(datos) {
+    const telefonoCliente = String(datos.telefonoCliente || "").replace(/\D/g, "");
+    const cantidad = Number(datos.cantidad || 0);
+    if (!telefonoCliente || !String(datos.clienteNombre || "").trim() || !cantidad || !datos.moneda) {
+        return { error: "Faltan datos obligatorios (WhatsApp del cliente, nombre, cantidad y moneda)." };
+    }
+    const moneda = String(datos.moneda).toUpperCase();
+
+    const operacion = await agregarOperacion({
+        phone:              telefonoCliente,
+        nombre:             datos.clienteNombre,
+        monto:              Number(datos.montoBRL || 0),
+        cup:                moneda === "CUP" ? cantidad : 0,
+        titular:            datos.clienteNombre,
+        tipo:               moneda === "USD" ? "usd_efectivo" : "cup_efectivo",
+        direccion:          datos.direccion || "",
+        provincia:          datos.provincia || "",
+        municipio:          datos.municipio || "",
+        referenciaEntrega:  datos.referencia || "",
+        telefonoEntrega:    datos.telefonoEntrega || "",
+        entregaDisponible:  true
+    });
+    if (!operacion) return { error: "No se pudo registrar la operación." };
+
+    let entrega = null;
+    try {
+        entrega = await agregarEntrega({
+            operationId:      operacion.id,
+            phone:            telefonoCliente,
+            clienteNombre:    datos.clienteNombre,
+            telefonoEntrega:  datos.telefonoEntrega || telefonoCliente,
+            cantidad,
+            moneda,
+            provincia:        datos.provincia || "",
+            municipio:        datos.municipio || "",
+            direccion:        datos.direccion || "",
+            referencia:       datos.referencia || "",
+            observaciones:    datos.observaciones || null
+        });
+        if (entrega) await notificarNuevaEntrega(entrega);
+    } catch (e) {
+        console.error("❌ Error creando entrega manual en el CRM:", e.message);
+    }
+
+    await guardarCliente({ phone: telefonoCliente, estado: "pedido_web_pendiente" });
+
+    try {
+        await enviarSeguro(telefonoCliente,
+            `📩 Recibimos tu pedido #${operacion.id}. Lo estamos verificando, te avisamos en cuanto esté confirmado. 🇨🇺`
+        );
+    } catch (e) {
+        console.error("❌ Error mandando confirmación al cliente (entrega manual):", e.message);
+    }
+
+    return { success: true, operacion, entrega };
+}
+
 // ── ENTRADA ÚNICA ────────────────────────────────────────
 
 async function procesarPedidoWeb(phone, texto, pushName) {
@@ -407,7 +469,7 @@ async function procesarPedidoWeb(phone, texto, pushName) {
 }
 
 module.exports = {
-    esPedidoWeb, procesarPedidoWeb,
+    esPedidoWeb, procesarPedidoWeb, crearEntregaManual,
     // exportados también para pruebas automáticas (test/pedido-web-flow.test.js) —
     // son funciones puras, no tocan WhatsApp ni la base de datos
     esEntrega, parsearPedidoEntrega, parsearPedidoTransferencia, limpiarNumero
