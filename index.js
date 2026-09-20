@@ -13,7 +13,7 @@ const { obtenerTodas, confirmarOperacion, completarOperacion, obtenerEstadistica
 const crm = require("./src/services/crm");
 const entregasService = require("./src/services/entregas");
 const { leerTasas } = require("./src/flows/cotizacion-flow");
-const { esPedidoWeb, procesarPedidoWeb } = require("./src/flows/pedido-web-flow");
+const { esPedidoWeb, procesarPedidoWeb, crearEntregaManual } = require("./src/flows/pedido-web-flow");
 const { enviarSeguro, getAdminPhone, getPIXKey, getPIXHolder, getPIXBank, getPIXImage } = require("./src/flows/shared");
 
 const app = express();
@@ -673,6 +673,19 @@ app.get("/admin/entregas/:id/historial", adminLimiter, verificarTokenEntregas, a
 app.get("/admin/entregas/tasa-usdt", adminLimiter, verificarTokenEntregas, async (req, res) => {
     try { res.json(await entregasService.obtenerTasasUsdt()); }
     catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Creación manual de una entrega — para cuando el cliente no sabe llenar la
+// calculadora y Yordanys ingresa los datos directamente. Solo ADMIN_TOKEN
+// (incluye el monto en reales, que tu compañera no debe ver). No depende de
+// ningún mensaje de WhatsApp, así que evita el problema de "mensaje a uno
+// mismo" que no se podía identificar de forma confiable.
+app.post("/admin/entregas/manual", adminLimiter, verificarToken, async (req, res) => {
+    try {
+        const resultado = await crearEntregaManual(req.body || {});
+        if (resultado.error) return res.status(400).json({ error: resultado.error });
+        res.json(resultado);
+    } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post("/admin/entregas/tasa-usdt", adminLimiter, verificarTokenEntregas, async (req, res) => {
