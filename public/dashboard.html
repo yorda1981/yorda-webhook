@@ -406,7 +406,7 @@
         </div>
 
         <div class="config-section" style="border-left: 5px solid #ef4444;">
-            <h3 style="color:#ef4444;">🚫 Números Bloqueados</h3>
+            <h3 style="color:#ef4444;">🚫 Números Bloqueados <span class="badge-count" id="countBloqueados">0</span></h3>
             <p style="color:#8b949e; font-size:13px; margin-bottom:14px;">
                 Un número bloqueado no recibe ninguna respuesta ni automatización de YordaBot
                 (ni recordatorios, ni saludos, ni avisos VIP). No borra ni afecta su historial
@@ -431,6 +431,9 @@
                         <tr><td colspan="4" style="text-align:center; padding:20px; color:#8b949e;">—</td></tr>
                     </tbody>
                 </table>
+            </div>
+            <div style="text-align:center; margin-top:12px;">
+                <button class="page-btn" id="btnVerTodosBloqueados" onclick="toggleVerTodosBloqueados()" style="display:none;"></button>
             </div>
         </div>
 
@@ -680,17 +683,34 @@
             return ` <span title="Destinatario del comprobante NO coincide con el esperado. ${nombre}" style="color:#ef4444;cursor:help;">⚠️</span>`;
         }
 
+        const MAX_BLOQUEADOS_COMPACTO = 5;
+
         async function cargarBloqueados() {
             if (!token) return;
             try {
                 const r = await fetch("/admin/bloqueados", { headers: authH() });
                 const lista = await r.json();
-                const tbody = document.getElementById("tablaBloqueados");
-                if (!Array.isArray(lista) || lista.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:20px; color:#8b949e;">Sin números bloqueados</td></tr>';
-                    return;
-                }
-                tbody.innerHTML = lista.map(b => `
+                window._ultimosBloqueados = Array.isArray(lista) ? lista : [];
+                renderBloqueados(window._ultimosBloqueados);
+            } catch(e) { console.error("Error cargando bloqueados:", e); }
+        }
+
+        // Resumen compacto: los 5 más recientes por defecto (el backend ya
+        // ordena por created_at DESC -- ver GET /admin/bloqueados), con
+        // "Ver todos (N)" para desplegar el resto. Mantiene el estado
+        // expandido/colapsado entre recargas (bloquear/desbloquear) para que
+        // la vista no salte sola bajo el operador.
+        function renderBloqueados(lista) {
+            document.getElementById("countBloqueados").innerText = lista.length;
+
+            const verTodos = !!window._verTodosBloqueados;
+            const aMostrar = verTodos ? lista : lista.slice(0, MAX_BLOQUEADOS_COMPACTO);
+
+            const tbody = document.getElementById("tablaBloqueados");
+            if (lista.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:20px; color:#8b949e;">Sin números bloqueados</td></tr>';
+            } else {
+                tbody.innerHTML = aMostrar.map(b => `
                     <tr>
                         <td>${escapeHtml(b.phone)}</td>
                         <td>${escapeHtml(b.motivo || "—")}</td>
@@ -698,7 +718,20 @@
                         <td><button class="btn-save" style="padding:6px 12px;font-size:12px;" onclick="desbloquearNumero('${escapeHtml(b.phone)}')">Desbloquear</button></td>
                     </tr>
                 `).join("");
-            } catch(e) { console.error("Error cargando bloqueados:", e); }
+            }
+
+            const btn = document.getElementById("btnVerTodosBloqueados");
+            if (lista.length > MAX_BLOQUEADOS_COMPACTO) {
+                btn.style.display = "inline-block";
+                btn.innerText = verTodos ? "▲ Mostrar menos" : `Ver todos (${lista.length})`;
+            } else {
+                btn.style.display = "none";
+            }
+        }
+
+        function toggleVerTodosBloqueados() {
+            window._verTodosBloqueados = !window._verTodosBloqueados;
+            renderBloqueados(window._ultimosBloqueados || []);
         }
 
         async function bloquearNumero() {
