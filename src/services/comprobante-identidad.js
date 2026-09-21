@@ -13,9 +13,14 @@
 //   A) EndToEndId (E2E) del PIX -- identificador fuerte, único en todo el
 //      sistema PIX brasileño. Si se leyó con confianza, es la clave.
 //   B) ID de transacción bancario -- identificador secundario, NO
-//      garantizado único entre bancos distintos (se busca, pero no lleva
-//      constraint UNIQUE).
-//   C) Si ninguno existe: se sigue usando el fallback existente en
+//      garantizado único entre bancos distintos. Por eso NUNCA se usa
+//      solo: se combina con el banco normalizado ("BANCO::ID") antes de
+//      compararlo -- dos bancos distintos con el mismo ID de transacción
+//      generan identidades DIFERENTES (ver auditoría de 7728e66, hallazgo
+//      I1). Si el banco no se pudo leer, el ID por sí solo NO se
+//      considera una identidad fuerte -- cae al fallback (C).
+//   C) Si ninguno existe (o el ID de transacción no vino acompañado de un
+//      banco legible): se sigue usando el fallback existente en
 //      pix-flow.js (monto + ventana de tiempo), SIN CAMBIOS -- ver el
 //      hallazgo documentado en la fase anterior. Monto+teléfono NUNCA se
 //      vuelven una clave de unicidad permanente por sí solos: dos PIX
@@ -28,15 +33,20 @@ const pool = require("../../db");
 // NORMALIZACIÓN
 // ─────────────────────────────────────────
 
-// Formato real de un E2E PIX: "E" + 8 dígitos (ISPB) + 10 dígitos
-// (fecha/hora) + 11 caracteres alfanuméricos = 32 caracteres después de la
-// "E" (33 en total). Se acepta un rango algo más laxo (28-34) para tolerar
-// un carácter de más/menos que a veces mete el OCR, pero NUNCA se inventa
-// ni se completa un E2E parcial -- si no cumple ni ese mínimo, se descarta.
+// Formato real de un EndToEndId PIX (Banco Central do Brasil / SPI): "E" +
+// ISPB (8 dígitos) + fecha AAAAMMDD (8) + hora HHmm (4) + sufijo
+// alfanumérico (11) = 31 caracteres DESPUÉS de la "E", 32 en total.
+// (Corregido tras la auditoría de 7728e66, hallazgo I6 -- el comentario
+// anterior decía 32/33 por error de conteo; verificado contra la
+// documentación oficial del BCB.) Se acepta ±3 caracteres alrededor del
+// valor real (31 después de la E, es decir 28-34) para tolerar un
+// carácter de más/menos que a veces mete el OCR, sin ser tan rígido que
+// rechace un E2E real por un carácter mal leído -- pero NUNCA se inventa
+// ni se completa un E2E parcial: si no cumple ni ese mínimo, se descarta.
 function normalizarE2E(raw) {
     if (!raw) return null;
     const limpio = String(raw).toUpperCase().replace(/[^A-Z0-9]/g, "");
-    if (!/^E[A-Z0-9]{27,33}$/.test(limpio)) return null;
+    if (!/^E[A-Z0-9]{28,34}$/.test(limpio)) return null;
     return limpio;
 }
 
@@ -52,6 +62,18 @@ function normalizarTransaccionId(raw) {
     return limpio;
 }
 
+// El nombre del banco SÍ se normaliza de forma más agresiva (mayúsculas,
+// sin acentos, recortado) porque aquí solo se usa para DISTINGUIR bancos
+// entre sí como parte de la identidad compuesta con el ID de transacción
+// -- no hace falta preservar el texto exacto (eso ya vive aparte en
+// comprobante_datos.bancoOrigen, sin normalizar, para mostrarlo tal cual).
+function normalizarBanco(raw) {
+    if (!raw) return null;
+    const limpio = String(raw).trim().toUpperCase()
+        .normalize("NFD").replace(/[̀-ͯ]/g, "");
+    return limpio.length >= 2 ? limpio : null;
+}
+
 // Tri-estado a partir del booleano que ya calcula el prompt de OCR
 // (destino_correcto, comparado contra getPIXAliases()/getPIXHolder() --
 // ver src/flows/shared.js y src/config/env.js, que es de donde sale de
@@ -63,21 +85,39 @@ function calcularDestinatarioMatch(datos) {
     return "desconocido"; // no se pudo determinar -- nunca se asume nada
 }
 
-// Identidad efectiva de ESTE comprobante: prioriza E2E, luego ID de
-// transacción, y si ninguno es legible, señala "fallback" (el caller debe
-// seguir usando la protección existente de monto+ventana, sin cambios).
-// Nota: `e2e`/`transaccionId` en el resultado llevan AMBOS valores
-// normalizados cuando están presentes (para persistirlos completos, ver
-// sección 2 de la fase) -- `tipo`/`columna`/`valor` son solo la prioridad
-// de DEDUPLICACIÓN (E2E gana si existe, aunque también haya un ID de
-// transacción legible).
+// Separador interno para la identidad compuesta banco+transacción. No es
+// un carácter que normalizarBanco()/normalizarTransaccionId() puedan
+// producir por sí solos (ambos son alfanuméricos tras normalizar), así
+// que no hay riesgo real de que dos pares (banco,id) distintos colisionen
+// en el mismo string compuesto.
+const SEPARADOR_IDENTIDAD_COMPUESTA = "::";
+
+// Identidad efectiva de ESTE comprobante: prioriza E2E; si no hay E2E pero
+// SÍ hay un ID de transacción CON banco legible, usa la identidad
+// COMPUESTA banco+id (hallazgo I1 de la auditoría de 7728e66 -- un ID de
+// transacción solo nunca es una identidad fuerte, porque bancos distintos
+// pueden repetirlo). Si no hay banco legible, el ID de transacción se
+// descarta como identidad fuerte -- comportamiento conservador, cae a
+// "fallback" (monto+ventana) en vez de inventar una identidad global a
+// partir de un dato potencialmente genérico.
+//
+// Nota: `e2e`/`transaccionId`/`banco` en el resultado llevan los valores
+// normalizados por separado cuando están presentes (para persistirlos
+// para auditoría, ver sección 2 de la fase) -- `tipo`/`columna`/`valor`
+// son la identidad efectiva usada para DEDUPLICAR.
 function extraerIdentidadComprobante(datos) {
     const e2e           = normalizarE2E(datos?.e2e);
     const transaccionId = normalizarTransaccionId(datos?.id_transaccion);
+    const banco         = normalizarBanco(datos?.banco);
 
-    if (e2e) return { tipo: "e2e", columna: "comprobante_e2e", valor: e2e, e2e, transaccionId };
-    if (transaccionId) return { tipo: "transaccion_id", columna: "comprobante_transaccion_id", valor: transaccionId, e2e: null, transaccionId };
-    return { tipo: "fallback", columna: null, valor: null, e2e: null, transaccionId: null };
+    if (e2e) {
+        return { tipo: "e2e", columna: "comprobante_e2e", valor: e2e, e2e, transaccionId, banco };
+    }
+    if (transaccionId && banco) {
+        const compuesto = `${banco}${SEPARADOR_IDENTIDAD_COMPUESTA}${transaccionId}`;
+        return { tipo: "transaccion_id", columna: "comprobante_transaccion_id", valor: compuesto, e2e: null, transaccionId, banco };
+    }
+    return { tipo: "fallback", columna: null, valor: null, e2e: null, transaccionId, banco };
 }
 
 // ─────────────────────────────────────────
@@ -109,6 +149,7 @@ async function buscarOperacionPorIdentidad(identidad) {
 module.exports = {
     normalizarE2E,
     normalizarTransaccionId,
+    normalizarBanco,
     calcularDestinatarioMatch,
     extraerIdentidadComprobante,
     buscarOperacionPorIdentidad

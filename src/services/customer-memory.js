@@ -214,6 +214,33 @@ async function limpiarTarjetaFrecuente(phone) {
     }
 }
 
+// Limpia SOLO el staging de identidad del comprobante (comprobante_pendiente/
+// valor/e2e/transacción/datos) -- se usa cuando ya se determinó que ESTE
+// comprobante concreto no va a convertirse en una operación nueva para este
+// cliente (porque ya es un duplicado de una operación existente, propia o
+// de otro teléfono -- ver responderComprobanteDuplicado en pix-flow.js,
+// corrección del hallazgo residual de la auditoría de 7728e66). Nunca toca
+// estado/monto/tarjeta -- eso puede seguir siendo una operación real en
+// curso sin relación con el comprobante que se acaba de descartar.
+async function limpiarComprobantePendiente(phone) {
+    if (!phone) return false;
+    try {
+        await pool.query(`
+            UPDATE customers SET
+                comprobante_pendiente      = NULL,
+                valor_comprobante          = NULL,
+                comprobante_e2e            = NULL,
+                comprobante_transaccion_id = NULL,
+                comprobante_datos          = NULL
+            WHERE phone = $1
+        `, [phone]);
+        return true;
+    } catch (err) {
+        console.error("❌ limpiarComprobantePendiente:", err.message);
+        return false;
+    }
+}
+
 // ─────────────────────────────────────────
 // OBTENER CLIENTE
 // ─────────────────────────────────────────
@@ -266,6 +293,7 @@ module.exports = {
     limpiarSesionDB,
     limpiarContextoCorto,
     limpiarTarjetaFrecuente,
+    limpiarComprobantePendiente,
     obtenerCliente,
     obtenerTodos,
     eliminarCliente,

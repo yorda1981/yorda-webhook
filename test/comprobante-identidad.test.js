@@ -13,7 +13,7 @@ const assert = require("node:assert/strict");
 
 const pool = require("../db");
 const {
-    normalizarE2E, normalizarTransaccionId, calcularDestinatarioMatch,
+    normalizarE2E, normalizarTransaccionId, normalizarBanco, calcularDestinatarioMatch,
     extraerIdentidadComprobante, buscarOperacionPorIdentidad
 } = require("../src/services/comprobante-identidad");
 
@@ -74,11 +74,18 @@ test("extraerIdentidadComprobante: con E2E válido -> tipo 'e2e', prioridad máx
     assert.equal(id.valor, "E12345678202401011200ABCDEFGHIJK");
 });
 
-test("extraerIdentidadComprobante: sin E2E pero con ID de transacción -> tipo 'transaccion_id'", () => {
-    const id = extraerIdentidadComprobante({ id_transaccion: "TXN-987654" });
+test("extraerIdentidadComprobante: sin E2E pero con ID de transacción + banco -> tipo 'transaccion_id' compuesto (hallazgo I1)", () => {
+    const id = extraerIdentidadComprobante({ id_transaccion: "TXN-987654", banco: "Nubank" });
     assert.equal(id.tipo, "transaccion_id");
     assert.equal(id.columna, "comprobante_transaccion_id");
-    assert.equal(id.valor, "TXN-987654");
+    assert.equal(id.valor, "NUBANK::TXN-987654");
+});
+
+test("extraerIdentidadComprobante: ID de transacción SIN banco legible -> nunca es identidad fuerte, cae a 'fallback' (hallazgo I1)", () => {
+    const id = extraerIdentidadComprobante({ id_transaccion: "TXN-987654" });
+    assert.equal(id.tipo, "fallback");
+    assert.equal(id.columna, null);
+    assert.equal(id.valor, null);
 });
 
 test("extraerIdentidadComprobante: sin ninguno -> tipo 'fallback' (el caller usa monto+ventana)", () => {
@@ -135,4 +142,43 @@ test("buscarOperacionPorIdentidad: error de DB (columna no migrada) -> degrada a
     t.mock.method(pool, "query", async () => { throw new Error('column "comprobante_e2e" does not exist'); });
     const r = await buscarOperacionPorIdentidad({ tipo: "e2e", columna: "comprobante_e2e", valor: "E111" });
     assert.equal(r, null);
+});
+
+// ── I1: identidad compuesta banco+transacción (auditoría 7728e66) ──
+
+test("normalizarBanco: normaliza mayúsculas/acentos/espacios para comparar bancos entre sí", () => {
+    assert.equal(normalizarBanco("  Nubank  "), "NUBANK");
+    assert.equal(normalizarBanco("Itaú"), "ITAU");
+});
+
+test("normalizarBanco: vacío/ilegible -> null (nunca se inventa un banco)", () => {
+    assert.equal(normalizarBanco(""), null);
+    assert.equal(normalizarBanco(null), null);
+});
+
+test("mismo banco + mismo transaction_id -> misma identidad (duplicado)", () => {
+    const a = extraerIdentidadComprobante({ id_transaccion: "TXN-001", banco: "Nubank" });
+    const b = extraerIdentidadComprobante({ id_transaccion: "TXN-001", banco: "NUBANK" });
+    assert.equal(a.valor, b.valor, "el mismo banco escrito distinto debe normalizar a la misma identidad");
+});
+
+test("bancos DIFERENTES + mismo transaction_id -> identidades DIFERENTES, nunca se confunden (hallazgo I1)", async (t) => {
+    const a = extraerIdentidadComprobante({ id_transaccion: "TXN-001", banco: "Nubank" });
+    const b = extraerIdentidadComprobante({ id_transaccion: "TXN-001", banco: "Itau" });
+    assert.notEqual(a.valor, b.valor);
+
+    // Y a nivel de búsqueda en DB: una operación con la identidad de A no
+    // debe encontrarse al buscar con la identidad de B.
+    mockOperations(t, [{ id: 1, comprobante_transaccion_id: a.valor, status: "pendiente" }]);
+    const encontrada = await buscarOperacionPorIdentidad(b);
+    assert.equal(encontrada, null, "un ID de transacción igual mostrado por un banco distinto NO debe deduplicarse");
+});
+
+// ── I6: formato E2E (verificado contra el estándar oficial BCB: E + 31 = 32 total) ──
+
+test("normalizarE2E: acepta el largo REAL de un E2E oficial (31 caracteres después de la E)", () => {
+    // ISPB(8) + fecha AAAAMMDD(8) + hora HHmm(4) + sufijo(11) = 31.
+    const e2e = "E" + "0".repeat(8) + "20260101" + "1200" + "A".repeat(11);
+    assert.equal(e2e.length, 32);
+    assert.equal(normalizarE2E(e2e), e2e);
 });

@@ -508,6 +508,18 @@
             return String(s || "").replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
         }
 
+        // Destinatario del comprobante: señal, nunca bloqueo -- solo se muestra
+        // cuando OCR pudo determinar que NO coincide con el esperado
+        // (comprobante_datos.destinatarioMatch === "diferente"). Nunca inventa
+        // un nombre: si no se pudo leer, no se muestra ningún nombre.
+        function avisoDestinatarioHtml(op) {
+            if (op?.comprobante_datos?.destinatarioMatch !== "diferente") return "";
+            const nombre = op.comprobante_datos.destinatario
+                ? `Detectado: "${escapeHtml(op.comprobante_datos.destinatario)}"`
+                : "Nombre no legible";
+            return ` <span title="Destinatario del comprobante NO coincide con el esperado. ${nombre}" style="color:#ef4444;cursor:help;">⚠️</span>`;
+        }
+
         async function cargarBloqueados() {
             if (!token) return;
             try {
@@ -640,7 +652,7 @@
                         return `
                         <tr>
                             <td>${new Date(op.created_at).toLocaleDateString("pt-BR")}<br><small>${new Date(op.created_at).toLocaleTimeString("pt-BR")}</small></td>
-                            <td><strong>${op.titular || op.nombre}</strong></td>
+                            <td><strong>${op.titular || op.nombre}</strong>${avisoDestinatarioHtml(op)}</td>
                             <td style="color:var(--yellow);font-weight:700;">R$ ${op.monto}</td>
                             <td>${colEntrega}</td>
                             <td><small>${op.tipo}</small></td>
@@ -665,7 +677,7 @@
                         return `
                         <tr>
                             <td>${new Date(op.created_at).toLocaleDateString("pt-BR")}</td>
-                            <td><strong>${op.titular || op.nombre}</strong></td>
+                            <td><strong>${op.titular || op.nombre}</strong>${avisoDestinatarioHtml(op)}</td>
                             <td>${colEntrega}</td>
                             <td style="color:var(--yellow);font-weight:700;">R$ ${op.monto}</td>
                             <td><small>${op.tipo}</small></td>

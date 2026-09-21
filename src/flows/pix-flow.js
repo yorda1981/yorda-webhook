@@ -1,7 +1,7 @@
 "use strict";
 
 const pool = require("../../db");
-const { guardarCliente, obtenerCliente }                                          = require("../services/customer-memory");
+const { guardarCliente, obtenerCliente, limpiarComprobantePendiente }             = require("../services/customer-memory");
 const { agregarOperacion, existeOperacionPendiente, obtenerPendienteCliente }     = require("../services/operations");
 const { calcularOperacion }                                                        = require("../services/calculator");
 const { enviarMensaje, enviarImagen }                                              = require("../services/zapi");
@@ -151,6 +151,42 @@ async function _enviarPIXFinal(phone, cliente, esEs) {
 }
 
 // ─────────────────────────────────────────
+// RESPUESTA A COMPROBANTE DUPLICADO (mismo E2E/ID ya visto)
+// ─────────────────────────────────────────
+
+// Responde de forma NEUTRA al cliente (nunca revela nombre/teléfono/datos
+// del cliente original) y, si la operación encontrada pertenece a OTRO
+// teléfono, avisa al admin (auditoría de 7728e66, hallazgo I2) -- el E2E
+// es global, así que dos teléfonos reclamando el mismo comprobante es una
+// señal real (confusión o intento indebido) que el admin debe poder
+// revisar, aun cuando el cliente que lo reenvía no se entera de nada.
+async function responderComprobanteDuplicado(phone, operacionExistente, esEs) {
+    const yaProcesada = operacionExistente.status === "confirmada" || operacionExistente.status === "completada";
+    const m = yaProcesada
+        ? (esEs ? "Este comprobante ya corresponde a una operación procesada. ✅" : "Este comprovante já corresponde a uma operação processada. ✅")
+        : (esEs ? "Ya tengo ese comprobante registrado 👍 Sigue pendiente de revisión." : "Já tenho esse comprovante registrado 👍 Continua pendente de revisão.");
+    await enviarSeguro(phone, m);
+
+    if (operacionExistente.phone && operacionExistente.phone !== phone) {
+        const adminPhone = getAdminPhone();
+        if (adminPhone) {
+            await enviarSeguro(adminPhone,
+                `⚠️ *COMPROBANTE REPETIDO DESDE OTRO TELÉFONO*\n\nEl mismo comprobante (operación #${operacionExistente.id}, originalmente de ${operacionExistente.phone}) fue presentado también por ${phone}.\n\nRevisar manualmente -- posible confusión o intento indebido.`
+            );
+        }
+    }
+
+    // Hallazgo residual (revisión final de esta corrección): este
+    // comprobante YA quedó resuelto como duplicado (propio o de otro
+    // teléfono) -- se limpia SOLO su staging de identidad en `customers`
+    // para que no bloquee innecesariamente al próximo comprobante
+    // realmente distinto que este mismo cliente mande después (ver I3).
+    // Nunca toca estado/monto/tarjeta, y la operación real (si existe)
+    // sigue intacta en `operations`.
+    await limpiarComprobantePendiente(phone);
+}
+
+// ─────────────────────────────────────────
 // INTENTAR COMPLETAR OPERACIÓN
 // ─────────────────────────────────────────
 
@@ -210,17 +246,18 @@ async function intentarCompletarOperacion(phone, pushName, cliente, esEs) {
             : { tipo: "transaccion_id", columna: "comprobante_transaccion_id", valor: cliente.comprobante_transaccion_id };
         const dup = await buscarOperacionPorIdentidad(identidadStaged);
         if (dup) {
-            const m = (dup.status === "confirmada" || dup.status === "completada")
-                ? (esEs ? "Este comprobante ya corresponde a una operación procesada. ✅" : "Este comprovante já corresponde a uma operação processada. ✅")
-                : (esEs ? "Ya tengo ese comprobante registrado 👍 Sigue pendiente de revisión." : "Já tenho esse comprovante registrado 👍 Continua pendente de revisão.");
-            await enviarSeguro(phone, m);
+            await responderComprobanteDuplicado(phone, dup, esEs);
             return true;
         }
     }
 
     const resultado = await calcularOperacion({ tipo: cliente.tipo_favorito, valor: cliente.ultimo_monto, nivelVip: Number(cliente.nivel_vip || 0) });
 
-    await guardarCliente({ phone, comprobantePendiente: false });
+    // C1 (auditoría 7728e66): comprobante_pendiente ya NO se pone en false
+    // ANTES de saber si agregarOperacion() tuvo éxito -- si fallara, dejaría
+    // el estado mintiendo ("ya no está pendiente" cuando en realidad nunca
+    // se creó la operación). limpiarSesion() al final de esta función, en
+    // el camino de éxito, ya lo deja en NULL -- no hace falta duplicarlo acá.
     const operacion = await agregarOperacion({
         phone,
         nombre:  pushName || cliente.nombre || "Cliente",
@@ -235,7 +272,54 @@ async function intentarCompletarOperacion(phone, pushName, cliente, esEs) {
         comprobanteDatos:         cliente.comprobante_datos || null
     });
 
-    const opId      = operacion?.id ? `#${operacion.id} ` : "";
+    // C1 (auditoría 7728e66): agregarOperacion() puede devolver null por dos
+    // motivos MUY distintos, y nunca se deben tratar igual:
+    //   (a) una petición CONCURRENTE con el mismo E2E/ID ganó la carrera --
+    //       el índice único de la migración 0012 rechazó nuestro INSERT.
+    //       Se distingue re-consultando por identidad: si ahora SÍ existe
+    //       una fila con nuestro mismo E2E/transacción, es (a) -- nunca se
+    //       crea un duplicado, se responde según el estado REAL de esa fila
+    //       (la que ganó), igual que cualquier otro reenvío.
+    //   (b) un fallo real de persistencia (DB caída, timeout, etc.) -- en
+    //       ese caso NUNCA se afirma que la operación quedó registrada. El
+    //       staging (comprobante_pendiente/valor/identidad) se PRESERVA tal
+    //       cual (no se llama limpiarSesion) para que un reintento futuro
+    //       lo vuelva a intentar, y se deja registrado el error.
+    if (!operacion) {
+        if (cliente.comprobante_e2e || cliente.comprobante_transaccion_id) {
+            const identidadStaged = cliente.comprobante_e2e
+                ? { tipo: "e2e", columna: "comprobante_e2e", valor: cliente.comprobante_e2e }
+                : { tipo: "transaccion_id", columna: "comprobante_transaccion_id", valor: cliente.comprobante_transaccion_id };
+            const ganadora = await buscarOperacionPorIdentidad(identidadStaged);
+            if (ganadora) {
+                await responderComprobanteDuplicado(phone, ganadora, esEs);
+                return true;
+            }
+        }
+
+        // No hay reintento automático real -- el mensaje no debe prometer
+        // uno. El comprobante queda guardado (staging preservado, no se
+        // llamó limpiarSesion) y el cliente puede reenviarlo cuando quiera;
+        // además se avisa al admin para seguimiento manual inmediato.
+        console.error(`❌ intentarCompletarOperacion: agregarOperacion() devolvió null para ${phone} (monto=${cliente.ultimo_monto}) -- comprobante preservado en staging, NO se avisa como registrada.`);
+        await enviarSeguro(phone, esEs
+            ? "Tuvimos un problema técnico registrando tu comprobante 😕 Quedó guardado -- Yordanys lo va a revisar manualmente. Si quieres, puedes reenviarlo en un momento."
+            : "Tivemos um problema técnico ao registrar seu comprovante 😕 Ficou salvo -- o Yordanys vai revisar manualmente. Se quiser, pode reenviar em instantes."
+        );
+        const adminPhone = getAdminPhone();
+        if (adminPhone) {
+            await enviarSeguro(adminPhone,
+                `⚠️ *FALLO REGISTRANDO COMPROBANTE*\n\nNo se pudo crear la operación para ${phone} (monto R$${cliente.ultimo_monto}) por un error técnico. El comprobante quedó guardado -- revisar manualmente.`
+            );
+        }
+        // true aquí NO significa "operación completada" -- significa "ya se
+        // le respondió al cliente lo que corresponde, el caller (
+        // procesarComprobante) no debe mandar además el genérico '¡Comprobante
+        // recibido!' encima de un mensaje que ya explica el problema real.
+        return true;
+    }
+
+    const opId      = `#${operacion.id} `;
     const tarjetaRaw = cliente.tarjeta || cliente.tarjeta_frecuente || "-";
     const tarjetaFmt = tarjetaRaw !== "-" ? tarjetaRaw.replace(/(.{4})/g, "$1 ").trim() : "-";
 
@@ -284,9 +368,14 @@ Pendiente de validación`;
     // procesarComprobante) -- se agrega SOLO a la notificación del admin,
     // que es quien de verdad confirma manualmente. Al cliente no se le
     // alarma por algo que puede ser un simple falso positivo de OCR.
-    const destinatarioMatch = cliente.comprobante_datos?.destinatarioMatch;
+    // I5 (auditoría 7728e66): se incluye el nombre REALMENTE detectado por
+    // OCR para que el admin pueda juzgar de un vistazo si es un error real
+    // o solo una variante (acentos, apellido distinto, etc.) -- nunca se
+    // inventa un nombre si no se pudo leer.
+    const datosComp         = cliente.comprobante_datos || {};
+    const destinatarioMatch = datosComp.destinatarioMatch;
     const avisoAdmin = destinatarioMatch === "diferente"
-        ? `\n\n⚠️ Destinatario del comprobante NO coincide con el esperado -- revisar antes de confirmar.`
+        ? `\n\n⚠️ Destinatario del comprobante NO coincide con el esperado${datosComp.destinatario ? ` (detectado: "${datosComp.destinatario}")` : " (nombre no legible)"} -- revisar antes de confirmar.`
         : "";
 
     const adminPhone = getAdminPhone();
@@ -322,10 +411,7 @@ async function procesarComprobante(phone, pushName, cliente, datos, esEs) {
     if (identidad.tipo !== "fallback") {
         const opExistente = await buscarOperacionPorIdentidad(identidad);
         if (opExistente) {
-            const m = (opExistente.status === "confirmada" || opExistente.status === "completada")
-                ? (esEs ? "Este comprobante ya corresponde a una operación procesada. ✅" : "Este comprovante já corresponde a uma operação processada. ✅")
-                : (esEs ? "Ya tengo ese comprobante registrado 👍 Sigue pendiente de revisión." : "Já tenho esse comprovante registrado 👍 Continua pendente de revisão.");
-            await enviarSeguro(phone, m);
+            await responderComprobanteDuplicado(phone, opExistente, esEs);
             return "";
         }
     } else if (datos.valor && datos.fecha && datos.hora) {
@@ -375,23 +461,49 @@ async function procesarComprobante(phone, pushName, cliente, datos, esEs) {
             : "\n\n⚠️ O destinatário do comprovante não coincide com o esperado — vai ficar marcado para revisão manual.";
     }
 
-    // 3) Staging en `customers` -- sobrevive aunque falte monto/tarjeta
+    // 3) I3 (auditoría 7728e66): si YA hay un comprobante DISTINTO en
+    // staging que todavía no se convirtió en operación, NO lo pisamos en
+    // silencio -- se detiene y se le pregunta al cliente cuál continuar.
+    // Solo aplica cuando el que acaba de llegar tiene identidad fuerte y es
+    // realmente distinta a la ya guardada -- si el nuevo NO tiene identidad
+    // fuerte, el COALESCE de guardarCliente() ya preserva la vieja sin
+    // tocarla (no hay nada que perder en ese caso). Prioridad: nunca perder
+    // silenciosamente la identidad/datos del comprobante A.
+    const yaHayOtroEnStaging = cliente?.comprobante_pendiente &&
+        (cliente?.comprobante_e2e || cliente?.comprobante_transaccion_id) &&
+        identidad.tipo !== "fallback" &&
+        identidad.valor !== cliente?.comprobante_e2e &&
+        identidad.valor !== cliente?.comprobante_transaccion_id;
+
+    if (yaHayOtroEnStaging) {
+        const m = esEs
+            ? "Todavía tengo otro comprobante tuyo pendiente de revisión 🤔\n\n¿Este es un pago DIFERENTE o me equivoqué de comprobante? Si es nuevo, dime el monto para separarlo; si fue un error, dime \"olvida eso\" y seguimos con este."
+            : "Ainda tenho outro comprovante seu pendente de revisão 🤔\n\nEste é um pagamento DIFERENTE ou foi engano? Se for novo, me diz o valor para separar; se foi erro, diz \"esquece isso\" e seguimos com este.";
+        await enviarSeguro(phone, m);
+        return "";
+    }
+
+    // 4) Staging en `customers` -- sobrevive aunque falte monto/tarjeta
     // todavía (mismo patrón que comprobante_pendiente/valor_comprobante ya
     // usaban). Se traslada a `operations` recién cuando agregarOperacion()
-    // corre en intentarCompletarOperacion().
+    // corre en intentarCompletarOperacion(). Se guarda la identidad EFECTIVA
+    // (identidad.valor -- ya sea el E2E o el compuesto banco::transacción,
+    // ver hallazgo I1), no los valores crudos por separado, para que sea
+    // exactamente lo mismo que se usará para deduplicar/crear la operación.
     await guardarCliente({
         phone,
         comprobantePendiente: true,
         valorComprobante: datos.valor ?? null,
-        comprobanteE2E: identidad.e2e,
-        comprobanteTransaccionId: identidad.transaccionId,
+        comprobanteE2E: identidad.tipo === "e2e" ? identidad.valor : null,
+        comprobanteTransaccionId: identidad.tipo === "transaccion_id" ? identidad.valor : null,
         comprobanteDatos: {
             fecha: datos.fecha ?? null,
             hora: datos.hora ?? null,
             pagador: datos.pagador ?? null,
             destinatario: datos.destinatario ?? null,
             destinatarioMatch,
-            bancoOrigen: datos.banco ?? null
+            bancoOrigen: datos.banco ?? null,
+            transaccionIdRaw: identidad.transaccionId ?? null
         },
         ...(datos.valor && !cliente.ultimo_monto && { monto: datos.valor })
     });

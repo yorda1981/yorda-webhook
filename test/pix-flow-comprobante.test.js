@@ -38,6 +38,8 @@ function mockMundo(t) {
     const customers = new Map();
     const operations = [];
     let siguienteId = 1;
+    let carreraE2E = null;
+    let forzarFalloGenerico = false;
 
     function aplicarParamsCustomers(row, params) {
         const set = (i, col) => { if (params[i] != null) row[col] = params[i]; };
@@ -74,6 +76,32 @@ function mockMundo(t) {
             customers.set(params[0], row);
             return { rows: [] };
         }
+        // limpiarSesionDB() -- se dispara al completar una operación con
+        // éxito. Sin este patrón, el staging (comprobante_pendiente/e2e/
+        // tarjeta_frecuente/etc.) nunca se limpiaría en el mock y una
+        // operación "completada" seguiría viéndose como pendiente.
+        if (/UPDATE customers SET[\s\S]*estado\s*=\s*NULL/.test(sql)) {
+            const row = customers.get(params[0]);
+            if (row) Object.assign(row, {
+                estado: null, fecha_estado: null, fecha_pix: null,
+                comprobante_pendiente: null, valor_comprobante: null,
+                comprobante_e2e: null, comprobante_transaccion_id: null, comprobante_datos: null,
+                last_response_id: null, ultimo_monto: null, tipo_favorito: null,
+                tarjeta_frecuente: null, titular_frecuente: null, banco_favorito: null,
+                ultima_pregunta: null, ultimas_opciones: null, contexto_actualizado_at: null
+            });
+            return { rows: [] };
+        }
+        // limpiarComprobantePendiente() -- se dispara cuando un comprobante
+        // se resuelve como duplicado (ver responderComprobanteDuplicado).
+        if (/UPDATE customers SET[\s\S]*comprobante_pendiente\s*=\s*NULL/.test(sql)) {
+            const row = customers.get(params[0]);
+            if (row) Object.assign(row, {
+                comprobante_pendiente: null, valor_comprobante: null,
+                comprobante_e2e: null, comprobante_transaccion_id: null, comprobante_datos: null
+            });
+            return { rows: [] };
+        }
 
         if (/^SELECT \* FROM rates LIMIT 1/.test(sql)) return { rows: [TASAS] };
 
@@ -102,6 +130,31 @@ function mockMundo(t) {
             return { rows: rows.map(o => ({ id: o.id })) };
         }
         if (/INSERT INTO operations/.test(sql)) {
+            if (forzarFalloGenerico) {
+                forzarFalloGenerico = false;
+                throw new Error("conexión perdida (simulado)");
+            }
+            const nuevoE2E = params[15] || null;
+            // Simula la RACE real: justo antes de que nuestro INSERT se
+            // ejecute, "otra petición concurrente" ya insertó una fila con
+            // este mismo E2E (algo que un SELECT anterior, hecho un
+            // instante antes, no pudo haber visto). El índice único
+            // parcial de la migración 0012 rechazaría nuestro INSERT con
+            // exactamente este error real de Postgres.
+            if (carreraE2E && nuevoE2E === carreraE2E) {
+                const ganadora = {
+                    id: siguienteId++, phone: "5511900099999", nombre: "Otro cliente",
+                    monto: Number(params[2]), cup: Number(params[3]), tarjeta: params[4], titular: params[5],
+                    banco: params[6], tipo: params[7], comprobante_e2e: nuevoE2E,
+                    comprobante_transaccion_id: null, comprobante_datos: null, status: "pendiente"
+                };
+                operations.push(ganadora);
+                carreraE2E = null;
+                const err = new Error('duplicate key value violates unique constraint "idx_operations_comprobante_e2e_unico"');
+                err.code = "23505";
+                err.constraint = "idx_operations_comprobante_e2e_unico";
+                throw err;
+            }
             const row = {
                 id: siguienteId++, phone: params[0], nombre: params[1], monto: Number(params[2]), cup: Number(params[3]),
                 tarjeta: params[4], titular: params[5], banco: params[6], tipo: params[7],
@@ -117,7 +170,11 @@ function mockMundo(t) {
         return { rows: [] };
     });
 
-    return { customers, operations };
+    return {
+        customers, operations,
+        armarCarrera: (e2e) => { carreraE2E = e2e; },
+        forzarFalloGenerico: () => { forzarFalloGenerico = true; }
+    };
 }
 
 test.beforeEach(() => { mensajesEnviados = []; });
@@ -140,7 +197,11 @@ test("extracción completa: comprobante con todos los campos crea la operación 
 
     const op = mundo.operations[0];
     assert.equal(op.comprobante_e2e, "E12345678202601011000ABCDEFGHIJK");
-    assert.equal(op.comprobante_transaccion_id, "TXN-000111");
+    // El E2E gana la prioridad de deduplicación (ver hallazgo I1) -- la
+    // columna comprobante_transaccion_id se deja null cuando ya hay E2E,
+    // pero el ID crudo queda igual disponible para auditoría.
+    assert.equal(op.comprobante_transaccion_id, null);
+    assert.equal(op.comprobante_datos.transaccionIdRaw, "TXN-000111");
     assert.equal(op.comprobante_datos.pagador, "Cliente Test");
     assert.equal(op.comprobante_datos.destinatario, "Yordanys Rafael");
     assert.equal(op.comprobante_datos.destinatarioMatch, "coincide");
@@ -202,8 +263,11 @@ test("caso obligatorio: dos comprobantes de igual monto con E2E DIFERENTES son d
     await procesarComprobante("5511900020005", "Cliente", await obtenerCliente("5511900020005"), pixA, true);
     // El cliente ya tiene una operación pendiente -- para simular un pago
     // NUEVO real, primero se "libera" (se completa/limpia) antes del segundo.
+    // limpiarSesion() ya corrió al completar A (nulea tarjeta_frecuente
+    // también), así que el cliente vuelve a dar monto+tarjeta para el
+    // pago B, igual que en un flujo real.
     mundo.operations[0].status = "completada";
-    await guardarCliente({ phone: "5511900020005", monto: 500 });
+    await guardarCliente({ phone: "5511900020005", monto: 500, tarjeta: "1111222233334444" });
 
     await procesarComprobante("5511900020005", "Cliente", await obtenerCliente("5511900020005"), pixB, true);
 
@@ -310,4 +374,166 @@ test("BLOQUEO: un número bloqueado sigue sin recibir ninguna automatización, n
         return { rows: [] };
     });
     assert.equal(await estaBloqueado("5511900020099"), true, "el bloqueo se revisa ANTES de cualquier procesamiento de comprobante");
+});
+
+// ═══════════════════════════════════════════════════════════
+// CORRECCIONES DE LA AUDITORÍA DE 7728e66 (C1, I1, I2, I3)
+// ═══════════════════════════════════════════════════════════
+
+// ── C1: race condition en el E2E (violación de índice único) ──
+
+test("C1 -- RACE E2E: dos inserciones casi simultáneas con el mismo E2E nunca crean un duplicado ni mandan un mensaje con ID vacío", async (t) => {
+    const mundo = mockMundo(t);
+    const e2e = "E77777777202601011000RRRRRRRRRRR";
+    mundo.customers.set("5511900030001", {
+        phone: "5511900030001", ultimo_monto: 300, tipo_favorito: "brl_cup", tarjeta_frecuente: "1111222233334444"
+    });
+    mundo.armarCarrera(e2e);
+
+    await procesarComprobante("5511900030001", "Cliente", await obtenerCliente("5511900030001"), { ...DATOS_COMPLETOS, e2e }, true);
+
+    const delMismoE2E = mundo.operations.filter(o => o.comprobante_e2e === e2e);
+    assert.equal(delMismoE2E.length, 1, "nunca debe crear un duplicado, aunque el INSERT propio haya chocado contra el índice único");
+
+    const huboMensajeOperacionPendienteNueva = mensajesEnviados.some(m => /OPERACIÓN.*PENDIENTE/.test(m.msg));
+    assert.equal(huboMensajeOperacionPendienteNueva, false, "el intento que pierde la carrera nunca debe mandar el mensaje de 'nueva operación creada' (con ID vacío)");
+
+    const ultimoMsg = mensajesEnviados[mensajesEnviados.length - 1]?.msg || "";
+    assert.match(ultimoMsg, /pendiente de revisión/i, "debe responder según el estado real de la operación que sí se creó");
+});
+
+test("C1 -- RACE E2E: la operación ganadora es la única que existe, con datos correctos", async (t) => {
+    const mundo = mockMundo(t);
+    const e2e = "E66666666202601011000QQQQQQQQQQQ";
+    mundo.customers.set("5511900030002", {
+        phone: "5511900030002", ultimo_monto: 300, tipo_favorito: "brl_cup", tarjeta_frecuente: "1111222233334444"
+    });
+    mundo.armarCarrera(e2e);
+
+    await procesarComprobante("5511900030002", "Cliente", await obtenerCliente("5511900030002"), { ...DATOS_COMPLETOS, e2e }, true);
+
+    assert.equal(mundo.operations.length, 1);
+    assert.equal(mundo.operations[0].comprobante_e2e, e2e);
+    assert.equal(mundo.operations[0].status, "pendiente");
+});
+
+test("C1 -- FALLO REAL de persistencia: nunca afirma que la operación quedó registrada, preserva el staging", async (t) => {
+    const mundo = mockMundo(t);
+    const e2e = "E88888888202601011000SSSSSSSSSSS";
+    mundo.customers.set("5511900030003", {
+        phone: "5511900030003", ultimo_monto: 300, tipo_favorito: "brl_cup", tarjeta_frecuente: "1111222233334444"
+    });
+    mundo.forzarFalloGenerico();
+
+    await procesarComprobante("5511900030003", "Cliente", await obtenerCliente("5511900030003"), { ...DATOS_COMPLETOS, e2e }, true);
+
+    assert.equal(mundo.operations.length, 0, "no debe crear ninguna operación tras un fallo real de persistencia");
+
+    const huboMensajeOperacionPendienteNueva = mensajesEnviados.some(m => /OPERACIÓN.*PENDIENTE/.test(m.msg));
+    assert.equal(huboMensajeOperacionPendienteNueva, false, "nunca debe afirmar que la operación quedó registrada");
+    const ultimoMsg = mensajesEnviados[mensajesEnviados.length - 1]?.msg || "";
+    assert.match(ultimoMsg, /problema técnico/i);
+
+    const cliente = mundo.customers.get("5511900030003");
+    assert.equal(cliente.comprobante_e2e, e2e, "el staging se preserva -- el comprobante no se pierde, se puede reintentar/revisar manualmente");
+    assert.equal(cliente.comprobante_pendiente, true, "sigue reflejando la realidad: todavía no hay operación creada para este comprobante");
+});
+
+// ── I2: mismo E2E presentado desde otro teléfono ──
+
+test("I2 -- mismo E2E desde OTRO teléfono: no crea otra operación, no revela datos del primero, avisa al admin", async (t) => {
+    const mundo = mockMundo(t);
+    const e2e = "E99999999202601011000TTTTTTTTTTT";
+    mundo.customers.set("5511900030004", {
+        phone: "5511900030004", ultimo_monto: 300, tipo_favorito: "brl_cup", tarjeta_frecuente: "1111222233334444"
+    });
+    // Comprobante A ya se procesó para el teléfono original.
+    await procesarComprobante("5511900030004", "Cliente A", await obtenerCliente("5511900030004"), { ...DATOS_COMPLETOS, e2e }, true);
+    assert.equal(mundo.operations.length, 1);
+
+    mensajesEnviados = [];
+
+    // El MISMO comprobante (mismo E2E) llega ahora desde OTRO teléfono.
+    mundo.customers.set("5511900030005", {
+        phone: "5511900030005", ultimo_monto: 300, tipo_favorito: "brl_cup", tarjeta_frecuente: "5555666677778888"
+    });
+    await procesarComprobante("5511900030005", "Cliente B", await obtenerCliente("5511900030005"), { ...DATOS_COMPLETOS, e2e }, true);
+
+    assert.equal(mundo.operations.length, 1, "nunca debe crear una segunda operación para el mismo E2E");
+
+    const mensajesAlSegundoCliente = mensajesEnviados.filter(m => m.phone === "5511900030005").map(m => m.msg).join(" | ");
+    assert.doesNotMatch(mensajesAlSegundoCliente, /5511900030004|Cliente A/, "nunca debe revelar el teléfono/nombre del cliente original al segundo");
+    assert.match(mensajesAlSegundoCliente, /pendiente de revisión/i);
+    // El aviso al admin (ADMIN_PHONE) se verifica por separado en
+    // test/pix-flow-comprobante-admin.test.js -- ese módulo necesita fijar
+    // process.env.ADMIN_PHONE ANTES de cualquier require (env.js lo lee una
+    // sola vez al cargarse), así que se aisló en su propio archivo para no
+    // afectar el resto de los asserts de "último mensaje" de este archivo.
+});
+
+// ── I3: dos comprobantes en staging antes de completar el primero ──
+
+test("I3 -- comprobante B llega antes de completar A: no pisa silenciosamente la identidad de A, pide aclaración", async (t) => {
+    const mundo = mockMundo(t);
+    // Cliente SIN tarjeta todavía -- A queda en staging (nunca llega a
+    // convertirse en operación), exactamente el escenario descrito en la
+    // auditoría.
+    mundo.customers.set("5511900030006", { phone: "5511900030006", tipo_favorito: "brl_cup" });
+
+    const compA = { ...DATOS_COMPLETOS, valor: 300, e2e: "E10101010202601011000AAAAAAAAAAA" };
+    const compB = { ...DATOS_COMPLETOS, valor: 500, e2e: "E20202020202601011000BBBBBBBBBBB" };
+
+    await procesarComprobante("5511900030006", "Cliente", await obtenerCliente("5511900030006"), compA, true);
+    let cliente = mundo.customers.get("5511900030006");
+    assert.equal(cliente.comprobante_e2e, "E10101010202601011000AAAAAAAAAAA", "A queda en staging (todavía no hay tarjeta)");
+    assert.equal(mundo.operations.length, 0);
+
+    mensajesEnviados = [];
+    await procesarComprobante("5511900030006", "Cliente", await obtenerCliente("5511900030006"), compB, true);
+
+    cliente = mundo.customers.get("5511900030006");
+    assert.equal(cliente.comprobante_e2e, "E10101010202601011000AAAAAAAAAAA", "la identidad de A NUNCA se pierde/pisa en silencio");
+    assert.equal(mundo.operations.length, 0, "B tampoco se crea todavía -- se pidió aclaración");
+
+    const ultimoMsg = mensajesEnviados[mensajesEnviados.length - 1]?.msg || "";
+    assert.match(ultimoMsg, /otro comprobante|pendiente de revisión/i);
+});
+
+test("I3 -- comprobante B SIN identidad fuerte nunca pisa la identidad de A (protegido por COALESCE, sin necesitar el chequeo explícito)", async (t) => {
+    const mundo = mockMundo(t);
+    mundo.customers.set("5511900030007", { phone: "5511900030007", tipo_favorito: "brl_cup" });
+
+    const compA = { ...DATOS_COMPLETOS, valor: 300, e2e: "E30303030202601011000CCCCCCCCCCC" };
+    const compBsinIdentidad = { tipo: "comprovante_pix", valor: 300, destino_correcto: true, valido: true }; // sin fecha/hora/e2e/id
+
+    await procesarComprobante("5511900030007", "Cliente", await obtenerCliente("5511900030007"), compA, true);
+    await procesarComprobante("5511900030007", "Cliente", await obtenerCliente("5511900030007"), compBsinIdentidad, true);
+
+    const cliente = mundo.customers.get("5511900030007");
+    assert.equal(cliente.comprobante_e2e, "E30303030202601011000CCCCCCCCCCC", "sin identidad fuerte en el segundo, COALESCE preserva la de A automáticamente");
+});
+
+// ── Hallazgo residual (revisión final): un duplicado resuelto no debe dejar staging "sucio" ──
+
+test("un comprobante resuelto como duplicado limpia SU PROPIO staging, sin bloquear el próximo comprobante realmente distinto", async (t) => {
+    const mundo = mockMundo(t);
+    const e2e = "E40404040202601011000DDDDDDDDDDD";
+    mundo.customers.set("5511900030008", { phone: "5511900030008", ultimo_monto: 300, tipo_favorito: "brl_cup", tarjeta_frecuente: "1111222233334444" });
+
+    await procesarComprobante("5511900030008", "Cliente", await obtenerCliente("5511900030008"), { ...DATOS_COMPLETOS, e2e }, true);
+    assert.equal(mundo.operations.length, 1);
+
+    // Reenvía el MISMO comprobante -- se detecta como duplicado.
+    await procesarComprobante("5511900030008", "Cliente", await obtenerCliente("5511900030008"), { ...DATOS_COMPLETOS, e2e }, true);
+    let cliente = mundo.customers.get("5511900030008");
+    assert.equal(cliente.comprobante_e2e, null, "el staging del comprobante ya resuelto como duplicado se limpia");
+
+    // Ahora manda un comprobante GENUINAMENTE distinto -- no debe chocar
+    // con el I3 (staging sucio de un duplicado ya resuelto).
+    mensajesEnviados = [];
+    const otroE2E = "E50505050202601011000EEEEEEEEEEE";
+    await procesarComprobante("5511900030008", "Cliente", await obtenerCliente("5511900030008"), { ...DATOS_COMPLETOS, valor: 700, e2e: otroE2E }, true);
+
+    const ultimoMsg = mensajesEnviados[mensajesEnviados.length - 1]?.msg || "";
+    assert.doesNotMatch(ultimoMsg, /otro comprobante/i, "no debe pedir aclaración -- el staging anterior ya se había limpiado");
 });
