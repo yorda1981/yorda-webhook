@@ -198,19 +198,49 @@ test("datosMontoOperador: tipo que no es Transferencia -> null, nunca inventa da
     assert.equal(operadores.datosMontoOperador({ tipo: "cup_efectivo", monto: 100 }), null);
 });
 
-test("construirMensajeOperador: incluye operación/cliente/tipo/montos/tarjeta/banco reales, nunca hardcodea la modalidad", () => {
+test("construirMensajeOperador: formato mínimo -- solo #operación, cliente, destino real y tarjeta", () => {
+    const msg = operadores.construirMensajeOperador({
+        id: 434, titular: "LOURDES ABREU ACOSTA", tipo: "brl_cup", monto: 300, cup: 20130,
+        tarjeta: "9205069993259455", banco: "BPA"
+    });
+    assert.equal(
+        msg,
+        "🔔 *Nueva transferencia #434*\n\nCliente: LOURDES ABREU ACOSTA\nEnviar: 20130 CUP\nTarjeta: 9205069993259455"
+    );
+});
+
+test("construirMensajeOperador: USD -- mismo formato, moneda y destino real del tipo (usd_clasica)", () => {
     const msg = operadores.construirMensajeOperador({
         id: 435, titular: "Cliente Real", tipo: "usd_clasica", monto: 100, cup: 560,
         tarjeta: "9876543210123456", banco: "BPA"
     });
-    assert.match(msg, /#435/);
-    assert.match(msg, /Cliente Real/);
-    assert.match(msg, /Tipo: USD/);
-    assert.match(msg, /100 USD/);
-    assert.match(msg, /R\$560/);
-    assert.match(msg, /9876543210123456/);
-    assert.match(msg, /BPA/);
-    assert.doesNotMatch(msg, /Tipo: CUP/);
+    assert.equal(
+        msg,
+        "🔔 *Nueva transferencia #435*\n\nCliente: Cliente Real\nEnviar: 100 USD\nTarjeta: 9876543210123456"
+    );
+});
+
+test("construirMensajeOperador: MLC -- mismo formato, moneda y destino real del tipo", () => {
+    const msg = operadores.construirMensajeOperador({
+        id: 436, titular: "Cliente MLC", tipo: "mlc", monto: 50, cup: 13500,
+        tarjeta: "1112223334445556", banco: "Metropolitano"
+    });
+    assert.equal(
+        msg,
+        "🔔 *Nueva transferencia #436*\n\nCliente: Cliente MLC\nEnviar: 50 MLC\nTarjeta: 1112223334445556"
+    );
+});
+
+test("construirMensajeOperador: nunca incluye el monto recibido en BRL, línea de Tipo, ni Banco (datos administrativos que el CRM ya conserva)", () => {
+    const msg = operadores.construirMensajeOperador({
+        id: 437, titular: "Cliente Real", tipo: "usd_clasica", monto: 100, cup: 560,
+        tarjeta: "9876543210123456", banco: "BPA"
+    });
+    assert.doesNotMatch(msg, /R\$/);
+    assert.doesNotMatch(msg, /Tipo:/);
+    assert.doesNotMatch(msg, /Banco/);
+    assert.doesNotMatch(msg, /BPA/);
+    assert.doesNotMatch(msg, /Operación:/);
 });
 
 // ── Idempotencia + trazabilidad (migración 0015) ──

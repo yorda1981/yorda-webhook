@@ -185,26 +185,24 @@ function datosMontoOperador(operacion) {
     }
 }
 
-function etiquetaModalidad(modalidad) {
-    return { cup: "CUP", usd: "USD", mlc: "MLC" }[modalidad] || modalidad;
-}
-
+// Mensaje mínimo para EJECUTAR la transferencia -- el CRM ya conserva el
+// resto de la información completa (monto en R$, banco, tipo exacto,
+// comprobante, etc.), así que aquí solo va lo que el operador necesita
+// para actuar: a quién, cuánto/en qué moneda y a qué tarjeta/cuenta. La
+// moneda del destino ya queda implícita en "Enviar: X CUP/USD/MLC" (ver
+// datosMontoOperador), por eso no hace falta una línea de "Tipo" aparte.
 function construirMensajeOperador(operacion) {
     const modalidad = modalidadDeTipo(operacion.tipo);
     const datos = datosMontoOperador(operacion);
     if (!modalidad || !datos) return null;
 
     const lineas = [
-        "🔔 *Nueva transferencia*",
+        `🔔 *Nueva transferencia #${operacion.id}*`,
         "",
-        `Operación: #${operacion.id}`,
-        `Cliente: ${operacion.titular || operacion.nombre || "-"}`,
-        `Tipo: ${etiquetaModalidad(modalidad)}`,
-        `Monto recibido: ${datos.pagado}`
+        `Cliente: ${operacion.titular || operacion.nombre || "-"}`
     ];
-    if (datos.destino) lineas.push(`Monto/destino: ${datos.destino}`);
-    if (operacion.tarjeta) lineas.push(`Tarjeta/cuenta destino: ${operacion.tarjeta}`);
-    if (operacion.banco) lineas.push(`Banco: ${operacion.banco}`);
+    if (datos.destino) lineas.push(`Enviar: ${datos.destino}`);
+    if (operacion.tarjeta) lineas.push(`Tarjeta: ${operacion.tarjeta}`);
 
     return lineas.join("\n");
 }
