@@ -14,7 +14,7 @@
 
 const pool = require("../../db");
 const { agregarOperacion, buscarPorRefWeb } = require("../services/operations");
-const { agregarEntrega, obtenerEntregaPorId } = require("../services/entregas");
+const { agregarEntrega, obtenerEntregaPorId, nombreReceptor } = require("../services/entregas");
 const { guardarCliente } = require("../services/customer-memory");
 const { enviarSeguro, getAdminPhone, getEntregaContactPhone, fmt } = require("./shared");
 const idempotencia = require("../services/idempotency");
@@ -124,7 +124,7 @@ async function notificarNuevaEntrega(entrega) {
     // por diseño, ver migración 0005), nunca una transferencia.
     const msg =
         `🚨 *NUEVA ENTREGA ${entrega.codigo}*\n\n` +
-        `👤 *Cliente:* ${entrega.cliente_nombre}\n` +
+        `👤 *Receptor:* ${nombreReceptor(entrega)}\n` +
         `📞 *Teléfono:* ${entrega.telefono_entrega || entrega.phone}\n` +
         `💵 *Entregar:* ${fmt(entrega.cantidad)} ${entrega.moneda}\n` +
         `📍 *Lugar:* ${lugar}` +
@@ -415,8 +415,12 @@ const SCOPE_ENTREGA_MANUAL = "entrega_manual";
 async function crearEntregaManual(datos) {
     const telefonoCliente = String(datos.telefonoCliente || "").replace(/\D/g, "");
     const cantidad = Number(datos.cantidad || 0);
-    if (!telefonoCliente || !String(datos.clienteNombre || "").trim() || !cantidad || !datos.moneda) {
-        return { error: "Faltan datos obligatorios (WhatsApp del cliente, nombre, cantidad y moneda)." };
+    // Cliente (paga, en Brasil) y receptor (recibe el efectivo, en Cuba) son
+    // roles distintos -- antes un solo campo "Nombre" cubría ambos. Los dos
+    // son obligatorios: sin receptor no hay a quién entregarle.
+    const receptorNombre = String(datos.receptorNombre || "").trim();
+    if (!telefonoCliente || !String(datos.clienteNombre || "").trim() || !receptorNombre || !cantidad || !datos.moneda) {
+        return { error: "Faltan datos obligatorios (WhatsApp del cliente, nombre del cliente, nombre del receptor, cantidad y moneda)." };
     }
     const moneda = String(datos.moneda).toUpperCase();
 
@@ -445,7 +449,10 @@ async function crearEntregaManual(datos) {
         nombre:             datos.clienteNombre,
         monto:              Number(datos.montoBRL || 0),
         cup:                moneda === "CUP" ? cantidad : 0,
-        titular:            datos.clienteNombre,
+        // titular = quien RECIBE (mismo criterio que el resto del sistema,
+        // ej. tarjeta destino en Transferencias) -- antes era clienteNombre
+        // porque el formulario no distinguía los dos roles.
+        titular:            receptorNombre,
         tipo:               moneda === "USD" ? "usd_efectivo" : "cup_efectivo",
         direccion:          datos.direccion || "",
         provincia:          datos.provincia || "",
@@ -465,6 +472,7 @@ async function crearEntregaManual(datos) {
             operationId:      operacion.id,
             phone:            telefonoCliente,
             clienteNombre:    datos.clienteNombre,
+            receptorNombre,
             telefonoEntrega:  datos.telefonoEntrega || telefonoCliente,
             cantidad,
             moneda,

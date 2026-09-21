@@ -71,9 +71,9 @@ async function agregarEntrega(data) {
                 codigo, operation_id, ref_web, phone, cliente_nombre,
                 telefono_entrega, cantidad, moneda, modalidad,
                 provincia, municipio, direccion, referencia, observaciones,
-                estado_entrega, estado_pago
+                estado_entrega, estado_pago, receptor_nombre
             ) VALUES (
-                $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'PENDIENTE','NO_APLICA'
+                $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'PENDIENTE','NO_APLICA',$15
             ) RETURNING *
         `, [
             codigo,
@@ -89,7 +89,13 @@ async function agregarEntrega(data) {
             data.municipio       || null,
             data.direccion       || null,
             data.referencia      || null,
-            data.observaciones   || null
+            data.observaciones   || null,
+            // Nombre de quien RECIBE en Cuba (migración 0017) -- distinto del
+            // cliente que paga. Nullable a propósito: canales que todavía no
+            // lo envían (ej. calculadora web, sin tocar en este cambio) dejan
+            // esta columna en NULL, y el código que la muestra usa
+            // receptor_nombre || cliente_nombre como resguardo.
+            data.receptorNombre  || null
         ]);
 
         await client.query("COMMIT");
@@ -157,7 +163,7 @@ async function obtenerEntregas(filtros = {}) {
         // de los dos teléfonos o la provincia/municipio.
         if (filtros.q) {
             condiciones.push(`(
-                codigo ILIKE $${i} OR cliente_nombre ILIKE $${i} OR
+                codigo ILIKE $${i} OR cliente_nombre ILIKE $${i} OR receptor_nombre ILIKE $${i} OR
                 phone ILIKE $${i} OR telefono_entrega ILIKE $${i} OR
                 provincia ILIKE $${i} OR municipio ILIKE $${i}
             )`);
@@ -521,9 +527,17 @@ async function actualizarTasasUsdt({ tasaCup, tasaUsd }) {
 // para Operadores de Transferencias: emoji + etiqueta en negrita, un solo
 // icono por dato -- 💵 (no 💰) porque esto siempre es efectivo.
 // ─────────────────────────────────────────
+// Nombre de quien RECIBE el efectivo en Cuba (migración 0017) -- con
+// resguardo a cliente_nombre para entregas creadas antes de esa columna,
+// o por canales que todavía no la llenan (calculadora web). Nunca se
+// inventa un nombre: si ninguno de los dos existe, cae a un genérico.
+function nombreReceptor(entrega) {
+    return entrega?.receptor_nombre || entrega?.cliente_nombre || "Cliente";
+}
+
 function mensajeEntregaMarcada(entrega) {
     return `✅ Entrega ${entrega.codigo} marcada como ENTREGADO.\n\n` +
-        `👤 *Cliente:* ${entrega.cliente_nombre}\n` +
+        `👤 *Receptor:* ${nombreReceptor(entrega)}\n` +
         `💵 *Entregado:* ${Number(entrega.cantidad).toLocaleString("es-ES")} ${entrega.moneda}\n\n` +
         `💵 *Pago al contacto:* PENDIENTE DE PAGO`;
 }
@@ -533,6 +547,7 @@ module.exports = {
     obtenerEntregaPorId,
     obtenerEntregaPorCodigo,
     mensajeEntregaMarcada,
+    nombreReceptor,
     buscarEntregaPorRefWeb,
     obtenerEntregas,
     marcarEntregado,

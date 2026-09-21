@@ -110,6 +110,7 @@ const DATOS_BASE = {
     telefonoCliente: "5511900000001",
     clienteNombre: "Cliente Test",
     montoBRL: "100",
+    receptorNombre: "Receptor Test",
     cantidad: "9500",
     moneda: "CUP"
 };
@@ -145,6 +146,14 @@ test("sin idempotencyKey (compatibilidad hacia atrás) -> sin dedup, cada llamad
     assert.equal(r1.success, true);
     assert.equal(r2.success, true);
     assert.notEqual(r1.entrega.id, r2.entrega.id);
+});
+
+test("sin receptorNombre -> error, no crea ni operación ni entrega (cliente y receptor son roles obligatorios distintos)", async (t) => {
+    mockPoolCompleto(t);
+    const { receptorNombre, ...sinReceptor } = DATOS_BASE;
+    const r = await crearEntregaManual(sinReceptor);
+    assert.ok(r.error);
+    assert.equal(r.success, undefined);
 });
 
 test("si agregarOperacion falla, la clave se libera y un reintento con la misma clave sí puede crear la entrega", async (t) => {

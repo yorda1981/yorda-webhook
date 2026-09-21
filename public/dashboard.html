@@ -290,8 +290,10 @@
                 <div style="margin-bottom:14px;">
                     <button class="btn-limpiar" style="background:#8b5cf6;" onclick="toggleEntregaManual()">➕ Nueva entrega manual</button>
                     <div id="panelEntregaManual" style="display:none;background:#0b0e1a;border-radius:12px;padding:16px;border:1px solid #2d355a;margin-top:10px;">
-                        <div style="font-size:12px;color:#8b949e;margin-bottom:10px;">Para cuando el cliente no sabe llenar la calculadora — esto crea el pedido directo, sin pasar por WhatsApp.</div>
-                        <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:10px;">
+                        <div style="font-size:12px;color:#8b949e;margin-bottom:14px;">Para cuando el cliente no sabe llenar la calculadora — esto crea el pedido directo, sin pasar por WhatsApp.</div>
+
+                        <div style="font-size:13px;font-weight:700;color:#a78bfa;margin-bottom:8px;">👤 Cliente (quien paga)</div>
+                        <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:10px; margin-bottom:16px;">
                             <label style="font-size:12px;color:#8b949e;">WhatsApp del cliente *
                                 <input type="tel" id="manWhatsapp" style="display:block;width:100%;background:#161b2e;border:1px solid #2d355a;padding:8px 10px;border-radius:8px;color:white;margin-top:4px;">
                             </label>
@@ -300,6 +302,16 @@
                             </label>
                             <label style="font-size:12px;color:#8b949e;">Total pagado (R$) *
                                 <input type="number" id="manMontoBRL" step="any" style="display:block;width:100%;background:#161b2e;border:1px solid #2d355a;padding:8px 10px;border-radius:8px;color:white;margin-top:4px;">
+                            </label>
+                        </div>
+
+                        <div style="font-size:13px;font-weight:700;color:#14b8a6;margin-bottom:8px;">📍 Entrega en Cuba (quien recibe)</div>
+                        <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:10px;">
+                            <label style="font-size:12px;color:#8b949e;">Nombre del receptor *
+                                <input type="text" id="manReceptorNombre" style="display:block;width:100%;background:#161b2e;border:1px solid #2d355a;padding:8px 10px;border-radius:8px;color:white;margin-top:4px;">
+                            </label>
+                            <label style="font-size:12px;color:#8b949e;">Teléfono del receptor en Cuba
+                                <input type="tel" id="manTelefonoEntrega" style="display:block;width:100%;background:#161b2e;border:1px solid #2d355a;padding:8px 10px;border-radius:8px;color:white;margin-top:4px;">
                             </label>
                             <label style="font-size:12px;color:#8b949e;">Cantidad a entregar *
                                 <input type="number" id="manCantidad" step="any" style="display:block;width:100%;background:#161b2e;border:1px solid #2d355a;padding:8px 10px;border-radius:8px;color:white;margin-top:4px;">
@@ -311,13 +323,14 @@
                                 </select>
                             </label>
                             <label style="font-size:12px;color:#8b949e;">Provincia
-                                <input type="text" id="manProvincia" style="display:block;width:100%;background:#161b2e;border:1px solid #2d355a;padding:8px 10px;border-radius:8px;color:white;margin-top:4px;">
+                                <select id="manProvincia" onchange="poblarMunicipiosManual()" style="display:block;width:100%;background:#161b2e;border:1px solid #2d355a;padding:8px 10px;border-radius:8px;color:white;margin-top:4px;">
+                                    <option value="">Selecciona una provincia</option>
+                                </select>
                             </label>
                             <label style="font-size:12px;color:#8b949e;">Municipio
-                                <input type="text" id="manMunicipio" style="display:block;width:100%;background:#161b2e;border:1px solid #2d355a;padding:8px 10px;border-radius:8px;color:white;margin-top:4px;">
-                            </label>
-                            <label style="font-size:12px;color:#8b949e;">Teléfono de entrega en Cuba
-                                <input type="tel" id="manTelefonoEntrega" style="display:block;width:100%;background:#161b2e;border:1px solid #2d355a;padding:8px 10px;border-radius:8px;color:white;margin-top:4px;">
+                                <select id="manMunicipio" disabled style="display:block;width:100%;background:#161b2e;border:1px solid #2d355a;padding:8px 10px;border-radius:8px;color:white;margin-top:4px;">
+                                    <option value="">Selecciona un municipio</option>
+                                </select>
                             </label>
                             <label style="font-size:12px;color:#8b949e;grid-column:1/-1;">Dirección
                                 <input type="text" id="manDireccion" style="display:block;width:100%;background:#161b2e;border:1px solid #2d355a;padding:8px 10px;border-radius:8px;color:white;margin-top:4px;">
@@ -509,6 +522,7 @@
 
     </div>
 
+    <script src="/provincias-cuba.js"></script>
     <script>
         let token = "";
         let intervalo = null;
@@ -1162,12 +1176,37 @@
             const panel = document.getElementById("panelEntregaManual");
             const abriendo = panel.style.display === "none";
             panel.style.display = abriendo ? "block" : "none";
+            if (abriendo) poblarProvinciasManual();
             // Una clave nueva por cada apertura del panel = un intento nuevo.
             // Mientras el panel sigue abierto (ej. reintentar tras un error),
             // se reutiliza la misma clave a propósito -- ver crearEntregaManualForm.
             if (abriendo && !entregaManualIdempotencyKey) {
                 entregaManualIdempotencyKey = generarIdempotencyKey();
             }
+        }
+
+        // Mismo catálogo que usa la calculadora (public/provincias-cuba.js,
+        // <script src> cargado arriba) -- nunca se mantiene una segunda
+        // lista. Municipio se llena SOLO con los municipios de la provincia
+        // elegida, igual que en la calculadora.
+        function poblarProvinciasManual() {
+            const sel = document.getElementById("manProvincia");
+            if (sel.options.length > 1) return; // ya poblado, no repetir
+            (typeof PROVINCIAS !== "undefined" ? PROVINCIAS : []).forEach(p => {
+                const opt = document.createElement("option");
+                opt.value = p.nombre;
+                opt.textContent = p.nombre;
+                sel.appendChild(opt);
+            });
+        }
+
+        function poblarMunicipiosManual() {
+            const nombreProv = document.getElementById("manProvincia").value;
+            const selMun = document.getElementById("manMunicipio");
+            const prov = (typeof PROVINCIAS !== "undefined" ? PROVINCIAS : []).find(p => p.nombre === nombreProv);
+            selMun.innerHTML = '<option value="">Selecciona un municipio</option>' +
+                (prov ? prov.municipios.map(m => `<option value="${m}">${m}</option>`).join("") : "");
+            selMun.disabled = !prov;
         }
 
         // Clave de idempotencia del intento de creación en curso -- la genera
@@ -1189,6 +1228,7 @@
                 telefonoCliente:  document.getElementById("manWhatsapp").value.trim(),
                 clienteNombre:    document.getElementById("manNombre").value.trim(),
                 montoBRL:         document.getElementById("manMontoBRL").value,
+                receptorNombre:   document.getElementById("manReceptorNombre").value.trim(),
                 cantidad:         document.getElementById("manCantidad").value,
                 moneda:           document.getElementById("manMoneda").value,
                 provincia:        document.getElementById("manProvincia").value.trim(),
@@ -1197,7 +1237,7 @@
                 referencia:       document.getElementById("manReferencia").value.trim(),
                 telefonoEntrega:  document.getElementById("manTelefonoEntrega").value.trim()
             };
-            if (!datos.telefonoCliente || !datos.clienteNombre || !datos.montoBRL || !datos.cantidad) {
+            if (!datos.telefonoCliente || !datos.clienteNombre || !datos.montoBRL || !datos.receptorNombre || !datos.cantidad) {
                 info.style.color = "var(--red)";
                 info.innerText = "Faltan campos obligatorios (*)";
                 return;
@@ -1212,8 +1252,10 @@
                 if (data.success) {
                     info.style.color = "var(--green)";
                     info.innerText = `✅ Entrega ${data.entrega?.codigo || ""} creada`;
-                    ["manWhatsapp","manNombre","manMontoBRL","manCantidad","manProvincia","manMunicipio","manDireccion","manReferencia","manTelefonoEntrega"]
+                    ["manWhatsapp","manNombre","manMontoBRL","manReceptorNombre","manCantidad","manProvincia","manDireccion","manReferencia","manTelefonoEntrega"]
                         .forEach(id => document.getElementById(id).value = "");
+                    document.getElementById("manMunicipio").innerHTML = '<option value="">Selecciona un municipio</option>';
+                    document.getElementById("manMunicipio").disabled = true;
                     entregaManualIdempotencyKey = null; // próxima creación = intento nuevo, clave nueva
                     cargarEntregas();
                 } else {
@@ -1362,7 +1404,7 @@
                     <td>${checkbox}</td>
                     <td style="font-family:monospace;font-weight:700;">${e.codigo}</td>
                     <td>${new Date(e.created_at).toLocaleDateString("pt-BR")}${notaAtraso}</td>
-                    <td><strong>${e.cliente_nombre || "-"}</strong><br><small style="color:#8b949e;">${(e.telefono_entrega || e.phone || "").split("@")[0]}</small></td>
+                    <td><strong>${e.receptor_nombre || e.cliente_nombre || "-"}</strong><br><small style="color:#8b949e;">${(e.telefono_entrega || e.phone || "").split("@")[0]}</small></td>
                     <td style="font-weight:700;">${Number(e.cantidad).toLocaleString("es-ES")} ${e.moneda}</td>
                     <td><small>${lugar}</small></td>
                     <td>${badgeEstadoEntrega(e.estado_entrega)}</td>

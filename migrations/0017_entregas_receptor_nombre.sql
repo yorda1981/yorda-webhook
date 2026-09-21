@@ -1,0 +1,22 @@
+-- 0017_entregas_receptor_nombre.sql
+--
+-- Separación explícita CLIENTE (quien paga, en Brasil) vs RECEPTOR (quien
+-- recibe el efectivo, en Cuba) en el formulario de "Nueva entrega manual"
+-- del CRM de Entregas (ver src/flows/pedido-web-flow.js:crearEntregaManual
+-- y public/dashboard.html).
+--
+-- `cliente_nombre` (columna existente, migración 0005) NO se renombra ni
+-- cambia de significado -- se sigue llenando exactamente igual que hasta
+-- ahora en todos los canales existentes (calculadora web incluida), para
+-- no romper compatibilidad ni el flujo automático ya validado.
+--
+-- `receptor_nombre` es NUEVA y NULLABLE a propósito: entregas creadas
+-- antes de esta migración (o por canales que todavía no la llenan)
+-- simplemente no la tienen -- el código que la muestra (CRM, mensajes de
+-- WhatsApp) usa `receptor_nombre || cliente_nombre` como resguardo, nunca
+-- se rompe ni se inventa un nombre para filas antiguas.
+--
+-- Aditiva, sin tocar ninguna migración anterior. NO se aplica todavía
+-- (queda pendiente igual que 0014-0016 en su momento).
+
+ALTER TABLE entregas ADD COLUMN IF NOT EXISTS receptor_nombre VARCHAR(150);
