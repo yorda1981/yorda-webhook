@@ -14,9 +14,10 @@
 
 const pool = require("../../db");
 const { agregarOperacion, buscarPorRefWeb } = require("../services/operations");
-const { agregarEntrega } = require("../services/entregas");
+const { agregarEntrega, obtenerEntregaPorId } = require("../services/entregas");
 const { guardarCliente } = require("../services/customer-memory");
 const { enviarSeguro, getAdminPhone, getEntregaContactPhone, fmt } = require("./shared");
+const idempotencia = require("../services/idempotency");
 
 // Consulta el nivel VIP (0-3) de este teléfono (para el descuento de entrega escalado).
 async function nivelVipDe(phone) {
@@ -398,6 +399,9 @@ async function manejarTransferencia(phone, texto, pushName, esEs) {
 // datos directamente en el CRM. Esto NO depende de ningún mensaje de
 // WhatsApp — evita el problema de que un pedido "mandado a uno mismo" no
 // se pueda identificar de forma confiable (ver fromMe en index.js).
+// scope propio de esta acción -- ver src/services/idempotency.js.
+const SCOPE_ENTREGA_MANUAL = "entrega_manual";
+
 async function crearEntregaManual(datos) {
     const telefonoCliente = String(datos.telefonoCliente || "").replace(/\D/g, "");
     const cantidad = Number(datos.cantidad || 0);
@@ -405,6 +409,26 @@ async function crearEntregaManual(datos) {
         return { error: "Faltan datos obligatorios (WhatsApp del cliente, nombre, cantidad y moneda)." };
     }
     const moneda = String(datos.moneda).toUpperCase();
+
+    // Idempotencia por request-id (opcional, compatible hacia atrás: sin
+    // idempotencyKey se comporta exactamente igual que antes). El
+    // frontend manda la MISMA clave en reintentos del mismo intento
+    // (doble clic) -- ver public/dashboard.html, crearEntregaManualForm().
+    const idempotencyKey = datos.idempotencyKey ? String(datos.idempotencyKey).slice(0, 100) : null;
+    if (idempotencyKey) {
+        const claim = await idempotencia.reclamar(idempotencyKey, SCOPE_ENTREGA_MANUAL);
+        if (!claim.nueva) {
+            if (claim.resourceId) {
+                const entregaExistente = await obtenerEntregaPorId(claim.resourceId);
+                if (entregaExistente) {
+                    return { success: true, entrega: entregaExistente, duplicado: true };
+                }
+            }
+            // Carrera real (poco común, pero posible): la primera llamada
+            // con esta clave todavía no terminó de crear el recurso.
+            return { error: "Ya hay una creación en curso con este mismo intento. Esperá un momento antes de reintentar." };
+        }
+    }
 
     const operacion = await agregarOperacion({
         phone:              telefonoCliente,
@@ -420,7 +444,10 @@ async function crearEntregaManual(datos) {
         telefonoEntrega:    datos.telefonoEntrega || "",
         entregaDisponible:  true
     });
-    if (!operacion) return { error: "No se pudo registrar la operación." };
+    if (!operacion) {
+        if (idempotencyKey) await idempotencia.liberar(idempotencyKey);
+        return { error: "No se pudo registrar la operación." };
+    }
 
     let entrega = null;
     try {
@@ -437,7 +464,10 @@ async function crearEntregaManual(datos) {
             referencia:       datos.referencia || "",
             observaciones:    datos.observaciones || null
         });
-        if (entrega) await notificarNuevaEntrega(entrega);
+        if (entrega) {
+            await notificarNuevaEntrega(entrega);
+            if (idempotencyKey) await idempotencia.resolver(idempotencyKey, entrega.id);
+        }
     } catch (e) {
         console.error("❌ Error creando entrega manual en el CRM:", e.message);
     }
