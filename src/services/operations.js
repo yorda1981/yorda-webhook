@@ -1,4 +1,5 @@
 const pool = require("../../db");
+const { log } = require("../utils/structured-logger");
 
 // =====================
 // AGREGAR OPERACIÓN
@@ -33,6 +34,7 @@ async function agregarOperacion(data) {
             typeof data.entregaDisponible === "boolean" ? data.entregaDisponible : null
         ]);
         console.log(`⏳ Operación PENDIENTE: R$${data.monto}`);
+        log("OPERATION_CREATED", { operationId: result.rows[0].id, tipo: result.rows[0].tipo, monto: result.rows[0].monto, phone: result.rows[0].phone });
         return result.rows[0];
     } catch (err) {
         console.error("❌ Error agregando operación:", err.message);
@@ -58,6 +60,7 @@ async function confirmarOperacion(id) {
         `, [id]);
         if (result.rows.length === 0) return false;
         console.log(`✅ Operación CONFIRMADA: ${id}`);
+        log("OPERATION_CONFIRMED", { operationId: id });
         return result.rows[0];
     } catch (err) {
         console.error("❌ Error confirmando operación:", err.message);
@@ -82,6 +85,7 @@ async function completarOperacion(id) {
         `, [id]);
         if (result.rows.length === 0) return null;
         console.log(`🏁 Operación COMPLETADA: ${id}`);
+        log("OPERATION_COMPLETED", { operationId: id });
         return result.rows[0];
     } catch (err) {
         console.error("❌ Error completando operación:", err.message);

@@ -20,6 +20,7 @@
 // ─────────────────────────────────────────────────────────
 
 const pool = require("../../db");
+const { log } = require("../utils/structured-logger");
 
 // =====================
 // HISTORIAL (interno)
@@ -95,6 +96,7 @@ async function agregarEntrega(data) {
         const entrega = result.rows[0];
         await registrarHistorial(entrega.id, `${entrega.codigo} creada`);
         console.log(`📦 Entrega creada: ${entrega.codigo}`);
+        log("DELIVERY_CREATED", { entregaId: entrega.id, codigo: entrega.codigo, moneda: entrega.moneda, phone: entrega.phone });
         return entrega;
     } catch (err) {
         await client.query("ROLLBACK");
@@ -239,6 +241,7 @@ async function marcarEntregado(id, usuario) {
             `${entrega.codigo} marcada ENTREGADO${usuario ? ` por ${usuario}` : ""} — pago al contacto: PENDIENTE DE PAGO`
         );
         console.log(`✅ Entrega ${entrega.codigo} marcada ENTREGADO`);
+        log("DELIVERY_COMPLETED", { entregaId: entrega.id, codigo: entrega.codigo });
         return entrega;
     } catch (err) {
         console.error("❌ Error marcando entrega como ENTREGADO:", err.message);

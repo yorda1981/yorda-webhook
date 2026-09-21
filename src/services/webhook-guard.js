@@ -9,31 +9,73 @@
 // ─────────────────────────────────────────
 
 const pool = require("../../db");
+const { log } = require("../utils/structured-logger");
 
 // ── DEDUPLICACIÓN DE messageId ──
-// Los reintentos de Z-API (mismo evento reenviado) traen el mismo
-// messageId/id/zeId. Se recuerda por 5 minutos — tiempo de sobra para
-// cualquier reintento real del proveedor, sin dejar crecer el Set para
-// siempre. Vive en memoria del proceso: se pierde si Railway reinicia,
-// pero eso solo abre una ventana de "no protegido" al reiniciar, nunca
-// un falso "ya procesado".
+//
+// Fase 6: la fuente de verdad pasó a ser la tabla `webhook_events`
+// (migrations/0008_webhook_events_dedup.sql) — un INSERT ... ON CONFLICT
+// DO NOTHING ... RETURNING es atómico incluso con dos instancias
+// escribiendo al mismo tiempo, cosa que el Set en memoria nunca pudo
+// garantizar (cada instancia tiene el suyo) ni sobrevivir a un reinicio
+// de Railway.
+//
+// El Set en memoria NO se eliminó: sigue como filtro rápido de primera
+// línea (evita un round-trip a la DB para el caso común de un mensaje que
+// claramente es nuevo dentro del mismo proceso). Pero si el Set dice "no
+// lo tengo", igual se confirma contra Postgres antes de decidir — nunca
+// al revés. Compatibilidad: si la tabla no existiera todavía (DB vieja
+// sin correr las migraciones nuevas) o hay un error de conexión, el
+// comportamiento cae al Set en memoria únicamente (igual que antes de
+// esta fase), nunca bloquea el webhook por un problema de la DB.
 const mensajesProcesados = new Set();
 const VENTANA_DEDUP_MS = 5 * 60 * 1000;
 
 // Devuelve true si YA se había procesado este messageId (el caller debe
-// cortar ahí). Si es nuevo, lo marca y devuelve false — atómico: no hay
-// forma de llamarlo dos veces seguidas para el mismo id y que ambas
-// devuelvan false.
-function yaFueProcesado(messageId) {
+// cortar ahí). Si es nuevo, lo marca (memoria + DB) y devuelve false.
+async function yaFueProcesado(messageId) {
     if (!messageId) return false;
-    if (mensajesProcesados.has(messageId)) return true;
+
+    if (mensajesProcesados.has(messageId)) {
+        log("WEBHOOK_DUPLICATE", { messageId, fuente: "memoria" });
+        return true;
+    }
+
+    // Aunque el Set diga "nuevo", puede haberlo procesado OTRA instancia
+    // hace instantes — por eso la DB manda. Se marca en memoria ANTES de
+    // await para que dos llamadas casi simultáneas en este mismo proceso
+    // (mismo tick) no hagan ambas el INSERT.
     mensajesProcesados.add(messageId);
-    // unref(): que este temporizador nunca sea, por sí solo, la razón por
-    // la que el proceso siga vivo (relevante sobre todo para los tests,
-    // que no tienen un servidor HTTP escuchando de fondo) — en producción
-    // no cambia nada, el listener de Express ya mantiene el proceso activo.
     setTimeout(() => mensajesProcesados.delete(messageId), VENTANA_DEDUP_MS).unref();
-    return false;
+
+    try {
+        const { rows } = await pool.query(
+            "INSERT INTO webhook_events (message_id) VALUES ($1) ON CONFLICT (message_id) DO NOTHING RETURNING message_id",
+            [messageId]
+        );
+        const esNuevo = rows.length > 0;
+        if (!esNuevo) log("WEBHOOK_DUPLICATE", { messageId, fuente: "postgres" });
+        return !esNuevo;
+    } catch (e) {
+        // Tabla inexistente (DB sin migrar todavía) u otro error de
+        // conexión: degrada al Set en memoria, nunca tumba el webhook.
+        console.warn("⚠️ webhook_events no disponible, dedup solo en memoria para esta corrida:", e.message);
+        return false;
+    }
+}
+
+// Job de limpieza (Fase 6) — borra eventos de más de 1 día. Sin esto la
+// tabla crecería para siempre; el dedup real solo necesita una ventana
+// corta (los reintentos de Z-API ocurren en minutos, no en días).
+async function limpiarWebhookEventsViejos() {
+    try {
+        const r = await pool.query(
+            "DELETE FROM webhook_events WHERE received_at < NOW() - INTERVAL '1 day'"
+        );
+        if (r.rowCount > 0) console.log(`🧹 webhook_events: ${r.rowCount} evento(s) viejo(s) borrados`);
+    } catch (e) {
+        console.warn("⚠️ limpiarWebhookEventsViejos:", e.message);
+    }
 }
 
 // ─────────────────────────────────────────
@@ -104,6 +146,7 @@ module.exports = {
     yaFueProcesado,
     activarPausaHumana,
     enPausaHumana,
+    limpiarWebhookEventsViejos,
     // Expuesto solo para tests (limpiar estado entre casos).
     _internos: { mensajesProcesados, ULTIMA_PAUSA_CACHE }
 };

@@ -15,8 +15,10 @@ const entregasService = require("./src/services/entregas");
 const { leerTasas } = require("./src/flows/cotizacion-flow");
 const { esPedidoWeb, procesarPedidoWeb, crearEntregaManual } = require("./src/flows/pedido-web-flow");
 const { enviarSeguro, getAdminPhone, getPIXKey, getPIXHolder, getPIXBank, getPIXImage } = require("./src/flows/shared");
-const { yaFueProcesado, activarPausaHumana, enPausaHumana } = require("./src/services/webhook-guard");
+const { yaFueProcesado, activarPausaHumana, enPausaHumana, limpiarWebhookEventsViejos } = require("./src/services/webhook-guard");
 const { verificarSecretoWebhook, validarPayloadWebhook } = require("./src/middleware/webhook-security");
+const { conLockExclusivo } = require("./src/services/job-lock");
+const { log } = require("./src/utils/structured-logger");
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -226,6 +228,7 @@ app.post("/webhook", verificarSecretoWebhook, webhookLimiter, validarPayloadWebh
         if (!body) return;
 
         const phoneRaw = body.phone || body.from;
+        log("WEBHOOK_RECEIVED", { type: body.type, phone: phoneRaw, fromMe: !!body.fromMe });
 
         if (body.chatLid && body.phone && body.phone.startsWith("55") && !body.fromMe) {
             mapaLidATelefono.set(body.chatLid, body.phone);
@@ -266,7 +269,7 @@ app.post("/webhook", verificarSecretoWebhook, webhookLimiter, validarPayloadWebh
         if (!tiposValidos.includes(body.type)) return;
 
         const messageId = body.messageId || body.id || body.zeId;
-        if (yaFueProcesado(messageId)) return;
+        if (await yaFueProcesado(messageId)) return;
 
         const pushName = body.senderName || "Cliente";
 
@@ -333,8 +336,10 @@ app.post("/webhook", verificarSecretoWebhook, webhookLimiter, validarPayloadWebh
             try {
                 await openaiService.procesarMensaje(phoneRaw, msgFinal, pushName);
                 pendingMessages.delete(phoneRaw);
+                log("MESSAGE_PROCESSED", { phone: phoneRaw });
             } catch (e) {
                 console.error(`❌ Error OpenAI: ${e.message}`);
+                log("EXTERNAL_API_ERROR", { origen: "openai.procesarMensaje", error: e.message });
             } finally {
                 buffers.delete(phoneRaw);
             }
@@ -729,11 +734,12 @@ const { enviarMensaje } = require("./src/services/zapi");
 // Migrar columnas CRM al arrancar (safe: IF NOT EXISTS)
 crm.migrarColumnasCRM().catch(e => console.error("❌ CRM migración:", e.message));
 
-// Ejecutar cada 15 minutos
+// Ejecutar cada 15 minutos. conLockExclusivo (Fase 6): si Railway llegara
+// a tener dos instancias corriendo a la vez, solo una ejecuta esta ronda —
+// evita recordatorios duplicados al mismo cliente.
 setInterval(() => {
-    crm.ejecutarRecordatorios().catch(e =>
-        console.error("❌ CRM recordatorios:", e.message)
-    );
+    conLockExclusivo("crmRecordatorios", () => crm.ejecutarRecordatorios())
+        .catch(e => console.error("❌ CRM recordatorios:", e.message));
 }, 15 * 60 * 1000);
 
 // Recalcular niveles VIP (⭐/⭐⭐/⭐⭐⭐) de TODOS los clientes una vez al día.
@@ -756,8 +762,11 @@ async function recalcularNivelesVipYAvisar() {
         console.error("❌ CRM recalcular niveles VIP:", e.message);
     }
 }
-setTimeout(recalcularNivelesVipYAvisar, 10 * 1000); // espera un poco a que terminen las migraciones al arrancar
-setInterval(recalcularNivelesVipYAvisar, 24 * 60 * 60 * 1000);
+function recalcularNivelesVipYAvisarConLock() {
+    return conLockExclusivo("vipRecalculo", recalcularNivelesVipYAvisar);
+}
+setTimeout(recalcularNivelesVipYAvisarConLock, 10 * 1000); // espera un poco a que terminen las migraciones al arrancar
+setInterval(recalcularNivelesVipYAvisarConLock, 24 * 60 * 60 * 1000);
 
 // ══════════════════════════════════════
 // MENSAJE DIARIO DE TASAS (10:15 hora de Bahía = 13:15 UTC)
@@ -804,7 +813,8 @@ setInterval(() => {
     const hoyKey = ahora.toISOString().slice(0, 10); // AAAA-MM-DD (UTC)
     if (ahora.getUTCHours() === 13 && ahora.getUTCMinutes() === 15 && ultimoEnvioTasas !== hoyKey) {
         ultimoEnvioTasas = hoyKey;
-        enviarTasasDiarias().catch(e => console.error("❌ Tasas diarias:", e.message));
+        conLockExclusivo("tasasDiarias", enviarTasasDiarias)
+            .catch(e => console.error("❌ Tasas diarias:", e.message));
     }
 }, 60 * 1000);
 
@@ -833,7 +843,8 @@ setInterval(() => {
     const hoyKey = ahora.toISOString().slice(0, 10);
     if (ahora.getUTCHours() === 11 && ahora.getUTCMinutes() === 0 && ultimoSaludo !== hoyKey) {
         ultimoSaludo = hoyKey;
-        enviarSaludosMatutinos().catch(e => console.error("❌ Saludos matutinos:", e.message));
+        conLockExclusivo("saludosMatutinos", enviarSaludosMatutinos)
+            .catch(e => console.error("❌ Saludos matutinos:", e.message));
     }
 }, 60 * 1000);
 
@@ -865,8 +876,18 @@ async function avisarEntregasAtrasadas() {
         console.error("❌ Error avisando entregas atrasadas:", e.message);
     }
 }
-setTimeout(avisarEntregasAtrasadas, 30 * 1000); // espera a que terminen las migraciones al arrancar
-setInterval(avisarEntregasAtrasadas, 6 * 60 * 60 * 1000); // revisa cada 6 horas
+function avisarEntregasAtrasadasConLock() {
+    return conLockExclusivo("entregasAtrasadas", avisarEntregasAtrasadas);
+}
+setTimeout(avisarEntregasAtrasadasConLock, 30 * 1000); // espera a que terminen las migraciones al arrancar
+setInterval(avisarEntregasAtrasadasConLock, 6 * 60 * 60 * 1000); // revisa cada 6 horas
+
+// ══════════════════════════════════════
+// LIMPIEZA DE webhook_events (Fase 6) — borra eventos de dedup de más de
+// 1 día. Corre una vez al día, con el mismo mecanismo de lock.
+// ══════════════════════════════════════
+setTimeout(() => conLockExclusivo("limpiezaWebhookEvents", limpiarWebhookEventsViejos), 60 * 1000);
+setInterval(() => conLockExclusivo("limpiezaWebhookEvents", limpiarWebhookEventsViejos), 24 * 60 * 60 * 1000);
 
 // ══════════════════════════════════════
 // NUEVO ENDPOINT CRM STATS

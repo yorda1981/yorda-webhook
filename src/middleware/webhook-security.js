@@ -1,6 +1,7 @@
 "use strict";
 
 const crypto = require("node:crypto");
+const { log } = require("../utils/structured-logger");
 
 // ─────────────────────────────────────────
 // SEGURIDAD DEL WEBHOOK ENTRANTE (/webhook)
@@ -48,7 +49,7 @@ function verificarSecretoWebhook(req, res, next) {
         return next();
     }
 
-    console.warn("⚠️ WEBHOOK_REJECTED_SECRET: intento sin secreto válido");
+    log("WEBHOOK_REJECTED", { motivo: "secreto_invalido" });
     return res.status(401).json({ error: "No autorizado" });
 }
 
@@ -59,7 +60,7 @@ function verificarSecretoWebhook(req, res, next) {
 function validarPayloadWebhook(req, res, next) {
     const body = req.body;
     if (body === null || typeof body !== "object" || Array.isArray(body)) {
-        console.warn("⚠️ WEBHOOK_REJECTED_PAYLOAD: forma de payload inválida");
+        log("WEBHOOK_REJECTED", { motivo: "payload_invalido" });
         return res.status(400).json({ error: "Payload inválido" });
     }
     next();

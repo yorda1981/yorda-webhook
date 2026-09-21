@@ -7,6 +7,7 @@ const {
 } = require("../config/env");
 
 const logger = require("../utils/logger");
+const { log } = require("../utils/structured-logger");
 
 async function enviarMensaje(phone, message) {
   try {
@@ -27,6 +28,7 @@ async function enviarMensaje(phone, message) {
     return true;
   } catch (e) {
     logger("error", "ZAPI_SEND_ERROR", { err: e.message });
+    log("EXTERNAL_API_ERROR", { origen: "zapi.enviarMensaje", error: e.message });
     return false;
   }
 }
@@ -49,6 +51,7 @@ async function enviarImagen(phone, imageUrl, caption = "") {
     });
   } catch (e) {
     logger("error", "ZAPI_IMAGE_ERROR", { err: e.message });
+    log("EXTERNAL_API_ERROR", { origen: "zapi.enviarImagen", error: e.message });
   }
 }
 
