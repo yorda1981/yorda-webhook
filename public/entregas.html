@@ -276,7 +276,7 @@
                 let acciones;
                 if (e.estado_entrega === "PENDIENTE") {
                     acciones = `
-                        <button class="btn-confirm" style="background:#60a5fa;" onclick="entregaMarcarEntregado(${e.id})">ENTREGADO</button>
+                        <button class="btn-confirm" style="background:#60a5fa;" onclick="entregaMarcarEntregado(${e.id}, this)">ENTREGADO</button>
                         <button class="btn-confirm" style="background:var(--red);color:white;margin-left:6px;" onclick="entregaCancelar(${e.id})">CANCELAR</button>`;
                 } else if (puedePagar) {
                     acciones = `<button class="btn-confirm" style="background:#14b8a6;" onclick="registrarPagoIndividual(${e.id})">PAGAR</button>`;
@@ -306,14 +306,16 @@
             }).join("");
         }
 
-        async function entregaMarcarEntregado(id) {
+        async function entregaMarcarEntregado(id, btn) {
             if (!confirm("¿Confirmas que esta entrega ya fue realizada en Cuba?")) return;
+            if (btn) btn.disabled = true;
             try {
                 const res = await fetch(`/admin/entregas/${id}/entregado`, { method: "POST", headers: authH(), body: JSON.stringify({}) });
                 const data = await res.json();
                 if (data.success) cargarEntregas();
                 else alert("❌ Error: " + (data.error || "desconocido"));
             } catch (e) { alert("❌ Error de conexión"); }
+            finally { if (btn) btn.disabled = false; }
         }
 
         async function entregaCancelar(id) {

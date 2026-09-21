@@ -554,7 +554,7 @@
                             <td style="color:var(--yellow);font-weight:700;">R$ ${op.monto}</td>
                             <td>${colEntrega}</td>
                             <td><small>${op.tipo}</small></td>
-                            <td><button class="btn-confirm" onclick="confirmar('${op.id}')">VERIFICADO</button></td>
+                            <td><button class="btn-confirm" onclick="confirmar('${op.id}', this)">VERIFICADO</button></td>
                         </tr>`;
                     }).join("");
                 }
@@ -579,7 +579,7 @@
                             <td>${colEntrega}</td>
                             <td style="color:var(--yellow);font-weight:700;">R$ ${op.monto}</td>
                             <td><small>${op.tipo}</small></td>
-                            <td><button class="btn-confirm" onclick="completar('${op.id}')">COMPLETAR</button></td>
+                            <td><button class="btn-confirm" onclick="completar('${op.id}', this)">COMPLETAR</button></td>
                         </tr>`;
                     }).join("");
                 }
@@ -602,31 +602,41 @@
             }
         }
 
-        async function confirmar(id) {
+        async function confirmar(id, btn) {
             if (!confirm("¿Has verificado este pago en tu cuenta bancaria?")) return;
-            const res = await fetch("/admin/confirmar-operacion/" + id, { method: "POST", headers: authH() });
-            const data = await res.json();
-            if (data.success) {
-                refreshData();
-                if (data.notificado === false) {
-                    alert("✅ Operación confirmada, PERO ⚠️ no se pudo enviar el mensaje de WhatsApp al cliente. Revisa que la instancia de Z-API esté conectada, o avísale tú manualmente.");
+            if (btn) btn.disabled = true; // evita doble clic mientras el request está en curso
+            try {
+                const res = await fetch("/admin/confirmar-operacion/" + id, { method: "POST", headers: authH() });
+                const data = await res.json();
+                if (data.success) {
+                    refreshData();
+                    if (data.notificado === false) {
+                        alert("✅ Operación confirmada, PERO ⚠️ no se pudo enviar el mensaje de WhatsApp al cliente. Revisa que la instancia de Z-API esté conectada, o avísale tú manualmente.");
+                    }
+                } else {
+                    alert("❌ Error al confirmar la operación: " + (data.error || "desconocido"));
                 }
-            } else {
-                alert("❌ Error al confirmar la operación: " + (data.error || "desconocido"));
+            } finally {
+                if (btn) btn.disabled = false;
             }
         }
 
-        async function completar(id) {
+        async function completar(id, btn) {
             if (!confirm("¿Confirmas que esta operación fue completada (entrega/transferencia realizada)?")) return;
-            const res = await fetch("/admin/completar-operacion/" + id, { method: "POST", headers: authH() });
-            const data = await res.json();
-            if (data.success) {
-                refreshData();
-                if (data.notificado === false) {
-                    alert("✅ Operación completada, PERO ⚠️ no se pudo enviar el mensaje de WhatsApp al cliente. Revisa que la instancia de Z-API esté conectada, o avísale tú manualmente.");
+            if (btn) btn.disabled = true;
+            try {
+                const res = await fetch("/admin/completar-operacion/" + id, { method: "POST", headers: authH() });
+                const data = await res.json();
+                if (data.success) {
+                    refreshData();
+                    if (data.notificado === false) {
+                        alert("✅ Operación completada, PERO ⚠️ no se pudo enviar el mensaje de WhatsApp al cliente. Revisa que la instancia de Z-API esté conectada, o avísale tú manualmente.");
+                    }
+                } else {
+                    alert("❌ Error al completar la operación: " + (data.error || "desconocido"));
                 }
-            } else {
-                alert("❌ Error al completar la operación: " + (data.error || "desconocido"));
+            } finally {
+                if (btn) btn.disabled = false;
             }
         }
 
@@ -680,10 +690,30 @@
 
         function toggleEntregaManual() {
             const panel = document.getElementById("panelEntregaManual");
-            panel.style.display = panel.style.display === "none" ? "block" : "none";
+            const abriendo = panel.style.display === "none";
+            panel.style.display = abriendo ? "block" : "none";
+            // Una clave nueva por cada apertura del panel = un intento nuevo.
+            // Mientras el panel sigue abierto (ej. reintentar tras un error),
+            // se reutiliza la misma clave a propósito -- ver crearEntregaManualForm.
+            if (abriendo && !entregaManualIdempotencyKey) {
+                entregaManualIdempotencyKey = generarIdempotencyKey();
+            }
         }
 
-        async function crearEntregaManualForm() {
+        // Clave de idempotencia del intento de creación en curso -- la genera
+        // el frontend, el backend la usa para no crear dos veces la misma
+        // entrega si este mismo intento se reenvía (doble clic, reintento).
+        // Se renueva solo cuando la creación anterior tuvo éxito o se cierra
+        // el panel -- un reintento del MISMO intento debe viajar con la MISMA
+        // clave para que el backend pueda reconocerlo.
+        let entregaManualIdempotencyKey = null;
+        function generarIdempotencyKey() {
+            if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+            // Respaldo para navegadores sin crypto.randomUUID (HTTP sin TLS, muy viejos).
+            return "k-" + Date.now() + "-" + Math.random().toString(36).slice(2);
+        }
+
+        async function crearEntregaManualForm(btn) {
             const info = document.getElementById("manEntregaInfo");
             const datos = {
                 telefonoCliente:  document.getElementById("manWhatsapp").value.trim(),
@@ -702,6 +732,10 @@
                 info.innerText = "Faltan campos obligatorios (*)";
                 return;
             }
+            if (!entregaManualIdempotencyKey) entregaManualIdempotencyKey = generarIdempotencyKey();
+            datos.idempotencyKey = entregaManualIdempotencyKey;
+
+            if (btn) btn.disabled = true; // evita doble clic mientras el request está en curso
             try {
                 const res = await fetch("/admin/entregas/manual", { method: "POST", headers: authH(), body: JSON.stringify(datos) });
                 const data = await res.json();
@@ -710,14 +744,20 @@
                     info.innerText = `✅ Entrega ${data.entrega?.codigo || ""} creada`;
                     ["manWhatsapp","manNombre","manMontoBRL","manCantidad","manProvincia","manMunicipio","manDireccion","manReferencia","manTelefonoEntrega"]
                         .forEach(id => document.getElementById(id).value = "");
+                    entregaManualIdempotencyKey = null; // próxima creación = intento nuevo, clave nueva
                     cargarEntregas();
                 } else {
                     info.style.color = "var(--red)";
                     info.innerText = "❌ " + (data.error || "Error desconocido");
+                    // No se renueva la clave: un reintento de ESTE mismo intento
+                    // (ej. tras corregir un dato) debe seguir siendo reconocible
+                    // como el mismo intento para el backend.
                 }
             } catch (e) {
                 info.style.color = "var(--red)";
                 info.innerText = "❌ Error de conexión";
+            } finally {
+                if (btn) btn.disabled = false;
             }
         }
 
@@ -825,7 +865,7 @@
                 let acciones;
                 if (e.estado_entrega === "PENDIENTE") {
                     acciones = `
-                        <button class="btn-confirm" style="background:#60a5fa;" onclick="entregaMarcarEntregado(${e.id})">ENTREGADO</button>
+                        <button class="btn-confirm" style="background:#60a5fa;" onclick="entregaMarcarEntregado(${e.id}, this)">ENTREGADO</button>
                         <button class="btn-confirm" style="background:var(--red);color:white;margin-left:6px;" onclick="entregaCancelar(${e.id})">CANCELAR</button>`;
                 } else if (puedePagar) {
                     acciones = `<button class="btn-confirm" style="background:#14b8a6;" onclick="registrarPagoIndividual(${e.id})">PAGAR</button>`;
@@ -855,14 +895,16 @@
             }).join("");
         }
 
-        async function entregaMarcarEntregado(id) {
+        async function entregaMarcarEntregado(id, btn) {
             if (!confirm("¿Confirmas que esta entrega ya fue realizada en Cuba?")) return;
+            if (btn) btn.disabled = true;
             try {
                 const res = await fetch(`/admin/entregas/${id}/entregado`, { method: "POST", headers: authH(), body: JSON.stringify({}) });
                 const data = await res.json();
                 if (data.success) cargarEntregas();
                 else alert("❌ Error: " + (data.error || "desconocido"));
             } catch (e) { alert("❌ Error de conexión"); }
+            finally { if (btn) btn.disabled = false; }
         }
 
         async function entregaCancelar(id) {

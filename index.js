@@ -19,6 +19,8 @@ const { yaFueProcesado, activarPausaHumana, enPausaHumana, limpiarWebhookEventsV
 const { verificarSecretoWebhook, validarPayloadWebhook } = require("./src/middleware/webhook-security");
 const { conLockExclusivo } = require("./src/services/job-lock");
 const { log } = require("./src/utils/structured-logger");
+const { adminReadLimiter, adminWriteLimiter } = require("./src/middleware/admin-rate-limiters");
+const { verificarToken, verificarTokenEntregas } = require("./src/middleware/admin-auth");
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -32,24 +34,10 @@ const webhookLimiter = rateLimit({
     message: "Too many requests"
 });
 
-const adminLimiter = rateLimit({
-    windowMs: 60 * 1000,
-    max: 60,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: "Too many requests"
-});
-
-// Límite estricto de intentos de login fallidos al dashboard (independiente del límite general).
-// Solo cuenta peticiones que terminan en 401 (token incorrecto) — un token correcto nunca cuenta.
-const authAttemptLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 5,
-    skipSuccessfulRequests: true,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: "Demasiados intentos fallidos. Espera 15 minutos e inténtalo de nuevo." }
-});
+// adminReadLimiter/adminWriteLimiter (src/middleware/admin-rate-limiters.js)
+// y la protección de intentos de login (src/middleware/admin-auth.js +
+// auth-attempt-limiter.js) reemplazan al viejo adminLimiter único y al
+// authAttemptLimiter global — ver esos archivos para el porqué.
 
 const buffers            = new Map();
 const pendingMessages    = new Map();
@@ -193,29 +181,10 @@ const mapaLidATelefono   = new Map();
 
 app.use(express.json({ limit: "10mb" }));
 app.use(express.static(path.join(__dirname, "public")));
-app.use("/admin", authAttemptLimiter);
-
-const verificarToken = (req, res, next) => {
-    const authHeader = req.headers.authorization || "";
-    const token = authHeader.replace(/^Bearer\s+/i, "");
-    const secret = process.env.ADMIN_TOKEN?.trim();
-    if (!token || token.trim() !== secret) return res.status(401).json({ error: "No autorizado" });
-    next();
-};
-
-// Acceso separado y más limitado: solo para las rutas del CRM de Entregas
-// (/admin/entregas...). Pensado para dar acceso a otra persona (ej. quien
-// coordina las entregas en Cuba) sin exponerle tasas, VIP ni ofertas.
-// El token de admin normal también sigue funcionando aquí.
-const verificarTokenEntregas = (req, res, next) => {
-    const authHeader = req.headers.authorization || "";
-    const token = authHeader.replace(/^Bearer\s+/i, "").trim();
-    const secretAdmin    = process.env.ADMIN_TOKEN?.trim();
-    const secretEntregas = process.env.ENTREGAS_TOKEN?.trim();
-    const valido = token && (token === secretAdmin || (secretEntregas && token === secretEntregas));
-    if (!valido) return res.status(401).json({ error: "No autorizado" });
-    next();
-};
+// verificarToken/verificarTokenEntregas ahora viven en
+// src/middleware/admin-auth.js — ya incluyen su propia protección contra
+// intentos de token inválido (src/middleware/auth-attempt-limiter.js),
+// aplicada por-ruta en vez de globalmente con app.use("/admin", ...).
 
 // ==========================================
 // WEBHOOK
@@ -356,14 +325,14 @@ app.post("/webhook", verificarSecretoWebhook, webhookLimiter, validarPayloadWebh
 // ADMIN
 // ==========================================
 
-app.get("/admin/tasas", adminLimiter, verificarToken, async (req, res) => {
+app.get("/admin/tasas", adminReadLimiter, verificarToken, async (req, res) => {
     try {
         const result = await pool.query("SELECT * FROM rates LIMIT 1");
         res.json(result.rows[0] || {});
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post("/admin/tasas", adminLimiter, verificarToken, async (req, res) => {
+app.post("/admin/tasas", adminWriteLimiter, verificarToken, async (req, res) => {
     try {
         const {
             brl_0, brl_100, brl_500, brl_1000, usd1, usd2, mlc, efectivo, tarifa_entrega,
@@ -406,26 +375,26 @@ app.post("/admin/tasas", adminLimiter, verificarToken, async (req, res) => {
     }
 });
 
-app.get("/admin/clientes", adminLimiter, verificarToken, async (req, res) => {
+app.get("/admin/clientes", adminReadLimiter, verificarToken, async (req, res) => {
     try { res.json(await obtenerTodos()); } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get("/admin/operaciones", adminLimiter, verificarToken, async (req, res) => {
+app.get("/admin/operaciones", adminReadLimiter, verificarToken, async (req, res) => {
     try { res.json(await obtenerTodas()); } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get("/admin/stats", adminLimiter, verificarToken, async (req, res) => {
+app.get("/admin/stats", adminReadLimiter, verificarToken, async (req, res) => {
     try { res.json(await obtenerEstadisticas()); } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get("/admin/crm/stats", adminLimiter, verificarToken, async (req, res) => {
+app.get("/admin/crm/stats", adminReadLimiter, verificarToken, async (req, res) => {
     try {
         const dias = req.query.dias ? Number(req.query.dias) : 30;
         res.json(await crm.obtenerEstadisticasCRM(dias));
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post("/admin/completar-todas-antiguas", adminLimiter, verificarToken, async (req, res) => {
+app.post("/admin/completar-todas-antiguas", adminWriteLimiter, verificarToken, async (req, res) => {
     try {
         const r = await pool.query(`
             UPDATE operations SET status = 'completada', completed_at = NOW()
@@ -438,7 +407,7 @@ app.post("/admin/completar-todas-antiguas", adminLimiter, verificarToken, async 
     }
 });
 
-app.post("/admin/confirmar-operacion/:id", adminLimiter, verificarToken, async (req, res) => {
+app.post("/admin/confirmar-operacion/:id", adminWriteLimiter, verificarToken, async (req, res) => {
     try {
         const operacion = await confirmarOperacion(req.params.id);
         if (!operacion) return res.status(404).json({ success: false, error: "Operación no encontrada" });
@@ -463,7 +432,7 @@ app.post("/admin/confirmar-operacion/:id", adminLimiter, verificarToken, async (
     }
 });
 
-app.post("/admin/completar-operacion/:id", adminLimiter, verificarToken, async (req, res) => {
+app.post("/admin/completar-operacion/:id", adminWriteLimiter, verificarToken, async (req, res) => {
     try {
         const operacion = await completarOperacion(req.params.id);
         if (!operacion) return res.status(404).json({ success: false, error: "Operación no encontrada" });
@@ -516,7 +485,7 @@ app.post("/admin/completar-operacion/:id", adminLimiter, verificarToken, async (
 // Solo entregas de EFECTIVO (CUP/USD) viven aquí.
 // ─────────────────────────────────────────
 
-app.get("/admin/entregas", adminLimiter, verificarTokenEntregas, async (req, res) => {
+app.get("/admin/entregas", adminReadLimiter, verificarTokenEntregas, async (req, res) => {
     try {
         const filtros = {
             q:             req.query.q,
@@ -534,12 +503,12 @@ app.get("/admin/entregas", adminLimiter, verificarTokenEntregas, async (req, res
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get("/admin/entregas/stats", adminLimiter, verificarTokenEntregas, async (req, res) => {
+app.get("/admin/entregas/stats", adminReadLimiter, verificarTokenEntregas, async (req, res) => {
     try { res.json(await entregasService.obtenerEstadisticasEntregas()); }
     catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post("/admin/entregas/:id/entregado", adminLimiter, verificarTokenEntregas, async (req, res) => {
+app.post("/admin/entregas/:id/entregado", adminWriteLimiter, verificarTokenEntregas, async (req, res) => {
     try {
         const entrega = await entregasService.marcarEntregado(req.params.id, req.body.usuario || "Panel admin");
         if (!entrega) return res.status(404).json({ success: false, error: "Entrega no encontrada o ya no está PENDIENTE" });
@@ -559,7 +528,7 @@ app.post("/admin/entregas/:id/entregado", adminLimiter, verificarTokenEntregas, 
     } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
-app.post("/admin/entregas/:id/cancelar", adminLimiter, verificarTokenEntregas, async (req, res) => {
+app.post("/admin/entregas/:id/cancelar", adminWriteLimiter, verificarTokenEntregas, async (req, res) => {
     try {
         const entrega = await entregasService.marcarCancelado(req.params.id, req.body.motivo || "");
         if (!entrega) return res.status(404).json({ success: false, error: "Entrega no encontrada o ya no está PENDIENTE" });
@@ -570,7 +539,7 @@ app.post("/admin/entregas/:id/cancelar", adminLimiter, verificarTokenEntregas, a
 // Pago al contacto en Cuba — individual o agrupado (varias entregas a la vez).
 // Puramente histórico: NO calcula ni convierte monedas, solo guarda lo que
 // se le pasa. Solo afecta entregas que realmente están PENDIENTE_DE_PAGO.
-app.post("/admin/entregas/pago", adminLimiter, verificarTokenEntregas, async (req, res) => {
+app.post("/admin/entregas/pago", adminWriteLimiter, verificarTokenEntregas, async (req, res) => {
     try {
         const { entregaIds, cantidadEnviada, monedaPago, fecha, txid, observacion } = req.body;
         if (!Array.isArray(entregaIds) || entregaIds.length === 0) {
@@ -595,7 +564,7 @@ app.post("/admin/entregas/pago", adminLimiter, verificarTokenEntregas, async (re
     } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
-app.get("/admin/entregas/pago/:codigo", adminLimiter, verificarTokenEntregas, async (req, res) => {
+app.get("/admin/entregas/pago/:codigo", adminReadLimiter, verificarTokenEntregas, async (req, res) => {
     try {
         const pago = await entregasService.obtenerPago(req.params.codigo);
         if (!pago) return res.status(404).json({ error: "Pago no encontrado" });
@@ -603,7 +572,7 @@ app.get("/admin/entregas/pago/:codigo", adminLimiter, verificarTokenEntregas, as
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get("/admin/entregas/:id/historial", adminLimiter, verificarTokenEntregas, async (req, res) => {
+app.get("/admin/entregas/:id/historial", adminReadLimiter, verificarTokenEntregas, async (req, res) => {
     try { res.json(await entregasService.obtenerHistorialDe(req.params.id)); }
     catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -611,7 +580,7 @@ app.get("/admin/entregas/:id/historial", adminLimiter, verificarTokenEntregas, a
 // Tasa CUP/USD → USDT — la puede ver y editar cualquiera de los dos (admin o
 // compañera) desde el propio CRM de Entregas. Solo sirve para sugerir el
 // monto en USDT al registrar un pago; nunca se aplica sola.
-app.get("/admin/entregas/tasa-usdt", adminLimiter, verificarTokenEntregas, async (req, res) => {
+app.get("/admin/entregas/tasa-usdt", adminReadLimiter, verificarTokenEntregas, async (req, res) => {
     try { res.json(await entregasService.obtenerTasasUsdt()); }
     catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -621,7 +590,7 @@ app.get("/admin/entregas/tasa-usdt", adminLimiter, verificarTokenEntregas, async
 // (incluye el monto en reales, que tu compañera no debe ver). No depende de
 // ningún mensaje de WhatsApp, así que evita el problema de "mensaje a uno
 // mismo" que no se podía identificar de forma confiable.
-app.post("/admin/entregas/manual", adminLimiter, verificarToken, async (req, res) => {
+app.post("/admin/entregas/manual", adminWriteLimiter, verificarToken, async (req, res) => {
     try {
         const resultado = await crearEntregaManual(req.body || {});
         if (resultado.error) return res.status(400).json({ error: resultado.error });
@@ -629,7 +598,7 @@ app.post("/admin/entregas/manual", adminLimiter, verificarToken, async (req, res
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post("/admin/entregas/tasa-usdt", adminLimiter, verificarTokenEntregas, async (req, res) => {
+app.post("/admin/entregas/tasa-usdt", adminWriteLimiter, verificarTokenEntregas, async (req, res) => {
     try {
         const actualizado = await entregasService.actualizarTasasUsdt(req.body || {});
         if (!actualizado) return res.status(500).json({ error: "No se pudo actualizar" });
@@ -649,14 +618,14 @@ app.get("/entregas", (req, res) =>
 );
 
 // Recargas
-app.get("/admin/recargas", adminLimiter, verificarToken, async (req, res) => {
+app.get("/admin/recargas", adminReadLimiter, verificarToken, async (req, res) => {
     try {
         const r = await pool.query("SELECT * FROM recargas ORDER BY tipo");
         res.json(r.rows);
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post("/admin/recargas/:tipo", adminLimiter, verificarToken, async (req, res) => {
+app.post("/admin/recargas/:tipo", adminWriteLimiter, verificarToken, async (req, res) => {
     try {
         const { precio, descripcion, activa } = req.body;
         await pool.query(`
@@ -672,14 +641,14 @@ app.post("/admin/recargas/:tipo", adminLimiter, verificarToken, async (req, res)
 });
 
 // Oferta del día
-app.get("/admin/oferta", adminLimiter, verificarToken, async (req, res) => {
+app.get("/admin/oferta", adminReadLimiter, verificarToken, async (req, res) => {
     try {
         const r = await pool.query("SELECT * FROM ofertas LIMIT 1");
         res.json(r.rows[0] || {});
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post("/admin/oferta", adminLimiter, verificarToken, async (req, res) => {
+app.post("/admin/oferta", adminWriteLimiter, verificarToken, async (req, res) => {
     try {
         const { texto, activa, vence_at, texto_vip, activa_vip } = req.body;
         await pool.query(`
