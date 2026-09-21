@@ -30,7 +30,8 @@ const assert = require("node:assert/strict");
 const pool = require("../db");
 const {
     elegirIndicePlantilla, diaDelAnioSaoPaulo, construirAvisoEntrega,
-    enviarAvisosEntregasPendientes, PLANTILLAS_MANANA, PLANTILLAS_TARDE
+    enviarAvisosEntregasPendientes, telefonoClienteParaAviso,
+    PLANTILLAS_MANANA, PLANTILLAS_TARDE
 } = require("../src/services/entregas-avisos");
 const { inicioDiaSaoPauloUTC } = require("../src/utils/timezone");
 
@@ -107,6 +108,36 @@ test("entrega pendiente por la mañana -> se envía un aviso", async (t) => {
     assert.equal(r.enviados, 1);
     assert.equal(mensajesEnviados.length, 1);
     assert.equal(mensajesEnviados[0].phone, "5511900010001");
+});
+
+test("phone y telefono_entrega diferentes -> el aviso pendiente se envía solamente al cliente/pagador", async (t) => {
+    const entrega = { ...ENTREGA_PENDIENTE, phone: "55 11 90000-1001", telefono_entrega: "+53 5 3974728" };
+    mockMundoEntregas(t, { entregasPendientes: [entrega] });
+    const r = await enviarAvisosEntregasPendientes("manana");
+    assert.equal(r.enviados, 1);
+    assert.deepEqual(mensajesEnviados.map(m => m.phone), ["5511900001001"]);
+    assert.ok(!mensajesEnviados.some(m => m.phone === "5353974728"));
+});
+
+test("telefono_entrega existe pero falta phone válido -> omite el aviso y nunca redirige al receptor", async (t) => {
+    const entrega = { ...ENTREGA_PENDIENTE, phone: null, telefono_entrega: "5353974728" };
+    mockMundoEntregas(t, { entregasPendientes: [entrega] });
+    const r = await enviarAvisosEntregasPendientes("tarde");
+    assert.equal(r.enviados, 0);
+    assert.equal(mensajesEnviados.length, 0);
+});
+
+test("phone válido -> exactamente un aviso al cliente", async (t) => {
+    const entrega = { ...ENTREGA_PENDIENTE, phone: "+55 (11) 90000-1001", telefono_entrega: "5353974728" };
+    mockMundoEntregas(t, { entregasPendientes: [entrega] });
+    await enviarAvisosEntregasPendientes("tarde");
+    assert.equal(mensajesEnviados.length, 1);
+    assert.equal(mensajesEnviados[0].phone, "5511900001001");
+});
+
+test("telefonoClienteParaAviso nunca cae a telefono_entrega", () => {
+    assert.equal(telefonoClienteParaAviso({ phone: null, telefono_entrega: "5353974728" }), null);
+    assert.equal(telefonoClienteParaAviso({ phone: "Sin teléfono", telefono_entrega: "5353974728" }), null);
 });
 
 test("entrega pendiente por la tarde -> se envía un aviso", async (t) => {

@@ -82,16 +82,34 @@ function construirAvisoEntrega(entrega, franja, ahora = new Date()) {
     return { mensaje, indice };
 }
 
+// Estos avisos informativos pertenecen al cliente/pagador en Brasil, no al
+// receptor logístico en Cuba. Nunca usar telefono_entrega como fallback.
+function telefonoClienteParaAviso(entrega) {
+    const phone = String(entrega?.phone || "").replace(/\D/g, "");
+    return phone.length >= 8 && phone.length <= 15 ? phone : null;
+}
+
 // ── Orquestación (llamada por el job en index.js) ──
 async function enviarAvisosEntregasPendientes(franja) {
     const inicioDiaUTC = inicioDiaSaoPauloUTC();
     const pendientes = await entregasService.obtenerEntregasPendientesParaAviso(franja, inicioDiaUTC);
     if (!pendientes.length) return { enviados: 0 };
 
+    // Sin WhatsApp válido del cliente se omite de forma segura. El teléfono
+    // del receptor sigue reservado para logística y nunca recibe este aviso.
+    const conCliente = [];
+    for (const entrega of pendientes) {
+        if (!telefonoClienteParaAviso(entrega)) {
+            console.warn(`⚠️ Aviso pendiente omitido para entrega ${entrega.codigo || entrega.id}: sin teléfono válido del cliente`);
+            continue;
+        }
+        conCliente.push(entrega);
+    }
+
     // Blocklist tiene prioridad absoluta -- igual criterio que el resto
     // del sistema (recordatorios CRM, aviso VIP, etc.).
-    const telefono = e => e.telefono_entrega || e.phone;
-    const sinBloqueados = await blockedNumbers.filtrarNoBloqueados(pendientes, telefono);
+    const telefono = telefonoClienteParaAviso;
+    const sinBloqueados = await blockedNumbers.filtrarNoBloqueados(conCliente, telefono);
 
     let enviados = 0;
     for (const entrega of sinBloqueados) {
@@ -119,5 +137,6 @@ module.exports = {
     diaDelAnioSaoPaulo,
     elegirIndicePlantilla,
     construirAvisoEntrega,
+    telefonoClienteParaAviso,
     enviarAvisosEntregasPendientes
 };
