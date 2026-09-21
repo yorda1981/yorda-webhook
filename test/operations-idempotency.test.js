@@ -21,7 +21,8 @@ const {
     completarOperacion,
     existeOperacionPendiente,
     buscarPorRefWeb,
-    obtenerEstadisticas
+    obtenerEstadisticas,
+    obtenerTodas
 } = require("../src/services/operations");
 
 test("confirmarOperacion: usa el guard WHERE status='pendiente' en el UPDATE", async (t) => {
@@ -152,4 +153,28 @@ test("obtenerEstadisticas: agrega TODA la tabla operations, sin filtrar por tipo
     assert.doesNotMatch(sqlUsado, /WHERE.*tipo/is, "no debe filtrar por tipo -- Recargas debe seguir contando en el Resumen General");
     assert.equal(stats.totalOperaciones, 5);
     assert.equal(stats.volumenTotal, 745);
+});
+
+// ── obtenerTodas: expone entrega_cantidad/entrega_moneda (cantidad REAL a
+// entregar, ver public/dashboard.html "A ENTREGAR") sin recalcular nada --
+// solo un LEFT JOIN de solo lectura a la tabla entregas ya existente.
+// operations.cup se guarda en 0 para usd_efectivo (pedido-web-flow.js), así
+// que no es confiable como "cantidad a entregar" -- entregas.cantidad sí lo
+// es siempre, para ambas monedas.
+
+test("obtenerTodas: hace LEFT JOIN a entregas (1:1 por operation_id), sin recalcular tasas ni montos", async (t) => {
+    let sqlUsado = "";
+    t.mock.method(pool, "query", async (sql) => { sqlUsado = sql; return { rows: [] }; });
+    await obtenerTodas();
+    assert.match(sqlUsado, /LEFT JOIN entregas/i);
+    assert.match(sqlUsado, /e\.cantidad AS entrega_cantidad/i);
+    assert.match(sqlUsado, /e\.moneda AS entrega_moneda/i);
+    assert.doesNotMatch(sqlUsado, /\*.*tasa|ROUND|::numeric/i, "no debe recalcular ningún valor, solo exponer lo ya almacenado");
+});
+
+test("obtenerTodas: sigue devolviendo TODAS las columnas de operations (o.*), no reemplaza nada existente", async (t) => {
+    let sqlUsado = "";
+    t.mock.method(pool, "query", async (sql) => { sqlUsado = sql; return { rows: [] }; });
+    await obtenerTodas();
+    assert.match(sqlUsado, /SELECT o\.\*/);
 });

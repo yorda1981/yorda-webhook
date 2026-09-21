@@ -104,7 +104,18 @@ async function completarOperacion(id) {
 
 async function obtenerTodas() {
     try {
-        const result = await pool.query("SELECT * FROM operations ORDER BY created_at DESC");
+        // LEFT JOIN de solo lectura a entregas (1:1 por operation_id) -- para
+        // cup_efectivo/usd_efectivo, operations.cup NO es confiable como
+        // "cantidad a entregar" (se guarda en 0 para USD, ver
+        // pedido-web-flow.js). entregas.cantidad/moneda sí lo son siempre,
+        // para ambas monedas. No se recalcula nada -- son los mismos valores
+        // ya almacenados, solo expuestos aparte para el dashboard.
+        const result = await pool.query(`
+            SELECT o.*, e.cantidad AS entrega_cantidad, e.moneda AS entrega_moneda
+            FROM operations o
+            LEFT JOIN entregas e ON e.operation_id = o.id
+            ORDER BY o.created_at DESC
+        `);
         return result.rows;
     } catch (err) {
         console.error("❌ Error obteniendo operaciones:", err.message);

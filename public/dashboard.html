@@ -173,7 +173,7 @@
                             <tr>
                                 <th>Fecha</th>
                                 <th>Cliente</th>
-                                <th>Monto</th>
+                                <th>A ENTREGAR</th>
                                 <th>Tarjeta / Entrega</th>
                                 <th>Tipo</th>
                                 <th>Acción</th>
@@ -205,7 +205,7 @@
                                 <th>Fecha</th>
                                 <th>Beneficiario</th>
                                 <th>Entrega</th>
-                                <th>Monto</th>
+                                <th>A ENTREGAR</th>
                                 <th>Tipo</th>
                                 <th>Acción</th>
                             </tr>
@@ -733,6 +733,41 @@
             return !!op && typeof op.tipo === "string" && op.tipo.startsWith("recarga_");
         }
 
+        function esOperacionDeEntrega(op) {
+            return !!op && (op.tipo === "cup_efectivo" || op.tipo === "usd_efectivo");
+        }
+
+        // Etiqueta visual de tipo para Entregas -- solo presentación, nunca
+        // toca op.tipo (el valor interno "cup_efectivo"/"usd_efectivo" sigue
+        // intacto en la base de datos y en cualquier otro lugar que lo lea).
+        function etiquetaTipoEntrega(tipo) {
+            if (tipo === "cup_efectivo") return "CUP efectivo";
+            if (tipo === "usd_efectivo") return "USD efectivo";
+            return tipo;
+        }
+
+        // Cantidad REAL a entregar al receptor en Cuba -- nunca operations.monto
+        // (eso es lo pagado en BRL). Prioriza entrega_cantidad/entrega_moneda
+        // (viene del JOIN a la tabla entregas en /admin/operaciones, ver
+        // src/services/operations.js:obtenerTodas) porque operations.cup se
+        // guarda en 0 para usd_efectivo y no es confiable ahí. Nunca recalcula
+        // con tasas -- son los mismos valores ya almacenados al crear la entrega.
+        function montoAEntregarHtml(op) {
+            const cantidad = op.entrega_cantidad != null ? Number(op.entrega_cantidad) : Number(op.cup || 0);
+            const moneda = op.entrega_moneda || (op.tipo === "usd_efectivo" ? "USD" : "CUP");
+            let cantidadFmt;
+            if (moneda === "USD") {
+                // Limpio: sin decimales si es un número entero, con 2 decimales
+                // (coma) solo si realmente hay centavos -- nunca ".00" de más.
+                cantidadFmt = Number.isInteger(cantidad)
+                    ? cantidad.toLocaleString("es-ES")
+                    : cantidad.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            } else {
+                cantidadFmt = Math.round(cantidad).toLocaleString("es-ES");
+            }
+            return `<span style="color:var(--yellow);font-weight:700;">💵 ${cantidadFmt} ${moneda}</span>`;
+        }
+
         // Destinatario del comprobante: señal, nunca bloqueo -- solo se muestra
         // cuando OCR pudo determinar que NO coincide con el esperado
         // (comprobante_datos.destinatarioMatch === "diferente"). Nunca inventa
@@ -1008,17 +1043,19 @@
                     tablaPendientes.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#8b949e;padding:20px;">Todo al día. No hay pagos pendientes.</td></tr>';
                 } else {
                     tablaPendientes.innerHTML = pendientes.map(op => {
-                        const esEntrega = op.tipo === "cup_efectivo" || op.tipo === "usd_efectivo";
+                        const esEntrega = esOperacionDeEntrega(op);
                         const colEntrega = esEntrega
                             ? `<small>🚚 ${op.municipio || "-"}, ${op.provincia || "-"}</small>`
                             : `<span style="font-family:monospace;font-size:12px;color:#8b949e;">${op.tarjeta ? "•••• " + op.tarjeta.slice(-4) : "-"}</span>`;
+                        const colMonto = esEntrega ? montoAEntregarHtml(op) : `<span style="color:var(--yellow);font-weight:700;">R$ ${op.monto}</span>`;
+                        const colTipo = esEntrega ? etiquetaTipoEntrega(op.tipo) : op.tipo;
                         return `
                         <tr>
                             <td>${new Date(op.created_at).toLocaleDateString("pt-BR")}<br><small>${new Date(op.created_at).toLocaleTimeString("pt-BR")}</small></td>
                             <td><strong>${op.titular || op.nombre}</strong>${avisoDestinatarioHtml(op)}</td>
-                            <td style="color:var(--yellow);font-weight:700;">R$ ${op.monto}</td>
+                            <td>${colMonto}</td>
                             <td>${colEntrega}</td>
-                            <td><small>${op.tipo}</small></td>
+                            <td><small>${colTipo}</small></td>
                             <td><button class="btn-confirm" onclick="confirmar('${op.id}', this)">VERIFICADO</button></td>
                         </tr>`;
                     }).join("");
@@ -1033,17 +1070,19 @@
                     tablaEnProceso.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#8b949e;padding:20px;">No hay operaciones en proceso.</td></tr>';
                 } else {
                     tablaEnProceso.innerHTML = enProceso.map(op => {
-                        const esEntrega = op.tipo === "cup_efectivo" || op.tipo === "usd_efectivo";
+                        const esEntrega = esOperacionDeEntrega(op);
                         const colEntrega = esEntrega
                             ? `<small>🚚 ${op.direccion || "-"}<br>${op.municipio || "-"}, ${op.provincia || "-"}</small>`
                             : `<span style="font-family:monospace;font-size:12px;color:#8b949e;">${op.tarjeta ? "•••• " + op.tarjeta.slice(-4) : "-"}</span>`;
+                        const colMonto = esEntrega ? montoAEntregarHtml(op) : `<span style="color:var(--yellow);font-weight:700;">R$ ${op.monto}</span>`;
+                        const colTipo = esEntrega ? etiquetaTipoEntrega(op.tipo) : op.tipo;
                         return `
                         <tr>
                             <td>${new Date(op.created_at).toLocaleDateString("pt-BR")}</td>
                             <td><strong>${op.titular || op.nombre}</strong>${avisoDestinatarioHtml(op)}</td>
                             <td>${colEntrega}</td>
-                            <td style="color:var(--yellow);font-weight:700;">R$ ${op.monto}</td>
-                            <td><small>${op.tipo}</small></td>
+                            <td>${colMonto}</td>
+                            <td><small>${colTipo}</small></td>
                             <td><button class="btn-confirm" onclick="completar('${op.id}', this)">COMPLETAR</button></td>
                         </tr>`;
                     }).join("");
