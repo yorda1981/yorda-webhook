@@ -7,6 +7,13 @@
 // Mockea pool.query (nunca toca Postgres real) y usa temporizadores falsos
 // de node:test para probar la ventana de deduplicación sin esperar 5
 // minutos de verdad.
+//
+// Fase 6: yaFueProcesado ahora es async (INSERT ... ON CONFLICT contra
+// webhook_events es la fuente de verdad; el Set en memoria es solo el
+// filtro rápido de primera línea). "insertado" simula un messageId nuevo
+// (RETURNING trae la fila); "0 filas" simula que ya existía — en Postgres
+// real, esto pasa tanto si ESTE proceso ya lo vio como si lo vio OTRA
+// instancia.
 // ─────────────────────────────────────────────────────────
 
 const test = require("node:test");
@@ -15,38 +22,70 @@ const assert = require("node:assert/strict");
 const pool = require("../db");
 const { yaFueProcesado, activarPausaHumana, enPausaHumana, _internos } = require("../src/services/webhook-guard");
 
+function mockInsertNuevo(t) {
+    return t.mock.method(pool, "query", async (sql) => {
+        if (/INSERT INTO webhook_events/.test(sql)) return { rows: [{ message_id: "x" }] };
+        return { rows: [] };
+    });
+}
+function mockInsertDuplicado(t) {
+    return t.mock.method(pool, "query", async (sql) => {
+        if (/INSERT INTO webhook_events/.test(sql)) return { rows: [] };
+        return { rows: [] };
+    });
+}
+
 // ── yaFueProcesado — deduplicación de messageId (reintentos de Z-API) ──
 
-test("mensaje nuevo -> false (no estaba procesado)", () => {
-    assert.equal(yaFueProcesado("msg-nuevo-1"), false);
+test("mensaje nuevo -> false (no estaba procesado)", async (t) => {
+    mockInsertNuevo(t);
+    assert.equal(await yaFueProcesado("msg-nuevo-1"), false);
 });
 
-test("mismo messageId dos veces seguidas -> la segunda es true (reintento del proveedor)", () => {
+test("mismo messageId dos veces seguidas -> la segunda es true, sin llegar a tocar la DB (filtro en memoria)", async (t) => {
     const id = "msg-retry-1";
-    assert.equal(yaFueProcesado(id), false); // primera vez: se procesa
-    assert.equal(yaFueProcesado(id), true);  // reintento: se descarta
+    let llamadasDB = 0;
+    t.mock.method(pool, "query", async () => { llamadasDB++; return { rows: [{ message_id: "x" }] }; });
+    assert.equal(await yaFueProcesado(id), false); // primera vez: se procesa, sí toca la DB
+    assert.equal(await yaFueProcesado(id), true);  // reintento: lo corta el Set en memoria, sin otra query
+    assert.equal(llamadasDB, 1);
 });
 
-test("sin messageId (undefined/null) -> siempre false, nunca bloquea el flujo", () => {
-    assert.equal(yaFueProcesado(undefined), false);
-    assert.equal(yaFueProcesado(null), false);
-    assert.equal(yaFueProcesado(""), false);
+test("sin messageId (undefined/null) -> siempre false, nunca toca la DB", async (t) => {
+    let llamadasDB = 0;
+    t.mock.method(pool, "query", async () => { llamadasDB++; return { rows: [] }; });
+    assert.equal(await yaFueProcesado(undefined), false);
+    assert.equal(await yaFueProcesado(null), false);
+    assert.equal(await yaFueProcesado(""), false);
+    assert.equal(llamadasDB, 0);
 });
 
-test("messageId distintos no se pisan entre sí", () => {
-    assert.equal(yaFueProcesado("msg-a"), false);
-    assert.equal(yaFueProcesado("msg-b"), false);
-    assert.equal(yaFueProcesado("msg-a"), true);
-    assert.equal(yaFueProcesado("msg-b"), true);
+test("messageId distintos no se pisan entre sí", async (t) => {
+    mockInsertNuevo(t);
+    assert.equal(await yaFueProcesado("msg-a"), false);
+    assert.equal(await yaFueProcesado("msg-b"), false);
+    assert.equal(await yaFueProcesado("msg-a"), true); // memoria
+    assert.equal(await yaFueProcesado("msg-b"), true); // memoria
 });
 
-test("pasada la ventana de 5 minutos, el mismo messageId ya no se considera duplicado", (t) => {
+test("messageId ya visto por OTRA instancia (no está en la memoria de este proceso, pero sí en Postgres) -> true", async (t) => {
+    mockInsertDuplicado(t); // ON CONFLICT DO NOTHING -> 0 filas
+    assert.equal(await yaFueProcesado("msg-de-otra-instancia"), true);
+});
+
+test("si Postgres falla (tabla no migrada, conexión caída) -> false, nunca bloquea el webhook", async (t) => {
+    t.mock.method(pool, "query", async () => { throw new Error("relation \"webhook_events\" does not exist"); });
+    assert.equal(await yaFueProcesado("msg-sin-tabla"), false);
+});
+
+test("pasada la ventana de 5 minutos, el mismo messageId vuelve a consultar la DB", async (t) => {
     t.mock.timers.enable({ apis: ["setTimeout"] });
+    mockInsertNuevo(t);
     const id = "msg-expira";
-    assert.equal(yaFueProcesado(id), false);
-    assert.equal(yaFueProcesado(id), true); // todavía dentro de la ventana
+    assert.equal(await yaFueProcesado(id), false);
+    assert.equal(await yaFueProcesado(id), true); // todavía dentro de la ventana (memoria)
     t.mock.timers.tick(5 * 60 * 1000 + 1);
-    assert.equal(yaFueProcesado(id), false); // expiró -> se trata como nuevo otra vez
+    assert.equal(await yaFueProcesado(id), false); // expiró en memoria -> vuelve a preguntarle a Postgres (mock: sigue "nuevo")
     t.mock.timers.reset();
 });
 
