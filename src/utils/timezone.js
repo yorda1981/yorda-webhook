@@ -78,4 +78,14 @@ function inicioDiaSaoPauloUTC(fecha = new Date()) {
     return saoPauloLocalAUTC(`${fechaSaoPaulo(fecha)}T00:00`);
 }
 
-module.exports = { ZONA_NEGOCIO, saoPauloLocalAUTC, utcASaoPauloLocal, fechaSaoPaulo, inicioDiaSaoPauloUTC };
+// Hora local (0-23) en America/Sao_Paulo para un instante dado (por
+// defecto ahora mismo) -- usa el mismo mecanismo Intl que el resto de este
+// archivo, en vez de asumir un offset fijo a mano. Se usa para elegir la
+// franja del saludo (mañana/tarde/noche) -- ver src/services/openai.js y
+// src/services/reglas-bot.js:franjaPorHora().
+function horaSaoPaulo(fecha = new Date()) {
+    const partes = partesEnZona(fecha, ZONA_NEGOCIO);
+    return partes.hour === "24" ? 0 : Number(partes.hour);
+}
+
+module.exports = { ZONA_NEGOCIO, saoPauloLocalAUTC, utcASaoPauloLocal, fechaSaoPaulo, inicioDiaSaoPauloUTC, horaSaoPaulo };

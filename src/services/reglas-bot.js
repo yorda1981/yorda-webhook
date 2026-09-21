@@ -380,7 +380,51 @@ function esPreguntaExploratoria(txt) {
     return /\bcomo funciona\b|\bque opciones tienen\b|\bcuales? son las opciones\b|\bcuanto seria\b|\bcomo es el proceso\b|\bque necesito para enviar\b|\bcomo funciona isso\b|\bcomo funciona o processo\b|\bquais (as )?opcoes\b|\bquanto seria\b/.test(txt);
 }
 
+// ─────────────────────────────────────────────────────────
+// HUMANIZACIÓN DE SALUDOS
+//
+// Funciones puras usadas por manejarSaludo() en openai.js. NUNCA deciden
+// SI se saluda (eso lo sigue decidiendo el gate `esSaludo` existente, sin
+// tocar) -- solo QUÉ franja usar y QUÉ nombre mostrar, dado que ya se
+// decidió responder con un saludo.
+// ─────────────────────────────────────────────────────────
+
+// Franja según la hora real (America/Sao_Paulo) -- mismos cortes que ya
+// usaba manejarSaludo() antes de esta fase (h<12 mañana, h<18 tarde, resto
+// noche), solo que ahora es una función con nombre y testeable sola.
+function franjaPorHora(horaSaoPaulo) {
+    const h = Number(horaSaoPaulo);
+    if (h < 12) return "manana";
+    if (h < 18) return "tarde";
+    return "noche";
+}
+
+// Si el cliente escribió explícitamente "buenos días"/"boa tarde"/etc.,
+// se le corresponde con ESA franja (más natural que "corregirlo" con la
+// hora real del servidor) -- null si el saludo es genérico ("hola"/"hi"),
+// caso en el que el caller debe usar franjaPorHora() en su lugar.
+function franjaSaludoExplicita(txt) {
+    if (/\bbuenos? d[ií]as\b|\bbom dia\b/.test(txt)) return "manana";
+    if (/\bbuenas tardes\b|\bboa tarde\b/.test(txt)) return "tarde";
+    if (/\bbuenas noches\b|\bboa noite\b/.test(txt)) return "noche";
+    return null;
+}
+
+// Nombre de pila "confiable" para usar en el saludo -- nunca se inventa:
+// descarta vacíos y el placeholder genérico "Cliente" que usan varios
+// flujos (ej. agregarOperacion) cuando no se conoce el nombre real. Si no
+// hay nada confiable, devuelve null (el caller debe entonces saludar sin
+// nombre, nunca con un valor inventado).
+function primerNombreConfiable(nombre) {
+    const limpio = String(nombre || "").trim();
+    if (!limpio || limpio.toLowerCase() === "cliente") return null;
+    return limpio.split(" ")[0];
+}
+
 module.exports = {
+    franjaPorHora,
+    franjaSaludoExplicita,
+    primerNombreConfiable,
     clienteEstaOcupado,
     tieneContextoReemplazable,
     esFraseDeAbandonoExplicito,

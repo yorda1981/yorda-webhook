@@ -12,8 +12,10 @@ const {
     debeCompletarConMontoPendiente, debeConfirmarCotizacion, tieneTarjetaGuardada, esConsultaTasas, esIntencionSinMonto, yaAvisoEntregaReciente,
     contextoUtilizable, interpretarSeleccionOpcion, interpretarTarjetaPorPalabra,
     esRechazoTarjeta, esPausaTemporal, esSenalConfusion, esCierreNatural, esPreguntaExploratoria,
-    interpretarAccionRecarga
+    interpretarAccionRecarga,
+    franjaPorHora, franjaSaludoExplicita, primerNombreConfiable
 } = require("./reglas-bot");
+const { horaSaoPaulo } = require("../utils/timezone");
 
 // Flows
 const { detectarImagenUnificada, detectarComprobantePDF, llamarAsistente } = require("../flows/imagen-flow");
@@ -108,7 +110,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
 
         // ── Saludo ──
         const esSaludo = /^(hola|oi|bom dia|buenas|buenos dias|boa tarde|boa noite|buen dia|hey|hi|hello|e ai|eai|buenas tardes|buenas noches|good morning)[\s!?.]*$/.test(txt);
-        if (esSaludo) return await manejarSaludo(phone, pushName, cliente, yaSaludado, lang, esEs);
+        if (esSaludo) return await manejarSaludo(phone, pushName, cliente, yaSaludado, lang, esEs, txt);
 
         // ── Filtro de gatillo ──
         const txtTrim = txt.trim();
@@ -677,25 +679,135 @@ function detectarTarjetaTexto(text) {
     return digits;
 }
 
-async function manejarSaludo(phone, pushName, cliente, yaSaludado, lang, esEs) {
-    const n    = pushName ? pushName.split(" ")[0] : null;
-    const frec = !!cliente?.cliente_frecuente;
-    const h    = new Date(Date.now() - 3 * 60 * 60 * 1000).getUTCHours();
+// ─────────────────────────────────────────
+// PLANTILLAS DE SALUDO — deterministas (conjunto fijo + pick(), nunca IA
+// libre), separadas por: cliente frecuente / cliente registrado (no
+// frecuente) / cliente nuevo, y por franja horaria dentro de cada uno
+// (salvo "frecuente", que mantiene exactamente las mismas 2 variantes que
+// ya tenía antes de esta fase -- no se tocó, no fue parte de lo pedido).
+//
+// Cada plantilla es (sufijoNombre) => texto -- `sufijoNombre` ya viene
+// formateado (", Lourdes" en ES / " Lourdes" en PT) o "" si no hay nombre
+// confiable, nunca "undefined"/"null" interpolado.
+// ─────────────────────────────────────────
+
+const SALUDO_FRECUENTE = {
+    es: [
+        (n) => `¡Hola${n}! Qué bueno verte de nuevo 😊 ¿En qué te ayudo hoy?`,
+        (n) => `¡Hola${n}! Siempre un placer 😊 ¿Qué necesitas?`
+    ],
+    pt: [
+        (n) => `Oi${n}! Que bom te ver de novo 😊 Em que posso te ajudar hoje?`,
+        (n) => `Olá${n}! Sempre bom contar com você 😊 O que precisa hoje?`
+    ]
+};
+
+// Cliente registrado (existe en `customers`) pero no frecuente -- se le
+// saluda por su nombre (si es confiable) y se asume que probablemente
+// quiere enviar, ya que es alguien que ya interactuó antes.
+const SALUDO_REGISTRADO = {
+    es: {
+        manana: [
+            (n) => `¡Buenos días${n}! 😊 Qué gusto saludarte. ¿Cuánto quieres enviar hoy?`,
+            (n) => `¡Hola${n}, buenos días! ☀️ ¿Cuánto quieres enviar hoy?`,
+            (n) => `Buenos días${n} 👋 ¿Cómo estás? ¿Cuánto deseas enviar?`
+        ],
+        tarde: [
+            (n) => `Buenas tardes${n} 👋😊 ¿Cómo estás? ¿Cuánto deseas enviar?`,
+            (n) => `¡Hola${n}! Buenas tardes 🌤️ ¿Cuánto quieres enviar hoy?`,
+            (n) => `Buenas tardes${n} 😊 Qué gusto saludarte. ¿Qué necesitas?`
+        ],
+        noche: [
+            (n) => `¡Buenas noches${n}! 🌙 Qué gusto tenerte por aquí. ¿Qué deseas hacer?`,
+            (n) => `Buenas noches${n} 😊 ¿En qué te ayudo?`,
+            (n) => `¡Hola${n}! Buenas noches 🌙 ¿Qué necesitas?`
+        ]
+    },
+    pt: {
+        manana: [
+            (n) => `Bom dia${n}! 😊 Que bom te saudar. Quanto quer enviar hoje?`,
+            (n) => `Olá${n}, bom dia! ☀️ Quanto quer enviar hoje?`,
+            (n) => `Bom dia${n} 👋 Como você está? Quanto deseja enviar?`
+        ],
+        tarde: [
+            (n) => `Boa tarde${n} 👋😊 Como você está? Quanto deseja enviar?`,
+            (n) => `Oi${n}! Boa tarde 🌤️ Quanto quer enviar hoje?`,
+            (n) => `Boa tarde${n} 😊 Que bom te saudar. O que precisa?`
+        ],
+        noche: [
+            (n) => `Boa noite${n}! 🌙 Que bom ter você por aqui. O que deseja fazer?`,
+            (n) => `Boa noite${n} 😊 Em que posso ajudar?`,
+            (n) => `Oi${n}! Boa noite 🌙 O que precisa?`
+        ]
+    }
+};
+
+// Cliente nuevo (nunca escribió antes, `cliente` no existe en `customers`)
+// -- NUNCA se asume que quiere enviar dinero, ni se inventa un nombre.
+const SALUDO_NUEVO = {
+    es: {
+        manana: [
+            () => `¡Buenos días! 😊 Bienvenido a Yorda Envíos. ¿En qué podemos ayudarte?`,
+            () => `Buenos días 👋 Gracias por escribirnos. ¿Qué deseas hacer?`
+        ],
+        tarde: [
+            () => `¡Buenas tardes! 😊 Bienvenido a Yorda Envíos. ¿En qué podemos ayudarte?`,
+            () => `Hola 👋😊 Buenas tardes. Gracias por escribirnos. ¿Qué deseas hacer?`
+        ],
+        noche: [
+            () => `¡Buenas noches! 😊 Bienvenido a Yorda Envíos. ¿En qué podemos ayudarte?`,
+            () => `Hola 👋 Buenas noches. Gracias por escribirnos. ¿Qué deseas hacer?`
+        ]
+    },
+    pt: {
+        manana: [
+            () => `Bom dia! 😊 Bem-vindo à Yorda Envíos. Em que podemos ajudar?`,
+            () => `Bom dia 👋 Obrigado por escrever. O que deseja fazer?`
+        ],
+        tarde: [
+            () => `Boa tarde! 😊 Bem-vindo à Yorda Envíos. Em que podemos ajudar?`,
+            () => `Oi 👋😊 Boa tarde. Obrigado por escrever. O que deseja fazer?`
+        ],
+        noche: [
+            () => `Boa noite! 😊 Bem-vindo à Yorda Envíos. Em que podemos ajudar?`,
+            () => `Oi 👋 Boa noite. Obrigado por escrever. O que deseja fazer?`
+        ]
+    }
+};
+
+// Función pura (exportada para pruebas automáticas) -- dado el contexto ya
+// decidido por el caller (nunca decide ella misma si corresponde saludar),
+// arma el texto final. `nombre` ya viene filtrado por primerNombreConfiable
+// -- null/"" nunca se interpola.
+function construirSaludo({ lang, esRegistrado, frecuente, nombre, franja }) {
+    const idioma = lang === "pt" ? "pt" : "es";
+    const sufijoNombre = nombre ? (idioma === "pt" ? ` ${nombre}` : `, ${nombre}`) : "";
+
+    let plantillas;
+    if (frecuente) plantillas = SALUDO_FRECUENTE[idioma];
+    else if (esRegistrado) plantillas = SALUDO_REGISTRADO[idioma][franja] || SALUDO_REGISTRADO[idioma].tarde;
+    else plantillas = SALUDO_NUEVO[idioma][franja] || SALUDO_NUEVO[idioma].tarde;
+
+    return pick(plantillas)(sufijoNombre);
+}
+
+async function manejarSaludo(phone, pushName, cliente, yaSaludado, lang, esEs, txt = "") {
     if (!yaSaludado) {
-        let s;
-        if (lang === "pt") {
-            const pn = n ? ` ${n}` : "";
-            if (frec)      s = pick([`Oi${pn}! Que bom te ver de novo 😊 Em que posso te ajudar hoje?`, `Olá${pn}! Sempre bom contar com você 😊 O que precisa hoje?`]);
-            else if (h < 12) s = pick([`Bom dia${pn}! ☀️ Como posso te ajudar?`, `Olá${pn}, bom dia! ☀️ Em que posso ajudar?`]);
-            else if (h < 18) s = pick([`Boa tarde${pn}! 🌤️ Como posso te ajudar?`, `Oi${pn}! Boa tarde ☀️ Em que posso ajudar hoje?`]);
-            else             s = pick([`Boa noite${pn}! 🌙 Como posso te ajudar?`, `Oi${pn}! Boa noite 🌙 Estou aqui para o que precisar.`]);
-        } else {
-            const pn = n ? `, ${n}` : "";
-            if (frec)      s = pick([`¡Hola${pn}! Qué bueno verte de nuevo 😊 ¿En qué te ayudo hoy?`, `¡Hola${pn}! Siempre un placer 😊 ¿Qué necesitas?`]);
-            else if (h < 12) s = pick([`¡Buenos días${pn}! ☀️ ¿En qué te puedo ayudar?`, `¡Hola${pn}, buenos días! ☀️ ¿Qué necesitas?`]);
-            else if (h < 18) s = pick([`¡Buenas tardes${pn}! 🌤️ ¿En qué te ayudo?`, `¡Hola${pn}! Buenas tardes 😊 ¿Qué necesitas?`]);
-            else             s = pick([`¡Buenas noches${pn}! 🌙 ¿En qué te ayudo?`, `¡Hola${pn}! Buenas noches 😊 ¿Qué necesitas?`]);
-        }
+        // "Registrado" = existe una fila en `customers` para este teléfono
+        // (ya escribió antes), sin importar si tiene operaciones reales --
+        // eso es "frecuente", un caso más específico dentro de "registrado".
+        const esRegistrado = !!cliente;
+        const frecuente = !!cliente?.cliente_frecuente;
+        // Preferir el nombre YA GUARDADO (de operaciones/conversaciones
+        // anteriores, más confiable) sobre el nombre del perfil de WhatsApp
+        // del mensaje actual -- nunca se inventa uno si ninguno es confiable.
+        const nombre = primerNombreConfiable(cliente?.nombre) || primerNombreConfiable(pushName);
+        // Si el cliente ya dijo "buenos días"/"boa noite"/etc., se le
+        // corresponde con esa franja -- si el saludo es genérico ("hola"),
+        // se usa la hora real de Brasil.
+        const franja = franjaSaludoExplicita(txt) || franjaPorHora(horaSaoPaulo());
+
+        const s = construirSaludo({ lang, esRegistrado, frecuente, nombre, franja });
         await guardarCliente({ phone, saludoEnviado: true });
         await enviarSeguro(phone, s);
         return s;
@@ -783,4 +895,9 @@ async function preguntarCantidadUSD(phone, txt, lang, esEs) {
     await enviarSeguro(phone, m); return m;
 }
 
-module.exports = { detectarImagenUnificada, detectarComprobantePDF, procesarMensaje, extraerMonto, detectarTarjetaTexto };
+module.exports = {
+    detectarImagenUnificada, detectarComprobantePDF, procesarMensaje, extraerMonto, detectarTarjetaTexto,
+    // exportada aparte para pruebas automáticas del formato de saludo sin
+    // pasar por todo el router -- es pura, no manda WhatsApp ni toca la DB.
+    construirSaludo
+};
