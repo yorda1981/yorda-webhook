@@ -25,6 +25,29 @@ async function leerDescripcionRecarga(tipoRecarga) {
         return null;
     }
 }
+
+// Revalidación final de disponibilidad -- justo antes de crear la operación
+// real (agregarOperacion), no solo al elegir la modalidad o mostrar el PIX.
+// El cliente puede haber empezado el flujo cuando la modalidad estaba activa
+// y haberla completado después de que el admin la desactivó o venció (fecha
+// límite de Internacional) -- una modalidad desactivada/vencida NO puede
+// crear una operación nueva solo porque el flujo arrancó antes. Consulta
+// directa a `recargas` (mismo motivo que leerDescripcionRecarga: evitar el
+// ciclo de imports con recarga-flow.js).
+async function recargaSigueActiva(tipoRecarga) {
+    try {
+        const r = await pool.query(`
+            SELECT 1 FROM recargas
+            WHERE tipo = $1 AND activa = true
+              AND (disponible_hasta IS NULL OR disponible_hasta >= NOW())
+            LIMIT 1
+        `, [tipoRecarga]);
+        return r.rows.length > 0;
+    } catch (e) {
+        console.error("❌ Error revalidando disponibilidad de recarga:", e.message);
+        return false;
+    }
+}
 const {
     enviarSeguro, limpiarSesion, fmt, pick, pickL,
     getPIXKey, getPIXHolder, getPIXBank, getPIXImage, getAdminPhone,
@@ -247,6 +270,29 @@ async function intentarCompletarOperacion(phone, pushName, cliente, esEs) {
         const dup = await buscarOperacionPorIdentidad(identidadStaged);
         if (dup) {
             await responderComprobanteDuplicado(phone, dup, esEs);
+            return true;
+        }
+    }
+
+    // Revalidación de punta a punta (punto 5): justo antes de crear la
+    // operación, se vuelve a comprobar que la modalidad de recarga sigue
+    // activa y no venció -- el flujo pudo haber empezado cuando SÍ estaba
+    // disponible. El comprobante ya recibido se PRESERVA (no se pierde ni se
+    // completa una venta que ya no corresponde) y se ofrece la alternativa.
+    if (esRecarga) {
+        const tipoRecargaKey = String(cliente.tipo_favorito || "").replace("recarga_", "");
+        const sigueActiva = await recargaSigueActiva(tipoRecargaKey);
+        if (!sigueActiva) {
+            await enviarSeguro(phone, esEs
+                ? "Justo esa modalidad de recarga dejó de estar disponible mientras confirmábamos tu pago 😕 Tu comprobante quedó guardado -- dime si quieres otra modalidad o espera que Yordanys lo revise."
+                : "Essa modalidade de recarga deixou de estar disponível enquanto confirmávamos seu pagamento 😕 Seu comprovante ficou salvo -- me diga se quer outra modalidade ou aguarde o Yordanys revisar."
+            );
+            const adminPhone = getAdminPhone();
+            if (adminPhone) {
+                await enviarSeguro(adminPhone,
+                    `⚠️ *RECARGA VENCIDA/DESACTIVADA CON COMPROBANTE EN CURSO*\n\n${phone} envió comprobante para recarga "${tipoRecargaKey}" pero esa modalidad ya no está disponible. Comprobante preservado, sin operación creada -- revisar manualmente.`
+                );
+            }
             return true;
         }
     }

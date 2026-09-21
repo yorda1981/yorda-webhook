@@ -11,7 +11,8 @@ const {
     clienteEstaOcupado, tieneContextoReemplazable, esFraseDeAbandonoExplicito,
     debeCompletarConMontoPendiente, debeConfirmarCotizacion, tieneTarjetaGuardada, esConsultaTasas, esIntencionSinMonto, yaAvisoEntregaReciente,
     contextoUtilizable, interpretarSeleccionOpcion, interpretarTarjetaPorPalabra,
-    esRechazoTarjeta, esPausaTemporal, esSenalConfusion, esCierreNatural, esPreguntaExploratoria
+    esRechazoTarjeta, esPausaTemporal, esSenalConfusion, esCierreNatural, esPreguntaExploratoria,
+    interpretarAccionRecarga
 } = require("./reglas-bot");
 
 // Flows
@@ -19,7 +20,10 @@ const { detectarImagenUnificada, detectarComprobantePDF, llamarAsistente } = req
 const { enviarPIX, _enviarPIXFinal, intentarCompletarOperacion, procesarComprobante, guardarTarjeta } = require("../flows/pix-flow");
 const { cotizarBRL, cotizarUSD, preguntarTipoUSD, cotizarMLC, tasaMLC, detectarCUPInverso, cotizarCUPInverso, consultarTasas } = require("../flows/cotizacion-flow");
 const { calcularOperacion } = require("./calculator");
-const { mostrarMenuRecargas, seleccionarRecarga, procesarNumeroRecarga } = require("../flows/recarga-flow");
+const {
+    mostrarMenuRecargas, intentarSeleccionDirecta, seleccionarRecarga, procesarNumeroRecarga,
+    confirmarResumenRecarga, cambiarModalidadRecarga, cambiarNumeroRecarga
+} = require("../flows/recarga-flow");
 const {
     enviarSeguro, limpiarSesion, getAdminPhone,
     norm, esPDF, pick, pickL, fmt,
@@ -216,17 +220,60 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         // ── Imágenes ──
         if (imageUrl) return await manejarImagen(phone, pushName, cliente, imageUrl, lang, esEs);
 
+        // ── Recargas: selección natural, número, resumen y cambios ──
         // FIX 2: Recarga sube antes de tarjetas — tiene su propio estado y no debe
-        // pasar por checks de tarjeta/monto innecesariamente
+        // pasar por checks de tarjeta/monto innecesariamente.
+        const enFlujoRecarga = cliente?.estado === "seleccionando_recarga" ||
+            cliente?.estado === "aguardando_numero_recarga" ||
+            cliente?.estado === "confirmando_recarga";
+
+        // Disparador del menú -- si el cliente ya nombra una modalidad puntual
+        // ("quiero una recarga internacional") se salta directo a esa opción
+        // (ver nombraModalidadRecarga en reglas-bot.js), sin ampliar el
+        // gatillo global en sí mismo (sigue siendo el mismo regex de siempre).
         if (/recarga|recargar|recargas|recarga etecsa|recarga cuba|recargar telefono|recarga movil/.test(txt) &&
-            cliente?.estado !== "aguardando_numero_recarga" && cliente?.estado !== "aguardando_comprovante")
+            cliente?.estado !== "aguardando_comprovante" && !enFlujoRecarga) {
+            const directa = await intentarSeleccionDirecta(phone, text);
+            if (directa !== null) return directa;
             return await mostrarMenuRecargas(phone);
+        }
 
-        if (cliente?.estado === "seleccionando_recarga" && /^[12]$/.test(txt.trim()))
-            return await seleccionarRecarga(phone, txt.trim());
+        if (enFlujoRecarga) {
+            // Acciones administrativas del propio flujo (cambiar modalidad/
+            // número, cancelar) -- solo dentro del contexto de recarga activo,
+            // nunca amplían triggers globales (ver interpretarAccionRecarga en
+            // reglas-bot.js).
+            const accion = interpretarAccionRecarga(txt);
 
-        if (cliente?.estado === "aguardando_numero_recarga" && /^5\d{7}$/.test(soloNums))
-            return await procesarNumeroRecarga(phone, soloNums, esEs);
+            if (accion === "cancelar") {
+                await limpiarSesion(phone);
+                const m = esEs ? "Listo, cancelé la recarga 😊 ¿Necesitas algo más?" : "Pronto, cancelei a recarga 😊 Precisa de mais algo?";
+                await enviarSeguro(phone, m);
+                return m;
+            }
+            if (accion === "cambiar_numero" && cliente.estado !== "seleccionando_recarga")
+                return await cambiarNumeroRecarga(phone, esEs);
+            if (accion === "cambiar_nacional")
+                return await cambiarModalidadRecarga(phone, "nacional", esEs);
+            if (accion === "cambiar_internacional")
+                return await cambiarModalidadRecarga(phone, "internacional", esEs);
+
+            if (cliente.estado === "seleccionando_recarga")
+                return await seleccionarRecarga(phone, txt.trim(), esEs);
+
+            if (cliente.estado === "aguardando_numero_recarga")
+                return await procesarNumeroRecarga(phone, text, esEs);
+
+            if (cliente.estado === "confirmando_recarga") {
+                if (accion === "confirmar" || esConfirma)
+                    return await confirmarResumenRecarga(phone, esEs);
+                const m = esEs
+                    ? "¿Confirmamos la recarga? Responde *sí* para continuar 😊"
+                    : "Confirmamos a recarga? Responda *sim* para continuar 😊";
+                await enviarSeguro(phone, m);
+                return m;
+            }
+        }
 
         // ── Selección de tarjeta ──
         // Acepta el número (1, 2...) o una respuesta corta por contexto

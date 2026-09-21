@@ -19,6 +19,8 @@ const { yaFueProcesado, activarPausaHumana, enPausaHumana, limpiarWebhookEventsV
 const { verificarSecretoWebhook, validarPayloadWebhook } = require("./src/middleware/webhook-security");
 const { conLockExclusivo } = require("./src/services/job-lock");
 const { log } = require("./src/utils/structured-logger");
+const { saoPauloLocalAUTC } = require("./src/utils/timezone");
+const { mensajeConfirmarOperacion, mensajeCompletarOperacion } = require("./src/services/operation-messages");
 const { adminReadLimiter, adminWriteLimiter } = require("./src/middleware/admin-rate-limiters");
 const { verificarToken, verificarTokenEntregas } = require("./src/middleware/admin-auth");
 const blockedNumbers = require("./src/services/blocked-numbers");
@@ -443,17 +445,7 @@ app.post("/admin/confirmar-operacion/:id", adminWriteLimiter, verificarToken, as
         if (!operacion) return res.status(404).json({ success: false, error: "Operación no encontrada" });
 
         const { enviarMensaje } = require("./src/services/zapi");
-        const esEntrega = operacion.tipo === "cup_efectivo" || operacion.tipo === "usd_efectivo";
-        const cuerpo = esEntrega
-            ? "Procederemos a coordinar su entrega en Cuba."
-            : "Procederemos a realizar la transferencia a Cuba.";
-        const notaPlazo = esEntrega
-            ? "\n\n🚚 Recuerda: la entrega puede demorar hasta 48 horas, según la demanda y disponibilidad."
-            : "";
-        const notificado = await enviarMensaje(
-            operacion.phone,
-            `✅ Recibimos su pago de R$${operacion.monto}.\n\n${cuerpo}\n\nCuando se complete le enviaremos el comprobante. 😊${notaPlazo}`
-        );
+        const notificado = await enviarMensaje(operacion.phone, mensajeConfirmarOperacion(operacion));
         if (!notificado) console.error(`⚠️ No se pudo notificar al cliente de la operación #${operacion.id} (phone: ${operacion.phone})`);
 
         res.json({ success: true, notificado });
@@ -468,11 +460,7 @@ app.post("/admin/completar-operacion/:id", adminWriteLimiter, verificarToken, as
         if (!operacion) return res.status(404).json({ success: false, error: "Operación no encontrada" });
 
         const { enviarMensaje } = require("./src/services/zapi");
-        const esEntrega = operacion.tipo === "cup_efectivo" || operacion.tipo === "usd_efectivo";
-        const msg = esEntrega
-            ? "🎉 ¡Tu entrega fue completada con éxito! Gracias por preferir nuestros servicios. 🇨🇺💜"
-            : "🎉 ¡Tu transferencia fue completada con éxito! Gracias por preferir nuestros servicios. 🇨🇺💜";
-        const notificado = await enviarMensaje(operacion.phone, msg);
+        const notificado = await enviarMensaje(operacion.phone, mensajeCompletarOperacion(operacion));
         if (!notificado) console.error(`⚠️ No se pudo notificar al cliente de la operación #${operacion.id} (phone: ${operacion.phone})`);
 
         // Si este pedido venía de la calculadora, el cliente estaba en "modo
@@ -650,22 +638,34 @@ app.get("/entregas", (req, res) =>
 // Recargas
 app.get("/admin/recargas", adminReadLimiter, verificarToken, async (req, res) => {
     try {
-        const r = await pool.query("SELECT * FROM recargas ORDER BY tipo");
+        // disponible_ahora se calcula con NOW() del propio Postgres -- nunca
+        // comparando fechas como strings ni contra la hora del navegador del
+        // admin (que podría estar en otra zona horaria).
+        const r = await pool.query(`
+            SELECT *, (activa AND (disponible_hasta IS NULL OR disponible_hasta >= NOW())) AS disponible_ahora
+            FROM recargas ORDER BY tipo
+        `);
         res.json(r.rows);
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post("/admin/recargas/:tipo", adminWriteLimiter, verificarToken, async (req, res) => {
     try {
-        const { precio, descripcion, activa } = req.body;
+        const { precio, descripcion, activa, disponibleHasta } = req.body;
+        const tipo = req.params.tipo;
+        // Fecha límite es exclusiva de Internacional por ahora -- Nacional
+        // nunca la guarda, sin importar qué mande el cliente (refuerzo del
+        // invariante en el backend, no solo en el dashboard).
+        const disponibleHastaUTC = tipo === "internacional" ? saoPauloLocalAUTC(disponibleHasta) : null;
         await pool.query(`
             UPDATE recargas SET
                 precio = $1,
                 descripcion = $2,
                 activa = $3,
+                disponible_hasta = $4,
                 updated_at = NOW()
-            WHERE tipo = $4
-        `, [precio, descripcion, activa, req.params.tipo]);
+            WHERE tipo = $5
+        `, [precio, descripcion, activa, disponibleHastaUTC, tipo]);
         res.json({ success: true });
     } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });

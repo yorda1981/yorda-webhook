@@ -15,7 +15,7 @@
 // hace las acciones (enviarSeguro, guardarCliente, etc.).
 // ─────────────────────────────────────────────────────────
 
-const ESTADOS_QUE_BLOQUEAN = ["aguardando_comprovante", "aguardando_numero_recarga"];
+const ESTADOS_QUE_BLOQUEAN = ["aguardando_comprovante", "aguardando_numero_recarga", "confirmando_recarga"];
 
 function clienteEstaOcupado(cliente) {
     return ESTADOS_QUE_BLOQUEAN.includes(cliente?.estado);
@@ -36,7 +36,8 @@ const ESTADOS_REEMPLAZABLES = [
     "cotizacion_realizada",
     "aguardando_comprovante",
     "seleccionando_recarga",
-    "aguardando_numero_recarga"
+    "aguardando_numero_recarga",
+    "confirmando_recarga"
 ];
 
 function tieneContextoReemplazable(cliente) {
@@ -147,6 +148,84 @@ function tieneTarjetaGuardada(cliente) {
 // recargas se trataban como remesa normal y el mensaje mostraba "Recibe: 0 CUP".
 function esRecarga(cliente) {
     return !!cliente?.tipo_favorito?.startsWith("recarga_");
+}
+
+// ─────────────────────────────────────────────────────────
+// SELECCIÓN NATURAL DE RECARGA (cierre del módulo de Recargas)
+//
+// Estas funciones solo REFINAN un mensaje que ya está dentro de un flujo
+// de recarga activo (`cliente.estado` en seleccionando_recarga/
+// aguardando_numero_recarga/confirmando_recarga) -- nunca amplían el
+// portón de gatillos por sí solas.
+// ─────────────────────────────────────────────────────────
+
+// Interpreta la respuesta del cliente contra las modalidades REALMENTE
+// disponibles en ese momento (`opciones`, ya filtradas por leerRecargas()).
+// Devuelve:
+//   null       -> no reconoce nada, el caller debe pedir de nuevo
+//   "AMBIGUO"  -> se refirió a algo puntual pero no se puede saber a cuál
+//                 sin adivinar (ej. "la segunda" con una sola opción)
+//   <tipo>     -> "nacional" | "internacional" (el tipo elegido, sin ambigüedad)
+function interpretarSeleccionRecarga(txt, opciones) {
+    if (!Array.isArray(opciones) || opciones.length === 0) return null;
+    const t = txt.trim();
+    const tipos = opciones.map(o => o.tipo);
+
+    if (/^[1-9]$/.test(t)) {
+        const idx = parseInt(t, 10) - 1;
+        return idx >= 0 && idx < tipos.length ? tipos[idx] : "AMBIGUO";
+    }
+    if (/\bnacional\b/.test(t) && tipos.includes("nacional")) return "nacional";
+    if (/\binternacional\b/.test(t) && tipos.includes("internacional")) return "internacional";
+    if (/^(la )?primera$/.test(t)) return tipos.length >= 1 ? tipos[0] : "AMBIGUO";
+    if (/^(la )?segunda$/.test(t)) return tipos.length >= 2 ? tipos[1] : "AMBIGUO";
+    // "esa"/"esa misma"/confirmaciones sueltas -- SOLO inequívoco si hay
+    // una única modalidad disponible; con 2+ opciones nunca se adivina.
+    if (/^(esa( misma)?|si|sí|dale|ok|claro|correcto|vale|perfecto)$/.test(t)) {
+        return opciones.length === 1 ? tipos[0] : null;
+    }
+    return null;
+}
+
+// Si el mensaje YA nombra explícitamente una modalidad por su nombre (ej.
+// "quiero una recarga internacional"), permite ir directo a esa opción sin
+// mostrar el menú -- solo cuando esa modalidad puntual está disponible.
+function nombraModalidadRecarga(txt, opciones) {
+    if (!Array.isArray(opciones)) return null;
+    const tipos = opciones.map(o => o.tipo);
+    if (/\binternacional\b/.test(txt) && tipos.includes("internacional")) return "internacional";
+    if (/\bnacional\b/.test(txt) && tipos.includes("nacional")) return "nacional";
+    return null;
+}
+
+// Cambios/cancelación dentro de un flujo de recarga activo (selección,
+// número, o resumen de confirmación). Devuelve:
+//   "confirmar"             -> el cliente aprueba el resumen/opción actual
+//   "cambiar_numero"        -> quiere corregir el número cubano
+//   "cambiar_nacional"      -> quiere cambiar a la modalidad Nacional
+//   "cambiar_internacional" -> quiere cambiar a la modalidad Internacional
+//   "cancelar"              -> quiere abandonar la recarga en curso
+//   null                    -> no reconoce nada, sigue el flujo normal
+function interpretarAccionRecarga(txt) {
+    const t = txt.trim();
+    if (/^(si|sí|dale|ok|confirmo|claro|correcto|vale|perfecto|confirmar)$/.test(t)) return "confirmar";
+    if (/me equivoque de numero|no,? es para otro numero|no,? para otro numero|cambia(r)? el numero|otro numero/.test(t)) return "cambiar_numero";
+    if (/mejor la nacional|cambia(r)? (a )?nacional/.test(t)) return "cambiar_nacional";
+    if (/mejor la internacional|cambia(r)? (a )?internacional/.test(t)) return "cambiar_internacional";
+    if (/\bcancela(r)?\b|\bdejalo\b|\bdeixa\b|\bdespues\b|\bdepois\b|\bme equivoque\b/.test(t)) return "cancelar";
+    return null;
+}
+
+// Números móviles cubanos: 8 dígitos, empiezan en 5 (5XXXXXXX). Acepta con
+// o sin el código de país +53 delante, con o sin espacios/guiones/"+".
+// Devuelve el número normalizado al formato que ya usa el sistema (8
+// dígitos, sin prefijo), o null si no tiene forma de número cubano válido
+// -- nunca inventa ni completa dígitos faltantes.
+function normalizarNumeroCubano(raw) {
+    const soloDigitos = String(raw || "").replace(/\D/g, "");
+    if (/^535\d{7}$/.test(soloDigitos)) return soloDigitos.slice(2);
+    if (/^5\d{7}$/.test(soloDigitos)) return soloDigitos;
+    return null;
 }
 
 // BUG VIEJO: estas 2 reglas solo reconocían frases en español — un cliente que
@@ -315,6 +394,10 @@ module.exports = {
     debeConfirmarCotizacion,
     tieneTarjetaGuardada,
     esRecarga,
+    interpretarSeleccionRecarga,
+    nombraModalidadRecarga,
+    interpretarAccionRecarga,
+    normalizarNumeroCubano,
     esConsultaTasas,
     esIntencionSinMonto,
     yaAvisoEntregaReciente,
