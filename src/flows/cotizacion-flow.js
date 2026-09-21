@@ -5,7 +5,7 @@ const { calcularOperacion }  = require("../services/calculator");
 const { guardarCliente }     = require("../services/customer-memory");
 const crm                    = require("../services/crm");
 const {
-    enviarSeguro, fmt, pickL,
+    enviarSeguro, fmt, pick, pickL,
     CIERRES_COT, CIERRES_COT_PT
 } = require("./shared");
 
@@ -167,13 +167,19 @@ function detectarCUPInverso(txt) {
         /para\s+(\d[\d.,]*)\s*(mil|k)?\s*(?:cup|cuc|pesos?|$)/i,
     ];
 
+    // FIX: "cuantos"/"quantos" (plural) no matcheaba porque el patrón exigía
+    // "cuanto" exacto seguido de espacio -- frases como "cuantos reales
+    // necesito..." quedaban sin detectar. También faltaban verbos como
+    // "hago"/"faço" ("¿con cuánto hago 100 mil cup?"). La MATEMÁTICA de
+    // cotizarCUPInverso (tramos) no se toca, solo la detección de la
+    // intención.
     const esInverso =
-        /(cuanto|quanto|cu[aá]nto)\s+(es|son|seria|ser[ií]a|cuesta|vale|pago|envio|mando|preciso|necesito).{0,40}(cup|cuc|pesos?\s*cubanos?|mil)/i.test(txt) ||
+        /(cuantos?|quantos?|cu[aá]ntos?)\s+(es|son|seria|ser[ií]a|cuesta|vale|pago|envio|mando|hago|fa[cç]o|preciso|necesito).{0,40}(cup|cuc|pesos?\s*cubanos?|mil)/i.test(txt) ||
         /(cup|cuc|pesos?\s*cubanos?).{0,40}(reais?|reales?|brl|r\$|en reais?|em reais?)/i.test(txt) ||
         /(que\s+)?(lleguen?|recib[ae]n?|chegar?|chegue).{0,20}(mil|\d{4,6})/i.test(txt) ||
         /(para\s+)?(que\s+)?(lleguen?|recib[ae]n?)/i.test(txt) ||
-        /(cuanto|quanto)\s+(real|reais|pago|mando|envio|preciso|necesito).{0,40}(mil|\d{3,6})/i.test(txt) ||
-        /(quanto\s+preciso|quanto\s+envio|quanto\s+mando|cuanto\s+necesito|cuanto\s+pago)/i.test(txt);
+        /(cuantos?|quantos?)\s+(real|reais|pago|mando|envio|hago|fa[cç]o|preciso|necesito).{0,40}(mil|\d{3,6})/i.test(txt) ||
+        /(quanto\s+preciso|quanto\s+envio|quanto\s+mando|cuanto\s+necesito|cuanto\s+pago|cuanto\s+hago|quanto\s+fa[cç]o)/i.test(txt);
 
     if (!esInverso) return null;
 
@@ -233,11 +239,18 @@ async function cotizarCUPInverso(phone, pushName, montoCUP, lang) {
         ? `Para chegar *${cupFmt} CUP* em Cuba 🇨🇺\n\nVocê precisa enviar *R$${realesNecesarios}*\n_(taxa: ${tasaUsada} CUP por real)_\n\n${pickL(CIERRES_COT, CIERRES_COT_PT, lang)}`
         : `Para que lleguen *${cupFmt} CUP* en Cuba 🇨🇺\n\nNecesitas enviar *R$${realesNecesarios}*\n_(tasa: ${tasaUsada} CUP por real)_\n\n${pickL(CIERRES_COT, CIERRES_COT_PT, lang)}`;
 
+    // Continuidad: si el cliente responde con otro número suelto dentro de
+    // los próximos 30 minutos (ver CONTEXTO_CORTO_TTL_MS en reglas-bot.js),
+    // ese número sustituye el OBJETIVO EN CUP, no un monto nuevo en reales
+    // -- ver el chequeo en openai.js justo antes del bloque de "número
+    // suelto = monto BRL".
     await guardarCliente({
         phone, nombre: pushName, monto: realesNecesarios, tipo: "brl_cup",
         estado: "cotizacion_realizada",
         fechaEstado: new Date().toISOString(),
-        fechaCotizacion: new Date().toISOString()
+        fechaCotizacion: new Date().toISOString(),
+        ultimaPregunta: "cotizacion_inversa_pendiente",
+        ultimasOpciones: { cupObjetivo: montoCUP, brlCalculado: realesNecesarios, tasaUsada }
     });
     await crm.onCotizacion(phone, lang);
     await enviarSeguro(phone, msg);
@@ -251,7 +264,15 @@ async function cotizarCUPInverso(phone, pushName, montoCUP, lang) {
 async function consultarTasas(phone) {
     const t = await leerTasas();
     if (!t) return null;
-    const msg = `Tasas de hoy 💱\n\n🇧🇷 Reales → CUP\nHasta R$99: ${t.brl_0} CUP\nR$100–499: ${t.brl_100} CUP\nR$500–999: ${t.brl_500} CUP\nR$1000+: ${t.brl_1000} CUP\n\n💵 USD Clásica/Prepago: R$${t.usd1}${t.mlc ? `\n💳 MLC: R$${t.mlc}` : ""}\n\n¿Cuánto quieres enviar? 😊`;
+    // Dos plantillas equivalentes (mismos números, mismo orden de tramos) --
+    // solo varía la redacción, para que preguntar la tasa dos veces seguidas
+    // no suene exactamente igual. Los valores nunca cambian, solo el texto.
+    const tablaTramos = `Hasta R$99: ${t.brl_0} CUP\nR$100–499: ${t.brl_100} CUP\nR$500–999: ${t.brl_500} CUP\nR$1000+: ${t.brl_1000} CUP`;
+    const extra = `💵 USD Clásica/Prepago: R$${t.usd1}${t.mlc ? `\n💳 MLC: R$${t.mlc}` : ""}`;
+    const msg = pick([
+        `Tasas de hoy 💱\n\n🇧🇷 Reales → CUP\n${tablaTramos}\n\n${extra}\n\n¿Cuánto quieres enviar? 😊`,
+        `Así está el cambio hoy 💱\n\n🇧🇷 Reales → CUP\n${tablaTramos}\n\n${extra}\n\n¿Qué monto tienes en mente? 😊`
+    ]);
     await enviarSeguro(phone, msg);
     return msg;
 }

@@ -2,10 +2,15 @@
 
 require("dotenv").config();
 
-const { guardarCliente, obtenerCliente, marcarSaludoPendiente }          = require("./customer-memory");
-const { obtenerUltimaOperacion }                   = require("./operations");
+const { guardarCliente, obtenerCliente, marcarSaludoPendiente, limpiarContextoCorto }          = require("./customer-memory");
+const { obtenerUltimaOperacion, obtenerPendienteCliente }                   = require("./operations");
 const crm                                          = require("./crm");
-const { esTarjetaDuplicada, esConsultaEntrega, esBareMontoValido, esEnvioNuevoSobreAbandonado, puedeCotizarBRL, clienteEstaOcupado, debeCompletarConMontoPendiente, debeConfirmarCotizacion, tieneTarjetaGuardada, esConsultaTasas, esIntencionSinMonto, yaAvisoEntregaReciente } = require("./reglas-bot");
+const {
+    esTarjetaDuplicada, esConsultaEntrega, esBareMontoValido, esEnvioNuevoSobreAbandonado, puedeCotizarBRL,
+    clienteEstaOcupado, tieneContextoReemplazable, esFraseDeAbandonoExplicito,
+    debeCompletarConMontoPendiente, debeConfirmarCotizacion, tieneTarjetaGuardada, esConsultaTasas, esIntencionSinMonto, yaAvisoEntregaReciente,
+    contextoCortoVigente, interpretarSeleccionOpcion, interpretarTarjetaPorPalabra
+} = require("./reglas-bot");
 
 // Flows
 const { detectarImagenUnificada, detectarComprobantePDF, llamarAsistente } = require("../flows/imagen-flow");
@@ -114,6 +119,20 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                          // ni gatillo, y quedaba sin respuesta pese a ser un monto válido.
         if (!debeResponder) return "";
 
+        // ── Abandono explícito de la operación en curso ──
+        // "olvida eso"/"cancela eso"/"no era eso"/"otra operación" -- el cliente
+        // pide expresamente arrancar de cero. NUNCA toca operations/entregas,
+        // solo resetea el contexto conversacional (ver reglas-bot.js). Solo
+        // aplica si había algo que abandonar -- si no, no hay nada que hacer
+        // y se deja caer al resto del árbol (evita responder a un "cancela eso"
+        // suelto de alguien sin ninguna conversación previa).
+        if (esFraseDeAbandonoExplicito(txt) && (cliente?.estado || cliente?.comprobante_pendiente)) {
+            await limpiarSesion(phone);
+            const m = esEs ? "Listo, empezamos de nuevo 😊 ¿Qué necesitas?" : "Pronto, começamos de novo 😊 O que você precisa?";
+            await enviarSeguro(phone, m);
+            return m;
+        }
+
         // ── Derivación humano ──
         if (/yordanys|hablar con alguien|operador|asesor humano|hablar con una persona/.test(txt)) {
             const msg = esEs ? "Yordanys te atiende enseguida 😊 👌" : "Yordanys te atende agora 😊 👌";
@@ -140,11 +159,29 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             return await procesarNumeroRecarga(phone, soloNums, esEs);
 
         // ── Selección de tarjeta ──
-        if (cliente?.estado === "seleccionando_tarjeta" && /^[1-9]$/.test(txt.trim())) {
+        // Acepta el número (1, 2...) o una respuesta corta por contexto
+        // ("la primera"/"la otra"/"esa") -- ver interpretarSeleccionOpcion en
+        // reglas-bot.js. Si es ambiguo, se pregunta -- nunca se adivina.
+        if (cliente?.estado === "seleccionando_tarjeta") {
             const tarjetas = Array.isArray(cliente?.tarjetas) ? cliente.tarjetas.filter(t => /^\d{15,16}$/.test(t)) : [];
-            const idx = parseInt(txt.trim()) - 1;
-            if (idx >= 0 && idx < tarjetas.length) {
-                await guardarCliente({ phone, tarjeta: tarjetas[idx], tarjeta_frecuente: tarjetas[idx], estado: "aguardando_comprovante", fechaEstado: new Date().toISOString(), fechaPix: new Date().toISOString() });
+            let tarjetaElegida = null;
+            if (/^[1-9]$/.test(txt.trim())) {
+                const idx = parseInt(txt.trim()) - 1;
+                if (idx >= 0 && idx < tarjetas.length) tarjetaElegida = tarjetas[idx];
+            } else {
+                const porContexto = interpretarSeleccionOpcion(txt, cliente);
+                if (porContexto === "AMBIGUO") {
+                    const m = lang === "pt"
+                        ? "Não entendi bem qual cartão -- pode me dizer o número (1, 2...)? 😊"
+                        : "No me quedó claro cuál tarjeta -- ¿me dices el número (1, 2...)? 😊";
+                    await enviarSeguro(phone, m);
+                    return m;
+                }
+                if (porContexto && tarjetas.includes(porContexto)) tarjetaElegida = porContexto;
+            }
+            if (tarjetaElegida) {
+                await guardarCliente({ phone, tarjeta: tarjetaElegida, tarjeta_frecuente: tarjetaElegida, estado: "aguardando_comprovante", fechaEstado: new Date().toISOString(), fechaPix: new Date().toISOString() });
+                await limpiarContextoCorto(phone);
                 return await _enviarPIXFinal(phone, await obtenerCliente(phone), esEs);
             }
         }
@@ -173,8 +210,13 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         }
 
         // ── Tarjeta por texto ──
-        const esTarjeta = detectarTarjetaTexto(text);
+        // "tarjeta" como palabra suelta reutiliza la tarjeta frecuente ya
+        // guardada, SOLO si el bot estaba esperando justo eso (ver
+        // interpretarTarjetaPorPalabra en reglas-bot.js) -- nunca adivina
+        // cuál si no hay contexto vigente o si no hay ninguna guardada.
+        const esTarjeta = detectarTarjetaTexto(text) || interpretarTarjetaPorPalabra(txt, cliente);
         if (esTarjeta) {
+            await limpiarContextoCorto(phone);
             // FIX MENSAJE DUPLICADO: si esta MISMA tarjeta ya estaba guardada y ya estamos
             // esperando el comprobante, no hay nada nuevo que hacer — evita reenviar el PIX
             // completo cada vez que el cliente manda otro mensaje con el mismo número
@@ -220,9 +262,18 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                     ? `Como te disse, entregamos direto no município sede — outros municípios a gente confirma por aqui. Para fazer o pedido: 👇\n${link}`
                     : `Como te comenté, entregamos directo en el municipio cabecera — otros municipios los confirmamos por aquí. Para hacer el pedido: 👇\n${link}`;
             } else {
+                // Dos redacciones con la MISMA información (tiempos, costos, link) --
+                // solo cambia qué tan detallado suena, para variar el primer contacto
+                // sin perder ningún dato importante.
                 m = lang === "pt"
-                    ? `🚚 *Entrega em dinheiro em Cuba*\n\nEntregamos direto no município sede das 16 províncias. Se for outro município, confirmamos disponibilidade por aqui mesmo.\n\n⏱️ Havana: até 24h · Demais províncias: até 48h (conforme demanda)\n\n💰 O custo da entrega é somado à parte — nunca é descontado do que seu familiar recebe.\n\nPara calcular o valor exato e fazer o pedido passo a passo, entra aqui 👇\n${link}`
-                    : `🚚 *Entrega en efectivo en Cuba*\n\nEntregamos directo en el municipio cabecera de las 16 provincias. Si es otro municipio, confirmamos disponibilidad por aquí mismo.\n\n⏱️ La Habana: hasta 24h · Resto de provincias: hasta 48h (según demanda)\n\n💰 El costo de entrega se suma aparte — nunca se descuenta de lo que recibe tu familiar.\n\nPara calcular el monto exacto y hacer el pedido paso a paso, entra aquí 👇\n${link}`;
+                    ? pick([
+                        `🚚 *Entrega em dinheiro em Cuba*\n\nEntregamos direto no município sede das 16 províncias. Se for outro município, confirmamos disponibilidade por aqui mesmo.\n\n⏱️ Havana: até 24h · Demais províncias: até 48h (conforme demanda)\n\n💰 O custo da entrega é somado à parte — nunca é descontado do que seu familiar recebe.\n\nPara calcular o valor exato e fazer o pedido passo a passo, entra aqui 👇\n${link}`,
+                        `🚚 Entregamos em dinheiro direto no município sede (⏱️ até 24h em Havana, até 48h nas demais). O custo é somado à parte, nunca descontado do que seu familiar recebe.\n\nPara calcular o valor e pedir 👇\n${link}`
+                    ])
+                    : pick([
+                        `🚚 *Entrega en efectivo en Cuba*\n\nEntregamos directo en el municipio cabecera de las 16 provincias. Si es otro municipio, confirmamos disponibilidad por aquí mismo.\n\n⏱️ La Habana: hasta 24h · Resto de provincias: hasta 48h (según demanda)\n\n💰 El costo de entrega se suma aparte — nunca se descuenta de lo que recibe tu familiar.\n\nPara calcular el monto exacto y hacer el pedido paso a paso, entra aquí 👇\n${link}`,
+                        `🚚 Entregamos en efectivo directo en el municipio cabecera (⏱️ hasta 24h en La Habana, hasta 48h en el resto). El costo se suma aparte, nunca se descuenta de lo que recibe tu familiar.\n\nPara calcular el monto y hacer el pedido 👇\n${link}`
+                    ]);
             }
             await guardarCliente({ phone, ultimoAvisoEntrega: new Date().toISOString() });
             await enviarSeguro(phone, m);
@@ -234,6 +285,22 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             const key = getPIXKey();
             const m   = key ? `No hay problema 😊\n\nCopia la clave PIX:\n\n${key}` : "Pídele la clave directamente a Yordanys 😊";
             await enviarSeguro(phone, m); return m;
+        }
+
+        // ── Continuidad de cotización inversa CUP → BRL ──
+        // Si la última pregunta del bot fue "¿cuánto pago para que lleguen X
+        // CUP?" y el contexto corto sigue vigente (< 30 min), un número nuevo
+        // suelto (con o sin "mejor"/"que sean" delante) sustituye el OBJETIVO
+        // EN CUP anterior -- NUNCA se interpreta como un monto nuevo a enviar
+        // en reales. Va ANTES del bloque de "número suelto = monto BRL" de
+        // abajo, que si corriera primero cotizaría el número como reales.
+        if (contextoCortoVigente(cliente) && cliente?.ultima_pregunta === "cotizacion_inversa_pendiente") {
+            const soloNumero = txt.replace(/^(mejor|que sean|seria|seriam|melhor|prefiro)\s+/, "").trim();
+            const nuevoCupObjetivo = /^\d{3,7}$/.test(soloNumero) ? Number(soloNumero) : null;
+            if (nuevoCupObjetivo && nuevoCupObjetivo >= 1000 && nuevoCupObjetivo <= 5000000) {
+                const r = await cotizarCUPInverso(phone, pushName, nuevoCupObjetivo, lang);
+                if (r) return r;
+            }
         }
 
         // FIX 4 (revisado): Número solo → tratar como monto y cotizar
@@ -320,6 +387,20 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         const esUSD = txt.includes("usd") || txt.includes("dolar") || txt.includes("dolares") || txt.includes("dólares");
         if (esUSD && !txt.includes("real") && !txt.includes("brl")) {
             if (!montoValido) return await preguntarCantidadUSD(phone, txt, lang, esEs) || "";
+
+            // FIX: pedir explícitamente una operación en USD mientras había una
+            // tarjeta/comprobante_pendiente de un contexto viejo reemplazable
+            // (ver ESTADOS_REEMPLAZABLES en reglas-bot.js) es siempre una
+            // intención nueva -- cambiar de moneda de origen ya es suficiente
+            // señal, no hace falta comparar montos. Se limpia la sesión vieja
+            // ANTES de cotizar para que esos datos no se arrastren a esta
+            // operación nueva. Mismo criterio de seguridad que el flujo BRL:
+            // nunca se pisa si ya existe una operación real pendiente.
+            if (tieneContextoReemplazable(cliente)) {
+                const hayOperacionReal = cliente?.comprobante_pendiente ? !!(await obtenerPendienteCliente(phone)) : false;
+                if (!hayOperacionReal) await limpiarSesion(phone);
+            }
+
             const esEfectivo = /efectivo|cash|vender|cambiar|comprar/.test(txt);
             const esPrepago  = /prepago|nauta|internacional/.test(txt);
             const esClasica  = /clasica|clásica|bpa|bandec|metropolitano/.test(txt);
@@ -341,9 +422,15 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         // es un envío nuevo — no la misma operación. Limpiamos la sesión vieja (tarjeta,
         // estado) para que no reaparezca la operación anterior en vez de cotizar la nueva.
         // Lógica en src/services/reglas-bot.js (probada en test/reglas-bot.test.js)
-        if (esEnvioNuevoSobreAbandonado(cliente, montoValido, valorFinal)) await limpiarSesion(phone);
+        // hayOperacionReal solo se consulta cuando de verdad importa (contexto
+        // reemplazable + comprobante_pendiente) -- evita una query extra en el
+        // resto de los mensajes.
+        const hayOperacionRealBRL = (tieneContextoReemplazable(cliente) && cliente?.comprobante_pendiente)
+            ? !!(await obtenerPendienteCliente(phone))
+            : false;
+        if (esEnvioNuevoSobreAbandonado(cliente, montoValido, valorFinal, hayOperacionRealBRL)) await limpiarSesion(phone);
 
-        if (hayContextoBRL && !esUSD && !esMLC && puedeCotizarBRL(cliente, montoValido, valorFinal))
+        if (hayContextoBRL && !esUSD && !esMLC && puedeCotizarBRL(cliente, montoValido, valorFinal, hayOperacionRealBRL))
             return await cotizarBRL(phone, pushName, valorFinal, lang) || "";
 
         if (valorFinal && !montoValido) return "";
@@ -412,11 +499,28 @@ async function montoPagoEnReales(cliente) {
 }
 
 function extraerMonto(txt, text) {
-    const MONTO_MONETARIO = /(?:r\$|reais|reales|real|brl|usd|d[oó]lar(?:es)?|cup|mlc|pesos?|plata|dinero)\s*(\d{2,5})|\b(\d{2,5})\s*(?:r\$|reais|reales|real|brl|usd|d[oó]lar(?:es)?|cup|mlc|pesos?)/i;
-    const matchMonetario  = text.match(MONTO_MONETARIO);
+    // REGLA DURA: un número atado explícitamente a CUP/pesos cubanos es el
+    // DESTINO (lo que recibe el familiar), nunca el ORIGEN (lo que el
+    // cliente envía). Antes "cup" vivía en la MISMA lista que "reales"/"brl"/
+    // "usd", así que un mensaje como "necesito enviar 30000 cup" terminaba
+    // cotizándose como si el cliente quisiera ENVIAR R$30.000. Ahora se
+    // separan en dos regex: MONTO_ORIGEN (monedas que sí se envían) y
+    // MONTO_CUP (monto de destino) -- un match de MONTO_CUP nunca produce un
+    // valorMonetario ni entra al fallback de "número suelto".
+    const MONTO_ORIGEN = /(?:r\$|reais|reales|real|brl|usd|d[oó]lar(?:es)?|mlc|plata|dinero)\s*(\d{2,5})|\b(\d{2,5})\s*(?:r\$|reais|reales|real|brl|usd|d[oó]lar(?:es)?|mlc)/i;
+    const MONTO_CUP    = /(?:cup|cuc|pesos?\s*cubanos?|peso\s*cubano)\s*(\d{2,5})|\b(\d{2,5})\s*(?:cup|cuc|pesos?\s*cubanos?)/i;
+
+    const matchMonetario  = text.match(MONTO_ORIGEN);
+    const matchCup        = text.match(MONTO_CUP);
     const valorMonetario  = matchMonetario ? Number(matchMonetario[1] || matchMonetario[2]) : null;
+
+    // Si el único número presente está atado a CUP y no hay ninguna moneda de
+    // origen explícita en el mismo mensaje, ni siquiera el fallback de
+    // "número suelto junto a una palabra de intención" puede usarlo.
+    const soloTieneCUP = !valorMonetario && !!matchCup;
+
     let valorContextual = null;
-    if (!valorMonetario && /enviar|mandar|envio|cotiz|transfer|pagar|monto|quant|cuant|quanto|quiero/.test(txt)) {
+    if (!valorMonetario && !soloTieneCUP && /enviar|mandar|envio|cotiz|transfer|pagar|monto|quant|cuant|quanto|quiero/.test(txt)) {
         const mc = /\b(\d{2,5})\b/g;
         let m;
         while ((m = mc.exec(txt)) !== null) { const n = Number(m[1]); if (n >= 10 && n <= 50000) { valorContextual = n; break; } }

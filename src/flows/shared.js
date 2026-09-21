@@ -95,7 +95,9 @@ const CONFIRMA_TARJETA_SIN_MONTO = [
     "¡Tarjeta guardada! 💳 ¿Qué monto quieres mandar?",
     "¡Anotado! 💳 ¿Cuánto vas hoy?",
     "Perfecto, ya tengo la tarjeta 💳 ¿Cuánto quieres enviar?",
-    "¡Ya la tengo! 💳 Dime el monto y arrancamos 😊"
+    "¡Ya la tengo! 💳 Dime el monto y arrancamos 😊",
+    "Tarjeta lista 💳 ¿Cuánto mandamos?",
+    "¡Guardada! 💳 ¿Con cuánto seguimos?"
 ];
 
 const CONFIRMA_TARJETA_SIN_MONTO_PT = [
@@ -103,21 +105,27 @@ const CONFIRMA_TARJETA_SIN_MONTO_PT = [
     "Cartão salvo! 💳 Qual o valor?",
     "Anotado! 💳 Quanto vai mandar hoje?",
     "Perfeito, já tenho o cartão 💳 Me diz o valor 😊",
-    "Já tenho! 💳 Me fala o valor e a gente resolve 😊"
+    "Já tenho! 💳 Me fala o valor e a gente resolve 😊",
+    "Cartão pronto 💳 Quanto mandamos?",
+    "Salvo! 💳 Seguimos com qual valor?"
 ];
 
 const ESPERA_COMPROBANTE_ES = [
     "Perfecto, mándame el comprobante cuando puedas 📎",
     "¡Genial! En cuanto me llegue el comprobante lo proceso 📎",
     "Listo, cuando hagas el pago mándame la foto o PDF 📎",
-    "Cuando transfieras mándame el comprobante y lo reviso enseguida 📎"
+    "Cuando transfieras mándame el comprobante y lo reviso enseguida 📎",
+    "Dale, me avisas con la foto del comprobante en cuanto pagues 📎",
+    "Ok, quedo atento al comprobante 📎"
 ];
 
 const ESPERA_COMPROBANTE_PT = [
     "Perfeito, me manda o comprovante quando puder 📎",
     "Ótimo! Assim que chegar o comprovante eu processo 📎",
     "Certo, quando fizer o pagamento me manda a foto ou PDF 📎",
-    "Quando transferir me manda o comprovante e eu revejo já 📎"
+    "Quando transferir me manda o comprovante e eu revejo já 📎",
+    "Beleza, me avisa com a foto assim que pagar 📎",
+    "Ok, fico esperando o comprovante 📎"
 ];
 
 const TARJETA_ILEGIBLE = [

@@ -22,6 +22,8 @@ const {
     esEnvioNuevoSobreAbandonado,
     puedeCotizarBRL,
     clienteEstaOcupado,
+    tieneContextoReemplazable,
+    esFraseDeAbandonoExplicito,
     esRespuestaSoloMonto,
     debeCompletarConMontoPendiente,
     debeConfirmarCotizacion,
@@ -29,7 +31,11 @@ const {
     esRecarga,
     esConsultaTasas,
     esIntencionSinMonto,
-    yaAvisoEntregaReciente
+    yaAvisoEntregaReciente,
+    CONTEXTO_CORTO_TTL_MS,
+    contextoCortoVigente,
+    interpretarSeleccionOpcion,
+    interpretarTarjetaPorPalabra
 } = require("../src/services/reglas-bot");
 const { gatilhos, palabrasNegocio } = require("../src/flows/shared");
 
@@ -69,9 +75,20 @@ test("cliente con operación abandonada (300) repite el MISMO monto (300) -> sig
     assert.equal(puedeCotizarBRL(cliente, true, 300), false);
 });
 
-test("cliente con comprobante YA recibido en proceso -> nunca resetear aunque cambie el monto", () => {
+test("cliente con comprobante pendiente pero SIN operación real -> sí se puede reemplazar (nueva intención)", () => {
+    // Mientras comprobante_pendiente sigue en true, NO existe todavía una fila
+    // real en `operations` para ese comprobante (agregarOperacion siempre limpia
+    // comprobante_pendiente en el mismo paso en que crea la fila -- ver
+    // reglas-bot.js). Por eso comprobante_pendiente por sí solo YA NO bloquea.
     const cliente = { estado: "aguardando_comprovante", ultimo_monto: 300, comprobante_pendiente: true };
-    assert.equal(esEnvioNuevoSobreAbandonado(cliente, true, 500), false);
+    assert.equal(esEnvioNuevoSobreAbandonado(cliente, true, 500, false), true);
+});
+
+test("cliente con una operación REAL pendiente en la tabla operations -> nunca resetear aunque cambie el monto", () => {
+    // hayOperacionReal=true es la única razón para bloquear el reemplazo --
+    // lo calcula el caller (openai.js) consultando `operations`.
+    const cliente = { estado: "aguardando_comprovante", ultimo_monto: 300, comprobante_pendiente: true };
+    assert.equal(esEnvioNuevoSobreAbandonado(cliente, true, 500, true), false);
 });
 
 test("cliente libre (sin estado bloqueante) con monto válido -> siempre puede cotizar", () => {
@@ -291,4 +308,123 @@ test("avisado hace 5 minutos (fuera de la ventana de 3 min) -> ya no es reciente
 
 test("avisado hace 1 hora -> definitivamente no es reciente", () => {
     assert.equal(yaAvisoEntregaReciente({ ultimo_aviso_entrega: haceMinutos(60) }), false);
+});
+
+// ── contextoCortoVigente / TTL de 30 minutos (migración 0011) ──
+
+test("contextoCortoVigente: sin contexto_actualizado_at -> false", () => {
+    assert.equal(contextoCortoVigente({}), false);
+    assert.equal(contextoCortoVigente(null), false);
+});
+
+test("contextoCortoVigente: actualizado hace 1 minuto -> vigente", () => {
+    assert.equal(contextoCortoVigente({ contexto_actualizado_at: haceMinutos(1) }), true);
+});
+
+test("contextoCortoVigente: actualizado hace 29 minutos -> todavía vigente (dentro de los 30 min)", () => {
+    assert.equal(contextoCortoVigente({ contexto_actualizado_at: haceMinutos(29) }), true);
+});
+
+test("contextoCortoVigente: actualizado hace 31 minutos -> vencido (fuera de los 30 min)", () => {
+    assert.equal(contextoCortoVigente({ contexto_actualizado_at: haceMinutos(31) }), false);
+});
+
+test("CONTEXTO_CORTO_TTL_MS es exactamente 30 minutos (valor aprobado)", () => {
+    assert.equal(CONTEXTO_CORTO_TTL_MS, 30 * 60 * 1000);
+});
+
+// ── interpretarSeleccionOpcion (respuestas cortas por contexto: "la primera"/"esa"/"la otra") ──
+
+test("interpretarSeleccionOpcion: contexto vencido -> null (no se usa, aunque la pregunta coincida)", () => {
+    const cliente = { ultima_pregunta: "seleccion_tarjeta", ultimas_opciones: ["1111", "2222"], contexto_actualizado_at: haceMinutos(31) };
+    assert.equal(interpretarSeleccionOpcion("la primera", cliente), null);
+});
+
+test("interpretarSeleccionOpcion: pregunta pendiente distinta -> null (nunca se mezcla con otro contexto)", () => {
+    const cliente = { ultima_pregunta: "tarjeta_pendiente", ultimas_opciones: ["1111", "2222"], contexto_actualizado_at: haceMinutos(1) };
+    assert.equal(interpretarSeleccionOpcion("la primera", cliente), null);
+});
+
+test("interpretarSeleccionOpcion: 'la primera'/'la segunda' -> devuelve la opción exacta", () => {
+    const cliente = { ultima_pregunta: "seleccion_tarjeta", ultimas_opciones: ["1111222233334444", "5555666677778888"], contexto_actualizado_at: haceMinutos(1) };
+    assert.equal(interpretarSeleccionOpcion("la primera", cliente), "1111222233334444");
+    assert.equal(interpretarSeleccionOpcion("la segunda", cliente), "5555666677778888");
+});
+
+test("interpretarSeleccionOpcion: 'la otra' con exactamente 2 opciones -> inequívoco (la segunda)", () => {
+    const cliente = { ultima_pregunta: "seleccion_tarjeta", ultimas_opciones: ["1111", "2222"], contexto_actualizado_at: haceMinutos(1) };
+    assert.equal(interpretarSeleccionOpcion("la otra", cliente), "2222");
+});
+
+test("interpretarSeleccionOpcion: 'la otra' con 3+ opciones -> AMBIGUO (nunca adivina)", () => {
+    const cliente = { ultima_pregunta: "seleccion_tarjeta", ultimas_opciones: ["1111", "2222", "3333"], contexto_actualizado_at: haceMinutos(1) };
+    assert.equal(interpretarSeleccionOpcion("la otra", cliente), "AMBIGUO");
+});
+
+test("interpretarSeleccionOpcion: 'esa' con UNA sola opción -> inequívoco", () => {
+    const cliente = { ultima_pregunta: "seleccion_tarjeta", ultimas_opciones: ["1111"], contexto_actualizado_at: haceMinutos(1) };
+    assert.equal(interpretarSeleccionOpcion("esa", cliente), "1111");
+});
+
+test("interpretarSeleccionOpcion: 'esa' con varias opciones -> AMBIGUO", () => {
+    const cliente = { ultima_pregunta: "seleccion_tarjeta", ultimas_opciones: ["1111", "2222"], contexto_actualizado_at: haceMinutos(1) };
+    assert.equal(interpretarSeleccionOpcion("esa", cliente), "AMBIGUO");
+});
+
+test("interpretarSeleccionOpcion: texto que no es ninguna de las formas reconocidas -> null", () => {
+    const cliente = { ultima_pregunta: "seleccion_tarjeta", ultimas_opciones: ["1111", "2222"], contexto_actualizado_at: haceMinutos(1) };
+    assert.equal(interpretarSeleccionOpcion("no se cual", cliente), null);
+});
+
+// ── interpretarTarjetaPorPalabra ("tarjeta" suelta reutiliza la frecuente) ──
+
+test("interpretarTarjetaPorPalabra: 'tarjeta' con contexto vigente y frecuente guardada -> la reutiliza", () => {
+    const cliente = { ultima_pregunta: "tarjeta_pendiente", tarjeta_frecuente: "9218123456789012", contexto_actualizado_at: haceMinutos(1) };
+    assert.equal(interpretarTarjetaPorPalabra("tarjeta", cliente), "9218123456789012");
+});
+
+test("interpretarTarjetaPorPalabra: sin tarjeta_frecuente guardada -> null (nunca adivina)", () => {
+    const cliente = { ultima_pregunta: "tarjeta_pendiente", contexto_actualizado_at: haceMinutos(1) };
+    assert.equal(interpretarTarjetaPorPalabra("tarjeta", cliente), null);
+});
+
+test("interpretarTarjetaPorPalabra: contexto vencido -> null aunque haya frecuente guardada", () => {
+    const cliente = { ultima_pregunta: "tarjeta_pendiente", tarjeta_frecuente: "9218123456789012", contexto_actualizado_at: haceMinutos(31) };
+    assert.equal(interpretarTarjetaPorPalabra("tarjeta", cliente), null);
+});
+
+test("interpretarTarjetaPorPalabra: pregunta pendiente distinta -> null", () => {
+    const cliente = { ultima_pregunta: "seleccion_tarjeta", tarjeta_frecuente: "9218123456789012", contexto_actualizado_at: haceMinutos(1) };
+    assert.equal(interpretarTarjetaPorPalabra("tarjeta", cliente), null);
+});
+
+// ── tieneContextoReemplazable / NUEVA INTENCIÓN EXPLÍCITA > CONTEXTO VIEJO ──
+
+test("tieneContextoReemplazable: cubre los 4 estados reemplazables", () => {
+    for (const estado of ["cotizacion_realizada", "aguardando_comprovante", "seleccionando_recarga", "aguardando_numero_recarga"]) {
+        assert.equal(tieneContextoReemplazable({ estado }), true, `estado "${estado}" debería ser reemplazable`);
+    }
+});
+
+test("tieneContextoReemplazable: un hecho financiero real (sin estado, operación ya cerrada) -> false", () => {
+    assert.equal(tieneContextoReemplazable({ estado: null }), false);
+    assert.equal(tieneContextoReemplazable({}), false);
+});
+
+test("esEnvioNuevoSobreAbandonado ahora cubre cotizacion_realizada y seleccionando_recarga (antes solo 2 estados)", () => {
+    assert.equal(esEnvioNuevoSobreAbandonado({ estado: "cotizacion_realizada", ultimo_monto: 300 }, true, 800), true);
+    assert.equal(esEnvioNuevoSobreAbandonado({ estado: "seleccionando_recarga", ultimo_monto: 300 }, true, 800), true);
+});
+
+// ── esFraseDeAbandonoExplicito ("olvida eso"/"cancela eso"/"otra operación") ──
+
+test("esFraseDeAbandonoExplicito: reconoce las frases de abandono explícito", () => {
+    for (const frase of ["olvida eso", "cancela eso", "no era eso", "quiero hacer otra operacion", "mejor cancela"]) {
+        assert.equal(esFraseDeAbandonoExplicito(frase), true, `"${frase}" debería reconocerse como abandono`);
+    }
+});
+
+test("esFraseDeAbandonoExplicito: un mensaje normal de negocio no dispara falsos positivos", () => {
+    assert.equal(esFraseDeAbandonoExplicito("quiero enviar 800 reales"), false);
+    assert.equal(esFraseDeAbandonoExplicito("cuanto es la tasa hoy"), false);
 });
