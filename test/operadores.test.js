@@ -175,10 +175,10 @@ test("operadoresActivosParaModalidad: filtra por modalidad, ignora inactivos, 't
 
 // ── Datos reales del mensaje ──
 
-test("datosMontoOperador: brl_cup -> pagado en R$, destino en CUP", () => {
+test("datosMontoOperador: brl_cup -> pagado en R$, destino en CUP, con separador de miles solo visual", () => {
     const d = operadores.datosMontoOperador({ tipo: "brl_cup", monto: 300, cup: 33000 });
     assert.equal(d.pagado, "R$300");
-    assert.equal(d.destino, "33000 CUP");
+    assert.equal(d.destino, "33.000 CUP");
 });
 
 test("datosMontoOperador: usd_clasica -> pagado en R$ (columna cup), destino en USD (columna monto)", () => {
@@ -187,9 +187,9 @@ test("datosMontoOperador: usd_clasica -> pagado en R$ (columna cup), destino en 
     assert.equal(d.destino, "100 USD");
 });
 
-test("datosMontoOperador: mlc -> pagado en R$ (columna cup), destino en MLC (columna monto)", () => {
+test("datosMontoOperador: mlc -> pagado en R$ (columna cup), destino en MLC (columna monto), con separador de miles", () => {
     const d = operadores.datosMontoOperador({ tipo: "mlc", monto: 50, cup: 13500 });
-    assert.equal(d.pagado, "R$13500");
+    assert.equal(d.pagado, "R$13.500");
     assert.equal(d.destino, "50 MLC");
 });
 
@@ -198,14 +198,14 @@ test("datosMontoOperador: tipo que no es Transferencia -> null, nunca inventa da
     assert.equal(operadores.datosMontoOperador({ tipo: "cup_efectivo", monto: 100 }), null);
 });
 
-test("construirMensajeOperador: formato mínimo -- solo #operación, cliente, destino real y tarjeta", () => {
+test("construirMensajeOperador: formato visual con emojis/negrita -- cliente, destino real (con separador de miles) y tarjeta", () => {
     const msg = operadores.construirMensajeOperador({
         id: 434, titular: "LOURDES ABREU ACOSTA", tipo: "brl_cup", monto: 300, cup: 20130,
         tarjeta: "9205069993259455", banco: "BPA"
     });
     assert.equal(
         msg,
-        "🔔 *Nueva transferencia #434*\n\nCliente: LOURDES ABREU ACOSTA\nEnviar: 20130 CUP\nTarjeta: 9205069993259455"
+        "🔔 *Nueva transferencia #434*\n\n👤 *Cliente:* LOURDES ABREU ACOSTA\n💰 *Enviar:* 20.130 CUP\n💳 *Tarjeta:* 9205069993259455"
     );
 });
 
@@ -216,18 +216,18 @@ test("construirMensajeOperador: USD -- mismo formato, moneda y destino real del 
     });
     assert.equal(
         msg,
-        "🔔 *Nueva transferencia #435*\n\nCliente: Cliente Real\nEnviar: 100 USD\nTarjeta: 9876543210123456"
+        "🔔 *Nueva transferencia #435*\n\n👤 *Cliente:* Cliente Real\n💰 *Enviar:* 100 USD\n💳 *Tarjeta:* 9876543210123456"
     );
 });
 
-test("construirMensajeOperador: MLC -- mismo formato, moneda y destino real del tipo", () => {
+test("construirMensajeOperador: MLC -- mismo formato, moneda y destino real del tipo, con separador de miles", () => {
     const msg = operadores.construirMensajeOperador({
         id: 436, titular: "Cliente MLC", tipo: "mlc", monto: 50, cup: 13500,
         tarjeta: "1112223334445556", banco: "Metropolitano"
     });
     assert.equal(
         msg,
-        "🔔 *Nueva transferencia #436*\n\nCliente: Cliente MLC\nEnviar: 50 MLC\nTarjeta: 1112223334445556"
+        "🔔 *Nueva transferencia #436*\n\n👤 *Cliente:* Cliente MLC\n💰 *Enviar:* 50 MLC\n💳 *Tarjeta:* 1112223334445556"
     );
 });
 
@@ -241,6 +241,13 @@ test("construirMensajeOperador: nunca incluye el monto recibido en BRL, línea d
     assert.doesNotMatch(msg, /Banco/);
     assert.doesNotMatch(msg, /BPA/);
     assert.doesNotMatch(msg, /Operación:/);
+});
+
+test("construirMensajeOperador: el separador de miles es solo visual -- no altera el valor real que se guardó en operations", () => {
+    const operacion = { id: 438, titular: "Cliente", tipo: "brl_cup", monto: 300, cup: 20130, tarjeta: "1111222233334444" };
+    operadores.construirMensajeOperador(operacion);
+    assert.equal(operacion.cup, 20130, "el valor numérico original de la operación no debe modificarse");
+    assert.equal(typeof operacion.cup, "number");
 });
 
 // ── Idempotencia + trazabilidad (migración 0015) ──

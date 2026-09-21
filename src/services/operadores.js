@@ -14,7 +14,7 @@
 // ─────────────────────────────────────────────────────────
 
 const pool = require("../../db");
-const { enviarSeguro } = require("../flows/shared");
+const { enviarSeguro, fmt } = require("../flows/shared");
 
 const MODALIDADES_VALIDAS = Object.freeze(["cup", "usd", "mlc", "todos"]);
 
@@ -164,22 +164,26 @@ async function operadoresActivosParaModalidad(modalidad) {
 //     tener este dato -- por eso `destino` sigue siendo null si cup es 0).
 //   - mlc:                                 monto = MLC destino, cup = R$ pagado
 // Nunca se inventa un valor que no esté realmente en la fila.
+// `fmt()` (src/flows/shared.js, ya usado en todo el resto de la app para
+// montos hacia WhatsApp) solo agrega separador de miles para lectura --
+// nunca toca el valor real de operacion.monto/cup, ni lo que ya se
+// guardó/calculó en `operations`. Puramente visual.
 function datosMontoOperador(operacion) {
     const tipo = operacion?.tipo;
     switch (tipo) {
         case "brl_cup":
         case "cup_transferencia":
-            return { pagado: `R$${operacion.monto}`, destino: `${operacion.cup} CUP` };
+            return { pagado: `R$${fmt(operacion.monto)}`, destino: `${fmt(operacion.cup)} CUP` };
         case "usd_clasica":
         case "usd_prepago":
         case "usd_pendiente_tipo":
-            return { pagado: `R$${operacion.cup}`, destino: `${operacion.monto} USD` };
+            return { pagado: `R$${fmt(operacion.cup)}`, destino: `${fmt(operacion.monto)} USD` };
         case "usd_transferencia":
-            return { pagado: `R$${operacion.monto}`, destino: operacion.cup ? `${operacion.cup} USD` : null };
+            return { pagado: `R$${fmt(operacion.monto)}`, destino: operacion.cup ? `${fmt(operacion.cup)} USD` : null };
         case "mlc":
-            return { pagado: `R$${operacion.cup}`, destino: `${operacion.monto} MLC` };
+            return { pagado: `R$${fmt(operacion.cup)}`, destino: `${fmt(operacion.monto)} MLC` };
         case "mlc_transferencia":
-            return { pagado: `R$${operacion.monto}`, destino: operacion.cup ? `${operacion.cup} MLC` : null };
+            return { pagado: `R$${fmt(operacion.monto)}`, destino: operacion.cup ? `${fmt(operacion.cup)} MLC` : null };
         default:
             return null;
     }
@@ -199,10 +203,10 @@ function construirMensajeOperador(operacion) {
     const lineas = [
         `🔔 *Nueva transferencia #${operacion.id}*`,
         "",
-        `Cliente: ${operacion.titular || operacion.nombre || "-"}`
+        `👤 *Cliente:* ${operacion.titular || operacion.nombre || "-"}`
     ];
-    if (datos.destino) lineas.push(`Enviar: ${datos.destino}`);
-    if (operacion.tarjeta) lineas.push(`Tarjeta: ${operacion.tarjeta}`);
+    if (datos.destino) lineas.push(`💰 *Enviar:* ${datos.destino}`);
+    if (operacion.tarjeta) lineas.push(`💳 *Tarjeta:* ${operacion.tarjeta}`);
 
     return lineas.join("\n");
 }
