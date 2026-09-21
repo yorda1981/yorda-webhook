@@ -20,6 +20,26 @@ function getPIXAliases() {
     return (env.PIX_HOLDER_ALIASES || "").split("|").map(s => s.trim()).filter(Boolean);
 }
 
+// Destinatarios internos del CRM de Entregas (ADMIN_PHONE + ENTREGA_CONTACT_PHONE),
+// deduplicados por dígitos -- Z-API acepta números con formatos distintos, pero
+// dos formatos que normalizan al mismo dígito son la MISMA persona y solo deben
+// recibir el aviso una vez. Se conserva el primer formato configurado para el
+// envío; nunca se colapsan números con dígitos realmente diferentes. Único punto
+// de esta lógica -- reusado tanto por el aviso de entrega nueva
+// (pedido-web-flow.js) como por el aviso de entrega ENTREGADO (entregas-coordinator.js).
+function destinatariosInternosEntregas() {
+    const destinatarios = [];
+    const vistos = new Set();
+    for (const numero of [getAdminPhone(), getEntregaContactPhone()].filter(Boolean)) {
+        const normalizado = String(numero).replace(/\D/g, "");
+        const clave = normalizado || String(numero).trim();
+        if (vistos.has(clave)) continue;
+        vistos.add(clave);
+        destinatarios.push(numero);
+    }
+    return destinatarios;
+}
+
 // ─────────────────────────────────────────
 // GATILLOS
 // ─────────────────────────────────────────
@@ -188,6 +208,7 @@ async function limpiarSesion(phone) { await limpiarSesionDB(phone); }
 module.exports = {
     DOS_HORAS,
     getPIXKey, getPIXHolder, getPIXBank, getPIXImage, getAdminPhone, getEntregaContactPhone, getPIXAliases,
+    destinatariosInternosEntregas,
     gatilhos, palabrasNegocio, triggersCubaBrasil, confirmaOperacion,
     CIERRES_COT, CIERRES_COT_PT,
     CONFIRMA_TARJETA_SIN_MONTO, CONFIRMA_TARJETA_SIN_MONTO_PT,

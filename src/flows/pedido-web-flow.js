@@ -16,7 +16,7 @@ const pool = require("../../db");
 const { agregarOperacion, buscarPorRefWeb } = require("../services/operations");
 const { agregarEntrega, obtenerEntregaPorId, nombreReceptor } = require("../services/entregas");
 const { guardarCliente } = require("../services/customer-memory");
-const { enviarSeguro, getAdminPhone, getEntregaContactPhone, fmt } = require("./shared");
+const { enviarSeguro, destinatariosInternosEntregas, fmt } = require("./shared");
 const idempotencia = require("../services/idempotency");
 
 // Consulta el nivel VIP (0-3) de este teléfono (para el descuento de entrega escalado).
@@ -133,19 +133,7 @@ async function notificarNuevaEntrega(entrega) {
         (entrega.observaciones ? `\nObservaciones: ${entrega.observaciones}` : "") +
         `\n\nEstado: PENDIENTE`;
 
-    // Z-API acepta números con distintos formatos, pero para deduplicar se
-    // comparan solo sus dígitos. Se conserva el primer formato configurado
-    // para el envío y nunca se colapsan números con dígitos diferentes.
-    const destinatarios = [];
-    const vistos = new Set();
-    for (const numero of [getAdminPhone(), getEntregaContactPhone()].filter(Boolean)) {
-        const normalizado = String(numero).replace(/\D/g, "");
-        const clave = normalizado || String(numero).trim();
-        if (vistos.has(clave)) continue;
-        vistos.add(clave);
-        destinatarios.push(numero);
-    }
-    for (const numero of destinatarios) {
+    for (const numero of destinatariosInternosEntregas()) {
         try {
             await enviarSeguro(numero, msg);
         } catch (e) {
