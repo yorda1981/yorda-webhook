@@ -335,6 +335,23 @@ function interpretarTarjetaPorPalabra(txt, cliente) {
     return cliente?.tarjeta_frecuente || null;
 }
 
+// MONEDA PENDIENTE — cuando el cliente pregunta por la tasa de MLC/USD SIN
+// decir cuánto ("tasa del MLC", "cuánto está el USD"), el bot contesta la
+// tasa y pregunta "¿cuánto quieres enviar?" (tasaMLC/preguntarCantidadUSD),
+// dejando pendiente esa pregunta con el MISMO mecanismo de contexto corto
+// que interpretarSeleccionOpcion/interpretarTarjetaPorPalabra (TTL 30 min).
+// Si el siguiente mensaje trae un monto pero NO nombra ninguna moneda, se
+// asume que sigue hablando de la moneda pendiente -- NUNCA al revés: una
+// moneda explícita en ESE mensaje (esMLC/esUSD/esMonedaNacional) siempre
+// tiene prioridad y el caller (openai.js) ni siquiera llega a consultar
+// esto en ese caso.
+function monedaPendienteDeContexto(cliente) {
+    if (!contextoUtilizable(cliente)) return null;
+    if (cliente?.ultima_pregunta !== "moneda_pendiente") return null;
+    const opciones = Array.isArray(cliente?.ultimas_opciones) ? cliente.ultimas_opciones : [];
+    return opciones[0] || null;
+}
+
 // ─────────────────────────────────────────────────────────
 // SEGUNDO SALTO DE NATURALIDAD — correcciones, pausas, cierre natural,
 // confusión y exploración vs decisión. Todas puras (solo texto/cliente),
@@ -450,6 +467,7 @@ module.exports = {
     contextoUtilizable,
     interpretarSeleccionOpcion,
     interpretarTarjetaPorPalabra,
+    monedaPendienteDeContexto,
     esRechazoTarjeta,
     esPausaTemporal,
     esSenalConfusion,

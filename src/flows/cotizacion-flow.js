@@ -147,6 +147,13 @@ async function tasaMLC(phone, lang) {
         const msg = lang === "pt"
             ? `💳 MLC hoje: *R$${tasaMlc}* por MLC\n\nQual o valor que quer enviar? 😊`
             : `💳 MLC hoy: *R$${tasaMlc}* por MLC\n\n¿Cuánto quieres enviar? 😊`;
+        // Deja la pregunta pendiente (contexto corto, TTL 30 min -- migración
+        // 0011, ver reglas-bot.js:monedaPendienteDeContexto) para que un
+        // "1000 reales"/"1000" en el siguiente mensaje, sin nombrar ninguna
+        // moneda, se siga interpretando como MLC y no como el BRL→CUP por
+        // defecto -- este guardarCliente NO cambia ultimo_monto/tipo_favorito
+        // ni marca ninguna cotización real (todavía no hay monto).
+        await guardarCliente({ phone, ultimaPregunta: "moneda_pendiente", ultimasOpciones: ["mlc"] });
         await enviarSeguro(phone, msg);
         return msg;
     }

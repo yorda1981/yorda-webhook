@@ -10,7 +10,7 @@ const {
     esTarjetaDuplicada, esConsultaEntrega, esBareMontoValido, esEnvioNuevoSobreAbandonado, puedeCotizarBRL,
     clienteEstaOcupado, tieneContextoReemplazable, esFraseDeAbandonoExplicito,
     debeCompletarConMontoPendiente, debeConfirmarCotizacion, tieneTarjetaGuardada, esConsultaTasas, esIntencionSinMonto, yaAvisoEntregaReciente,
-    contextoUtilizable, interpretarSeleccionOpcion, interpretarTarjetaPorPalabra,
+    contextoUtilizable, interpretarSeleccionOpcion, interpretarTarjetaPorPalabra, monedaPendienteDeContexto,
     esRechazoTarjeta, esPausaTemporal, esSenalConfusion, esCierreNatural, esPreguntaExploratoria,
     interpretarAccionRecarga,
     franjaPorHora, franjaSaludoExplicita, primerNombreConfiable
@@ -95,6 +95,15 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         // FIX 3: Extraer monto ANTES de esCubaBrasil para que montoValido esté disponible
         const { valorFinal, valorMonetario, montoValido } = extraerMonto(txt, text);
         const soloNums = txt.replace(/\D/g, "");
+
+        // Moneda mencionada EXPLÍCITAMENTE en ESTE mensaje -- se calculan acá
+        // (antes solían declararse más abajo, cada uno justo antes de su propio
+        // bloque) porque ahora también los necesita la continuidad de MONEDA
+        // PENDIENTE de más abajo, para saber cuándo NO debe intervenir (una
+        // moneda nombrada en el mensaje actual siempre gana, sin excepción).
+        const esMLC = txt.includes("mlc");
+        const esUSD = txt.includes("usd") || txt.includes("dolar") || txt.includes("dolares") || txt.includes("dólares");
+        const esMonedaNacional = /moneda nacional|en cup\b|a cup\b|pesos cubanos|peso cubano/.test(txt);
 
         // ── Cuba→Brasil ──
         const esCubaBrasil = triggersCubaBrasil.some(t => txt.includes(norm(t))) ||
@@ -440,7 +449,36 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         // "enviar" junto) nunca activa montoValido, así que el bloque nunca disparaba y
         // el mensaje quedaba sin respuesta. Ahora se calcula el número directo del texto.
         // Lógica en src/services/reglas-bot.js (probada en test/reglas-bot.test.js)
+        // (se calcula ACÁ, antes de la continuidad de moneda pendiente de abajo,
+        // porque esta también necesita reconocer un número suelto como "1000").
         const bareNumero = esBareMontoValido(txt);
+
+        // ── Continuidad de MONEDA PENDIENTE (MLC/USD preguntado sin monto) ──
+        // BUG REAL (producción): cliente pregunta "tasa del MLC" (sin monto) ->
+        // tasaMLC() contesta la tasa y pregunta "¿cuánto quieres enviar?", pero
+        // antes NO guardaba ningún estado -- así que un "1000 reales" (o un "1000"
+        // suelto) en el siguiente mensaje no tenía cómo saber que seguía hablando
+        // de MLC y caía al flujo por defecto (BRL→CUP), cotizando la moneda
+        // equivocada. Mismo defecto en preguntarCantidadUSD() (USD sin monto).
+        //
+        // Fix: tasaMLC/preguntarCantidadUSD ahora dejan la pregunta pendiente con
+        // el mecanismo de contexto corto ya existente (ultima_pregunta =
+        // "moneda_pendiente", TTL 30 min -- ver reglas-bot.js:
+        // monedaPendienteDeContexto). Si este mensaje trae un monto (con palabra
+        // de moneda o número suelto) y NO nombra ninguna moneda explícita
+        // (esMLC/esUSD/esMonedaNacional, calculados arriba), se respeta la moneda
+        // pendiente. Una moneda explícita en ESTE mensaje SIEMPRE gana -- por eso
+        // el guard exige que las tres sean false antes de siquiera consultar el
+        // contexto pendiente (NUEVA INTENCIÓN EXPLÍCITA > CONTEXTO ANTERIOR, sin
+        // excepciones).
+        const montoParaContinuidad = montoValido ? valorFinal : bareNumero;
+        if (!esMLC && !esUSD && !esMonedaNacional && montoParaContinuidad !== null) {
+            const monedaPendiente = monedaPendienteDeContexto(cliente);
+            if (monedaPendiente === "mlc") return await cotizarMLC(phone, pushName, montoParaContinuidad, lang) || "";
+            if (monedaPendiente && monedaPendiente.startsWith("usd"))
+                return await cotizarUSD(phone, pushName, montoParaContinuidad, monedaPendiente, lang, esEs) || "";
+        }
+
         if (bareNumero !== null) {
             if (!clienteEstaOcupado(cliente)) return await cotizarBRL(phone, pushName, bareNumero, lang) || "";
         }
@@ -491,7 +529,6 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         }
 
         // ── MLC ──
-        const esMLC = txt.includes("mlc");
         if (esMLC && montoValido) return await cotizarMLC(phone, pushName, valorFinal, lang) || "";
         if (esMLC)                return await tasaMLC(phone, lang) || "";
 
@@ -527,7 +564,6 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         }
 
         // ── USD ──
-        const esUSD = txt.includes("usd") || txt.includes("dolar") || txt.includes("dolares") || txt.includes("dólares");
         if (esUSD && !txt.includes("real") && !txt.includes("brl")) {
             if (!montoValido) return await preguntarCantidadUSD(phone, txt, lang, esEs) || "";
 
@@ -553,7 +589,6 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
 
         // FIX 6: BRL→CUP — NO disparar si el cliente está esperando comprobante
         // Un cliente en aguardando_comprovante que manda un número no debe recibir cotización
-        const esMonedaNacional = /moneda nacional|en cup\b|a cup\b|pesos cubanos|peso cubano/.test(txt);
         const estadoBloquea    = clienteEstaOcupado(cliente);
         const hayContextoBRL   = valorMonetario !== null ||
             (!estadoBloquea && !!cliente?.estado) ||
@@ -892,6 +927,13 @@ async function preguntarCantidadUSD(phone, txt, lang, esEs) {
     const m = lang === "pt"
         ? `Certo${tipo ? ` (${tipo})` : ""} 💵\n\nQual o valor em USD que quer enviar?`
         : `Perfecto${tipo ? ` (${tipo})` : ""} 💵\n\n¿Cuánto USD quieres enviar?`;
+    // Mismo mecanismo que tasaMLC() (ver cotizacion-flow.js) -- deja pendiente
+    // el sub-tipo USD ya reconocido en ESTE mensaje (o "usd_clasica" por
+    // defecto, mismo criterio que la línea de abajo en el bloque ── USD ──)
+    // para que un monto suelto en el siguiente mensaje, sin repetir "usd",
+    // se siga cotizando en USD.
+    const tipoUsdInterno = esEfec ? "usd_efectivo" : esPrepago ? "usd_prepago" : "usd_clasica";
+    await guardarCliente({ phone, ultimaPregunta: "moneda_pendiente", ultimasOpciones: [tipoUsdInterno] });
     await enviarSeguro(phone, m); return m;
 }
 
