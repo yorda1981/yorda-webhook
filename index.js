@@ -602,12 +602,7 @@ app.post("/admin/entregas/:id/entregado", adminWriteLimiter, verificarTokenEntre
         // Aviso a tu número — así te enteras aunque el cambio lo haga tu
         // compañera desde el acceso reducido (/entregas).
         try {
-            await enviarSeguro(getAdminPhone(),
-                `✅ Entrega ${entrega.codigo} marcada como ENTREGADO.\n\n` +
-                `Cliente: ${entrega.cliente_nombre}\n` +
-                `${Number(entrega.cantidad).toLocaleString("es-ES")} ${entrega.moneda}\n\n` +
-                `💵 Pago al contacto: PENDIENTE DE PAGO`
-            );
+            await enviarSeguro(getAdminPhone(), entregasService.mensajeEntregaMarcada(entrega));
         } catch (e) { console.error("⚠️ No se pudo notificar entrega marcada:", e.message); }
 
         res.json({ success: true, entrega });

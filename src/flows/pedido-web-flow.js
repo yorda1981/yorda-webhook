@@ -118,13 +118,17 @@ function parsearPedidoEntrega(texto) {
 // es solo el canal de aviso.
 async function notificarNuevaEntrega(entrega) {
     const lugar = [entrega.provincia, entrega.municipio].filter(Boolean).join(", ") || "—";
+    // Mismo criterio visual aprobado para Operadores (emoji + etiqueta en
+    // negrita, un solo icono identificador por dato) -- 💵 en vez de 💰
+    // porque el CRM de Entregas es siempre efectivo (modalidad='EFECTIVO'
+    // por diseño, ver migración 0005), nunca una transferencia.
     const msg =
-        `🚨 NUEVA ENTREGA ${entrega.codigo}\n\n` +
-        `Cliente: ${entrega.cliente_nombre}\n` +
-        `Teléfono: ${entrega.telefono_entrega || entrega.phone}\n` +
-        `Entregar: ${fmt(entrega.cantidad)} ${entrega.moneda}\n` +
-        `Lugar: ${lugar}` +
-        (entrega.direccion ? `\nDirección: ${entrega.direccion}` : "") +
+        `🚨 *NUEVA ENTREGA ${entrega.codigo}*\n\n` +
+        `👤 *Cliente:* ${entrega.cliente_nombre}\n` +
+        `📞 *Teléfono:* ${entrega.telefono_entrega || entrega.phone}\n` +
+        `💵 *Entregar:* ${fmt(entrega.cantidad)} ${entrega.moneda}\n` +
+        `📍 *Lugar:* ${lugar}` +
+        (entrega.direccion ? `\n📍 *Dirección:* ${entrega.direccion}` : "") +
         (entrega.referencia ? `\nReferencia: ${entrega.referencia}` : "") +
         (entrega.observaciones ? `\nObservaciones: ${entrega.observaciones}` : "") +
         `\n\nEstado: PENDIENTE`;
@@ -508,5 +512,8 @@ module.exports = {
     esPedidoWeb, procesarPedidoWeb, crearEntregaManual,
     // exportados también para pruebas automáticas (test/pedido-web-flow.test.js) —
     // son funciones puras, no tocan WhatsApp ni la base de datos
-    esEntrega, parsearPedidoEntrega, parsearPedidoTransferencia, limpiarNumero
+    esEntrega, parsearPedidoEntrega, parsearPedidoTransferencia, limpiarNumero,
+    // notificarNuevaEntrega SÍ manda WhatsApp (enviarSeguro) -- se exporta
+    // aparte, solo para poder probar el formato exacto del mensaje.
+    notificarNuevaEntrega
 };

@@ -513,10 +513,26 @@ async function actualizarTasasUsdt({ tasaCup, tasaUsd }) {
     }
 }
 
+// ─────────────────────────────────────────
+// MENSAJE AL ADMIN — entrega marcada como ENTREGADO (index.js, ruta
+// POST /admin/entregas/:id/entregado). Función pura extraída para poder
+// probar su formato sin levantar el servidor (mismo patrón que
+// src/services/operation-messages.js). Mismo criterio visual aprobado
+// para Operadores de Transferencias: emoji + etiqueta en negrita, un solo
+// icono por dato -- 💵 (no 💰) porque esto siempre es efectivo.
+// ─────────────────────────────────────────
+function mensajeEntregaMarcada(entrega) {
+    return `✅ Entrega ${entrega.codigo} marcada como ENTREGADO.\n\n` +
+        `👤 *Cliente:* ${entrega.cliente_nombre}\n` +
+        `💵 *Entregado:* ${Number(entrega.cantidad).toLocaleString("es-ES")} ${entrega.moneda}\n\n` +
+        `💵 *Pago al contacto:* PENDIENTE DE PAGO`;
+}
+
 module.exports = {
     agregarEntrega,
     obtenerEntregaPorId,
     obtenerEntregaPorCodigo,
+    mensajeEntregaMarcada,
     buscarEntregaPorRefWeb,
     obtenerEntregas,
     marcarEntregado,
