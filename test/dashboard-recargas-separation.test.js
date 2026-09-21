@@ -242,22 +242,22 @@ test("utcToSaoPauloLocal: sin valor -> string vacío (el input queda sin fecha l
 // el lado de dashboard.html; el SQL en sí se audita en la propia lectura
 // del código, ya que es una sola línea sin filtro que agregar).
 
-test("Resumen General: tiene un título explícito y la aclaración de alcance ('incluye Transferencias, Entregas y Recargas')", () => {
+test("Resumen General: tiene un título explícito y una aclaración de alcance", () => {
     const html = fs.readFileSync(path.join(__dirname, "..", "public", "dashboard.html"), "utf8");
     assert.match(html, /📊 Resumen General/);
-    assert.match(html, /Incluye Transferencias, Entregas y Recargas/);
+    assert.match(html, /Resumen financiero y comercial de Yorda Envíos/);
 });
 
-test("Resumen General: las etiquetas ambiguas ahora dicen '(todas)' -- nunca se leen igual que las secciones scoped de abajo", () => {
+test("Resumen General: las etiquetas ambiguas quedaron desambiguadas -- nunca se leen igual que las secciones scoped de abajo", () => {
     const html = fs.readFileSync(path.join(__dirname, "..", "public", "dashboard.html"), "utf8");
     // La etiqueta va dentro de un <span> (con o sin atributos, ej.
     // class="label" del layout compacto) -- lo que importa es el texto.
-    assert.match(html, /<span[^>]*>Pendientes \(todas\)<\/span>/);
-    assert.match(html, /<span[^>]*>Completadas \(todas\)<\/span>/);
+    assert.match(html, /<span[^>]*>Pendientes de confirmación<\/span>/);
+    assert.match(html, /<span[^>]*>Completadas<\/span>/);
     // Las demás métricas del card no se tocan.
-    assert.match(html, /<span[^>]*>Ops\. Confirmadas<\/span>/);
-    assert.match(html, /<span[^>]*>Volumen Total<\/span>/);
-    assert.match(html, /<span[^>]*>Clientes<\/span>/);
+    assert.match(html, /<span[^>]*>Pago confirmado<\/span>/);
+    assert.match(html, /<span[^>]*>Volumen confirmado<\/span>/);
+    assert.match(html, /<span[^>]*>Contactos registrados<\/span>/);
 });
 
 // ── Resumen corto de Recargas: EXCLUSIVAMENTE activas, nunca se rellena con completadas ──

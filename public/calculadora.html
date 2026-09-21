@@ -799,10 +799,12 @@ const T = {
     lblTarjeta:"Número de tarjeta o cuenta destino", lblValorRecibe:"Valor a recibir", lblCambiar:"Cambiar monto",
     lblNombreBenef:"Nombre del beneficiario (opcional)", lblTelefono:"Teléfono (opcional)",
     lblBanco:"Banco (opcional)", lblObservaciones:"Observaciones (opcional)",
-    lblNombreCompleto:"Nombre y apellidos de quien recibe", lblTelefonoReq:"Teléfono",
+    lblNombreCompleto:"Nombre y apellidos de quien recibe", lblTelefonoReq:"Teléfono del receptor en Cuba",
+    ayudaTelefonoReceptor:"Se utiliza para coordinar la entrega del efectivo.",
     lblProvincia:"Provincia", lblMunicipio:"Municipio", lblDireccion:"Dirección completa",
     lblReferencia:"Referencia de la dirección (opcional)", lblTelefonoAlt:"Teléfono alternativo (opcional)",
-    lblWhatsappCliente:"¿Llenas este pedido en nombre del cliente? Escribe aquí su WhatsApp (opcional)",
+    lblWhatsappCliente:"WhatsApp del cliente/pagador (opcional)",
+    ayudaWhatsappCliente:"Recibe confirmaciones y avisos sobre la operación.",
     optProvincia:"Selecciona una provincia", optMunicipio:"Selecciona un municipio",
     sepObligatorios:"Datos obligatorios", sepOpcionales:"Datos opcionales",
     entregaDisponible:"✅ Entrega disponible", entregaConfirmar:"⚠️ Disponibilidad por confirmar",
@@ -883,10 +885,12 @@ const T = {
     lblTarjeta:"Número do cartão ou conta de destino", lblValorRecibe:"Valor a receber", lblCambiar:"Alterar valor",
     lblNombreBenef:"Nome do beneficiário (opcional)", lblTelefono:"Telefone (opcional)",
     lblBanco:"Banco (opcional)", lblObservaciones:"Observações (opcional)",
-    lblNombreCompleto:"Nome completo de quem recebe", lblTelefonoReq:"Telefone",
+    lblNombreCompleto:"Nome completo de quem recebe", lblTelefonoReq:"Telefone do destinatário em Cuba",
+    ayudaTelefonoReceptor:"Usado para coordenar a entrega do dinheiro.",
     lblProvincia:"Província", lblMunicipio:"Município", lblDireccion:"Endereço completo",
     lblReferencia:"Referência do endereço (opcional)", lblTelefonoAlt:"Telefone alternativo (opcional)",
-    lblWhatsappCliente:"Está preenchendo este pedido em nome do cliente? Escreva aqui o WhatsApp dele (opcional)",
+    lblWhatsappCliente:"WhatsApp do cliente/pagador (opcional)",
+    ayudaWhatsappCliente:"Recebe confirmações e avisos sobre a operação.",
     optProvincia:"Selecione uma província", optMunicipio:"Selecione um município",
     sepObligatorios:"Dados obrigatórios", sepOpcionales:"Dados opcionais",
     entregaDisponible:"✅ Entrega disponível", entregaConfirmar:"⚠️ Disponibilidade a confirmar",
@@ -1329,6 +1333,7 @@ function renderDatosForm(){
     <div class="campo-form" id="fTelefonoReq">
       <label>${t().lblTelefonoReq} <span class="req">*</span></label>
       <input type="tel" id="inTelefonoReq" value="${pedido.datos.telefono||""}" placeholder="+53 5xxxxxxx">
+      <small>${t().ayudaTelefonoReceptor}</small>
       <div class="err">${t().errTelefono}</div>
     </div>
     <div class="campo-form" id="fProvincia">
@@ -1354,7 +1359,7 @@ function renderDatosForm(){
     <div class="campo-form"><label>${t().lblReferencia}</label><input type="text" id="inReferencia" value="${pedido.datos.referencia||""}" placeholder="Ej: Casa azul frente a la farmacia"></div>
     <div class="campo-form"><label>${t().lblTelefonoAlt}</label><input type="tel" id="inTelefonoAlt" value="${pedido.datos.telefonoAlt||""}"></div>
     <div class="campo-form"><label>${t().lblObservaciones}</label><textarea id="inObsEfe">${pedido.datos.observaciones||""}</textarea></div>
-    <div class="campo-form"><label>${t().lblWhatsappCliente}</label><input type="tel" id="inWhatsappCliente" value="${pedido.datos.whatsappCliente||""}"></div>`;
+    <div class="campo-form"><label>${t().lblWhatsappCliente}</label><input type="tel" id="inWhatsappCliente" value="${pedido.datos.whatsappCliente||""}"><small>${t().ayudaWhatsappCliente}</small></div>`;
   }
 
   $("datosForm").innerHTML = html;

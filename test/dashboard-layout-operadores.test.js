@@ -121,15 +121,19 @@ test("layout nuevo: todas las secciones preexistentes siguen presentes en el HTM
     }
 });
 
-test("Resumen General conserva EXACTAMENTE las mismas 9 métricas que antes de la reorganización", () => {
+test("Resumen General conserva las 9 métricas y usa etiquetas honestas", () => {
     const html = fs.readFileSync(DASHBOARD_PATH, "utf8");
     const metricas = [
         "stat-clientes", "stat-ops", "stat-vol", "stat-pend", "stat-completadas",
         "stat-cotizados", "stat-cierres", "stat-conversion", "stat-abandonos"
     ];
     for (const id of metricas) assert.match(html, new RegExp(`id="${id}"`));
-    // Sigue siendo global -- la aclaración de alcance no desapareció con el rediseño.
-    assert.match(html, /Incluye Transferencias, Entregas y Recargas/);
+    for (const etiqueta of [
+        "Contactos registrados", "Pago confirmado", "Volumen confirmado",
+        "Pendientes de confirmación", "Clientes cotizados hoy", "Cierres Hoy",
+        "Conversión hoy", "En abandono \\(30 días\\)"
+    ]) assert.match(html, new RegExp(etiqueta));
+    assert.match(html, /Resumen financiero y comercial de Yorda Envíos/);
 });
 
 // ── VIP abre/cierra ──

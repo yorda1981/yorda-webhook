@@ -146,17 +146,17 @@
 
             <div class="config-section" style="margin-bottom:0;">
                 <h3 style="margin-bottom:4px;">📊 Resumen General</h3>
-                <p style="color:#8b949e; font-size:11px; margin-top:0; margin-bottom:10px;">Incluye Transferencias, Entregas y Recargas</p>
+                <p style="color:#8b949e; font-size:11px; margin-top:0; margin-bottom:10px;">Resumen financiero y comercial de Yorda Envíos</p>
                 <div class="resumen-compacto">
-                    <div class="resumen-compacto-item"><span class="label">Clientes</span><span class="value" id="stat-clientes">—</span></div>
-                    <div class="resumen-compacto-item"><span class="label">Ops. Confirmadas</span><span class="value" id="stat-ops">—</span></div>
-                    <div class="resumen-compacto-item"><span class="label">Volumen Total</span><span class="value" id="stat-vol">—</span></div>
-                    <div class="resumen-compacto-item"><span class="label">Pendientes (todas)</span><span class="value" id="stat-pend" style="color: var(--yellow);">—</span></div>
-                    <div class="resumen-compacto-item"><span class="label">Completadas (todas)</span><span class="value" id="stat-completadas" style="color:#60a5fa;">—</span></div>
-                    <div class="resumen-compacto-item"><span class="label">Cotizados Hoy</span><span class="value" id="stat-cotizados" style="color:#38bdf8;">—</span></div>
+                    <div class="resumen-compacto-item"><span class="label">Contactos registrados</span><span class="value" id="stat-clientes">—</span></div>
+                    <div class="resumen-compacto-item"><span class="label">Pago confirmado</span><span class="value" id="stat-ops">—</span></div>
+                    <div class="resumen-compacto-item"><span class="label">Volumen confirmado</span><span class="value" id="stat-vol">—</span></div>
+                    <div class="resumen-compacto-item"><span class="label">Pendientes de confirmación</span><span class="value" id="stat-pend" style="color: var(--yellow);">—</span></div>
+                    <div class="resumen-compacto-item"><span class="label">Completadas</span><span class="value" id="stat-completadas" style="color:#60a5fa;">—</span></div>
+                    <div class="resumen-compacto-item"><span class="label">Clientes cotizados hoy</span><span class="value" id="stat-cotizados" style="color:#38bdf8;">—</span></div>
                     <div class="resumen-compacto-item"><span class="label">Cierres Hoy</span><span class="value" id="stat-cierres" style="color:var(--green);">—</span></div>
-                    <div class="resumen-compacto-item"><span class="label">Conversión</span><span class="value" id="stat-conversion" style="color:#a78bfa;">—%</span></div>
-                    <div class="resumen-compacto-item"><span class="label">Abandonos</span><span class="value" id="stat-abandonos" style="color:var(--red);">—</span></div>
+                    <div class="resumen-compacto-item" title="No existe todavía una relación inequívoca entre cada cotización y su operación."><span class="label">Conversión hoy</span><span class="value" id="stat-conversion" style="color:#a78bfa;">—</span></div>
+                    <div class="resumen-compacto-item" title="Clientes actualmente en abandono con actividad en los últimos 30 días."><span class="label">En abandono (30 días)</span><span class="value" id="stat-abandonos" style="color:var(--red);">—</span></div>
                 </div>
             </div>
         </div>
@@ -294,8 +294,9 @@
 
                         <div style="font-size:13px;font-weight:700;color:#a78bfa;margin-bottom:8px;">👤 Cliente (quien paga)</div>
                         <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:10px; margin-bottom:16px;">
-                            <label style="font-size:12px;color:#8b949e;">WhatsApp del cliente *
+                            <label style="font-size:12px;color:#8b949e;">WhatsApp del cliente/pagador *
                                 <input type="tel" id="manWhatsapp" style="display:block;width:100%;background:#161b2e;border:1px solid #2d355a;padding:8px 10px;border-radius:8px;color:white;margin-top:4px;">
+                                <small style="display:block;margin-top:4px;">Recibe confirmaciones y avisos sobre la operación.</small>
                             </label>
                             <label style="font-size:12px;color:#8b949e;">Nombre del cliente *
                                 <input type="text" id="manNombre" style="display:block;width:100%;background:#161b2e;border:1px solid #2d355a;padding:8px 10px;border-radius:8px;color:white;margin-top:4px;">
@@ -312,6 +313,7 @@
                             </label>
                             <label style="font-size:12px;color:#8b949e;">Teléfono del receptor en Cuba
                                 <input type="tel" id="manTelefonoEntrega" style="display:block;width:100%;background:#161b2e;border:1px solid #2d355a;padding:8px 10px;border-radius:8px;color:white;margin-top:4px;">
+                                <small style="display:block;margin-top:4px;">Se utiliza para coordinar la entrega del efectivo.</small>
                             </label>
                             <label style="font-size:12px;color:#8b949e;">Cantidad a entregar *
                                 <input type="number" id="manCantidad" step="any" style="display:block;width:100%;background:#161b2e;border:1px solid #2d355a;padding:8px 10px;border-radius:8px;color:white;margin-top:4px;">
@@ -1574,9 +1576,10 @@
             if (!d || !Object.keys(d).length) return;
 
             // Cards nuevas
-            const cotizados = Number(d.cotizados || 0);
+            const cotizados = Number(d.cotizados_hoy ?? d.cotizados ?? 0);
             const cierresHoy = Number(d.cierres_hoy || 0);
-            const conv = d.conversion_pct != null ? d.conversion_pct + "%" : "—%";
+            const conversionHoy = d.conversion_hoy ?? null;
+            const conv = conversionHoy != null ? conversionHoy + "%" : "—";
             const abandonos = Number(d.abandonos || 0);
 
             const sc = document.getElementById("stat-cotizados");

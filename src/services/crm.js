@@ -452,26 +452,53 @@ async function obtenerEstadisticasCRM(dias) {
         const diasNum = Number(dias);
         const filtroFecha = (diasNum && diasNum > 0) ? `AND updated_at > NOW() - INTERVAL '${diasNum} days'` : "";
         const r = await pool.query(`
+            WITH limites_hoy AS (
+                SELECT
+                    timezone(
+                        'UTC',
+                        date_trunc('day', NOW() AT TIME ZONE 'America/Sao_Paulo')
+                            AT TIME ZONE 'America/Sao_Paulo'
+                    ) AS inicio_utc,
+                    timezone(
+                        'UTC',
+                        (date_trunc('day', NOW() AT TIME ZONE 'America/Sao_Paulo') + INTERVAL '1 day')
+                            AT TIME ZONE 'America/Sao_Paulo'
+                    ) AS fin_utc
+            ),
+            clientes AS (
             SELECT
                 COUNT(*) FILTER (WHERE estado_crm = 'nuevo_cliente' ${filtroFecha})           AS nuevos,
                 COUNT(*) FILTER (WHERE estado_crm = 'cotizado' ${filtroFecha})                AS cotizados,
+                -- Provisional y honesto: una fila por cliente, según la última
+                -- cotización registrada durante el día calendario de São Paulo.
+                COUNT(*) FILTER (
+                    WHERE fecha_cotizacion >= limites_hoy.inicio_utc
+                      AND fecha_cotizacion <  limites_hoy.fin_utc
+                )                                                               AS cotizados_hoy,
                 COUNT(*) FILTER (WHERE estado_crm = 'esperando_pix' ${filtroFecha})           AS esperando_pix,
                 COUNT(*) FILTER (WHERE estado_crm = 'esperando_comprobante' ${filtroFecha})   AS esperando_comprobante,
                 COUNT(*) FILTER (WHERE estado_crm = 'completado' ${filtroFecha})              AS completados,
                 COUNT(*) FILTER (WHERE estado_crm = 'abandono' ${filtroFecha})                AS abandonos,
-                COUNT(*) FILTER (WHERE cliente_frecuente = true)               AS frecuentes,
-                COUNT(*) FILTER (
-                    WHERE estado_crm = 'completado'
-                    AND updated_at > NOW() - INTERVAL '24 hours'
-                )                                                               AS cierres_hoy,
-                -- Conversión: completados / (cotizados + esperando_pix + completado + abandono)
-                ROUND(
-                    COUNT(*) FILTER (WHERE estado_crm = 'completado' ${filtroFecha}) * 100.0 /
-                    NULLIF(COUNT(*) FILTER (WHERE estado_crm IN (
-                        'cotizado','esperando_pix','esperando_comprobante','completado','abandono'
-                    ) ${filtroFecha}), 0)
-                , 1) AS conversion_pct
+                COUNT(*) FILTER (WHERE cliente_frecuente = true)                AS frecuentes
             FROM customers
+            CROSS JOIN limites_hoy
+            GROUP BY limites_hoy.inicio_utc, limites_hoy.fin_utc
+            ),
+            cierres AS (
+                -- operations es la única representación financiera. No se une
+                -- con entregas, por lo que cada Entrega se cuenta una sola vez.
+                SELECT COUNT(*) AS cierres_hoy
+                FROM operations
+                CROSS JOIN limites_hoy
+                WHERE completed_at >= limites_hoy.inicio_utc
+                  AND completed_at <  limites_hoy.fin_utc
+            )
+            SELECT clientes.*,
+                   cierres.cierres_hoy,
+                   NULL::numeric AS conversion_hoy,
+                   NULL::numeric AS conversion_pct
+            FROM clientes
+            CROSS JOIN cierres
         `);
         return r.rows[0] || {};
     } catch (e) {
