@@ -261,6 +261,12 @@ async function manejarEntrega(phone, texto, pushName, esEs) {
             refWeb:           datos.ref,
             phone,
             clienteNombre:    nombreCliente,
+            // receptor = mismo valor que operations.titular arriba
+            // (datos.nombre, "quien recibe" en el formulario de la
+            // calculadora) -- sin esto, nombreReceptor() caía de vuelta a
+            // cliente_nombre (el pagador) y el aviso mostraba el nombre
+            // equivocado bajo la etiqueta "Receptor:".
+            receptorNombre:   datos.nombre,
             telefonoEntrega:  datos.telefono,
             cantidad:         datos.moneda === "CUP" ? montoRecibeFinal : datos.montoRecibe,
             moneda:           datos.moneda,

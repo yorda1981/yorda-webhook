@@ -29,7 +29,8 @@ require.cache[zapiPath] = {
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { notificarNuevaEntrega } = require("../src/flows/pedido-web-flow");
+const pool = require("../db");
+const { notificarNuevaEntrega, procesarPedidoWeb } = require("../src/flows/pedido-web-flow");
 const { mensajeEntregaMarcada, nombreReceptor } = require("../src/services/entregas");
 
 test.beforeEach(() => { mensajesEnviados = []; });
@@ -127,4 +128,71 @@ test("mensajeEntregaMarcada: separador de miles solo visual, no altera el valor 
     mensajeEntregaMarcada(entrega);
     assert.equal(entrega.cantidad, 5000, "el valor numérico original no debe modificarse");
     assert.equal(typeof entrega.cantidad, "number");
+});
+
+// ── manejarEntrega (canal calculadora web): receptor_nombre debe guardarse
+// con el nombre de "quien recibe" (el mismo que operations.titular), NO con
+// el pushName/nombre de quien paga -- ver public/calculadora.html
+// (construirMensajeWhatsApp: la línea 👤 siempre es nombreCompleto, "Nombre
+// y apellidos de quien recibe"). ──
+
+function mensajeEntregaWeb({ nombreReceptor, provincia, municipio }) {
+    return [
+        "🇨🇺 *NUEVO PEDIDO — YORDA ENVÍOS* #ABCD1234",
+        "",
+        "Tipo: CUP EN EFECTIVO",
+        "",
+        "Total a pagar: R$ 300",
+        `Recibe: 9.500 CUP`,
+        "",
+        `👤 Beneficiario: ${nombreReceptor}`,
+        "📞 Teléfono: 53555512345",
+        `📍 Provincia: ${provincia}`,
+        `📍 Municipio: ${municipio}`,
+        "🏠 Dirección: Calle 23 #456",
+        "",
+        "🚚 Entrega: Disponible"
+    ].join("\n");
+}
+
+test("manejarEntrega (calculadora web): guarda receptor_nombre = quien recibe (formulario), no el pushName de quien paga", async (t) => {
+    let insertEntregaParams = null;
+    t.mock.method(pool, "query", async (sql, params = []) => {
+        if (/^SELECT \* FROM operations WHERE ref_web/.test(sql)) return { rows: [] };
+        if (/SELECT nivel_vip FROM customers/.test(sql)) return { rows: [] };
+        if (/FROM rates LIMIT 1/.test(sql)) return { rows: [] };
+        if (/FROM ofertas LIMIT 1/.test(sql)) return { rows: [] };
+        if (/SELECT phone FROM customers/.test(sql)) return { rows: [] };
+        if (/INSERT INTO customers/.test(sql) || /UPDATE customers SET/.test(sql)) return { rows: [] };
+        if (/INSERT INTO operations/.test(sql)) return { rows: [{ id: 1 }] };
+        if (/INSERT INTO entregas_historial/.test(sql)) return { rows: [] };
+        return { rows: [] };
+    });
+    t.mock.method(pool, "connect", async () => ({
+        query: async (sql, params = []) => {
+            if (sql === "BEGIN" || sql === "COMMIT" || sql === "ROLLBACK") return {};
+            if (/nextval/.test(sql)) return { rows: [{ n: 2000 }] };
+            if (/^\s*INSERT INTO entregas\b/.test(sql)) {
+                insertEntregaParams = params;
+                return { rows: [{ id: 1, codigo: "E-2000" }] };
+            }
+            return { rows: [] };
+        },
+        release() {}
+    }));
+
+    const texto = mensajeEntregaWeb({ nombreReceptor: "Ana García (receptora)", provincia: "La Habana", municipio: "Playa" });
+    // pushName distinto del receptor -- simula el caso real: quien manda el
+    // pedido por WhatsApp (o cuyo perfil se usa) no es necesariamente quien
+    // recibe el efectivo en Cuba.
+    const ok = await procesarPedidoWeb("5511900070099", texto, "María Paga (perfil WhatsApp)");
+    assert.equal(ok, true);
+
+    assert.ok(insertEntregaParams, "debe haber insertado la entrega");
+    // Columnas del INSERT INTO entregas: codigo, operation_id, ref_web,
+    // phone, cliente_nombre, telefono_entrega, cantidad, moneda, modalidad,
+    // provincia, municipio, direccion, referencia, observaciones,
+    // receptor_nombre ($15) -- ver src/services/entregas.js:agregarEntrega.
+    assert.equal(insertEntregaParams[14], "Ana García (receptora)", "receptor_nombre debe ser quien recibe, no el pushName de quien paga");
+    assert.notEqual(insertEntregaParams[14], "María Paga (perfil WhatsApp)");
 });
