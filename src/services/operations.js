@@ -13,8 +13,9 @@ async function agregarOperacion(data) {
                 tarjeta, titular, banco, tipo,
                 ref_web, direccion, provincia, municipio,
                 referencia_entrega, telefono_entrega, entrega_disponible,
+                comprobante_e2e, comprobante_transaccion_id, comprobante_datos,
                 status, created_at
-            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'pendiente',NOW())
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'pendiente',NOW())
             RETURNING *
         `, [
             data.phone   || "Sin teléfono",
@@ -31,7 +32,10 @@ async function agregarOperacion(data) {
             data.municipio         || null,
             data.referenciaEntrega || null,
             data.telefonoEntrega   || null,
-            typeof data.entregaDisponible === "boolean" ? data.entregaDisponible : null
+            typeof data.entregaDisponible === "boolean" ? data.entregaDisponible : null,
+            data.comprobanteE2E            || null,
+            data.comprobanteTransaccionId  || null,
+            data.comprobanteDatos ? JSON.stringify(data.comprobanteDatos) : null
         ]);
         console.log(`⏳ Operación PENDIENTE: R$${data.monto}`);
         log("OPERATION_CREATED", { operationId: result.rows[0].id, tipo: result.rows[0].tipo, monto: result.rows[0].monto, phone: result.rows[0].phone });

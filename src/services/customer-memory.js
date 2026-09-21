@@ -28,7 +28,10 @@ async function guardarCliente({
     lastResponseId      = null,   // nuevo — Responses API
     ultimoAvisoEntrega  = null,   // nuevo — para no repetir la explicación de entrega seguido
     ultimaPregunta      = null,   // nuevo — contexto conversacional corto (migración 0011)
-    ultimasOpciones     = null    // nuevo — idem, array de opciones mostradas junto a ultimaPregunta
+    ultimasOpciones     = null,   // nuevo — idem, array de opciones mostradas junto a ultimaPregunta
+    comprobanteE2E           = null,  // nuevo — identidad del comprobante en staging (migración 0012)
+    comprobanteTransaccionId = null,  // nuevo — idem, ID de transacción bancario (si no hay E2E)
+    comprobanteDatos         = null   // nuevo — idem, resto de campos extraídos (fecha/hora/pagador/destinatario/...)
 }) {
     if (!phone) return null;
 
@@ -53,11 +56,12 @@ async function guardarCliente({
                     fecha_pix, created_at, updated_at,
                     tarjetas, comprobante_pendiente, valor_comprobante,
                     ultima_interaccion, saludo_enviado, last_response_id, ultimo_aviso_entrega,
-                    ultima_pregunta, ultimas_opciones, contexto_actualizado_at
+                    ultima_pregunta, ultimas_opciones, contexto_actualizado_at,
+                    comprobante_e2e, comprobante_transaccion_id, comprobante_datos
                 ) VALUES (
                     $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,
                     NOW(), NOW(),
-                    $13,$14,$15,$16,$17,$18,$19,$20,$21,$22
+                    $13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25
                 )
             `, [
                 phone, nombre, monto, tipo, banco, tarjeta, titular,
@@ -65,7 +69,8 @@ async function guardarCliente({
                 tarjetas ? JSON.stringify(tarjetas) : null,
                 comprobantePendiente, valorComprobante, ultimaInteraccion,
                 saludoEnviado, lastResponseId, ultimoAvisoEntrega,
-                ultimaPregunta, ultimasOpciones ? JSON.stringify(ultimasOpciones) : null, contextoActualizadoAt
+                ultimaPregunta, ultimasOpciones ? JSON.stringify(ultimasOpciones) : null, contextoActualizadoAt,
+                comprobanteE2E, comprobanteTransaccionId, comprobanteDatos ? JSON.stringify(comprobanteDatos) : null
             ]);
 
         } else {
@@ -92,6 +97,9 @@ async function guardarCliente({
                     ultima_pregunta          = COALESCE($20, ultima_pregunta),
                     ultimas_opciones         = COALESCE($21, ultimas_opciones),
                     contexto_actualizado_at  = COALESCE($22, contexto_actualizado_at),
+                    comprobante_e2e             = COALESCE($23, comprobante_e2e),
+                    comprobante_transaccion_id  = COALESCE($24, comprobante_transaccion_id),
+                    comprobante_datos           = COALESCE($25, comprobante_datos),
                     updated_at           = NOW()
                 WHERE phone = $1
             `, [
@@ -100,7 +108,8 @@ async function guardarCliente({
                 tarjetas ? JSON.stringify(tarjetas) : null,
                 comprobantePendiente, valorComprobante, ultimaInteraccion,
                 saludoEnviado, lastResponseId, ultimoAvisoEntrega,
-                ultimaPregunta, ultimasOpciones ? JSON.stringify(ultimasOpciones) : null, contextoActualizadoAt
+                ultimaPregunta, ultimasOpciones ? JSON.stringify(ultimasOpciones) : null, contextoActualizadoAt,
+                comprobanteE2E, comprobanteTransaccionId, comprobanteDatos ? JSON.stringify(comprobanteDatos) : null
             ]);
         }
 
@@ -128,6 +137,12 @@ async function limpiarSesionDB(phone) {
                 fecha_pix             = NULL,
                 comprobante_pendiente = NULL,
                 valor_comprobante     = NULL,
+                -- Identidad del comprobante en staging (migración 0012): una
+                -- sesión cerrada no debe dejar un E2E/ID de transacción
+                -- colgado para la próxima operación de este cliente.
+                comprobante_e2e            = NULL,
+                comprobante_transaccion_id = NULL,
+                comprobante_datos          = NULL,
                 last_response_id      = NULL,
                 -- Limpiar datos de la operación anterior para evitar que
                 -- se reutilicen en una nueva cotización del mismo cliente

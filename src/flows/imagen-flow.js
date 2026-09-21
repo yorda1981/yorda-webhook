@@ -12,6 +12,26 @@ const openai = new OpenAI({ apiKey: env.OPENAI_API_KEY });
 // PROMPTS OCR
 // ─────────────────────────────────────────
 
+// Campos de identidad/extracción estructurada compartidos por imagen y PDF
+// (mismo shape de salida para los dos canales -- ver
+// src/services/comprobante-identidad.js, que es quien normaliza/dedupe
+// usando estos campos, sin duplicar reglas entre canales).
+const CAMPOS_COMPROBANTE_JSON = `"valor":200,"fecha":"DD/MM/AAAA","hora":"HH:MM","banco":"banco origen","destinatario":"nombre","pagador":"nombre o null","id_transaccion":"o null","e2e":"o null","destino_correcto":true,"valido":true`;
+
+const REGLAS_EXTRACCION_COMPROBANTE = `
+- valor: número puro sin símbolo (200, no "R$200,00")
+- destinatario: nombre de quien RECIBE el dinero, tal como aparece
+- pagador: nombre de quien ENVÍA el dinero, si aparece (si no, null)
+- e2e: el EndToEndId del PIX si aparece (suele empezar con "E" seguido de
+  números/letras, a veces etiquetado "Id da transação", "ID: E...",
+  "comprovante E2E"). Extrae el código COMPLETO tal como se ve.
+- id_transaccion: cualquier OTRO identificador/número de comprobante/
+  transacción distinto del E2E, si aparece (ej. "Nº do documento",
+  "código da operação"). Si no hay ninguno visible, null.
+- NUNCA inventes ni completes parcialmente un e2e o id_transaccion -- si
+  no se lee con claridad completa, ese campo va en null.
+- datos faltantes o ilegibles → null (nunca inventar, nunca adivinar)`;
+
 function promptImagen() {
     const aliases = getPIXAliases().join(", ");
     const key     = getPIXKey();
@@ -20,7 +40,7 @@ function promptImagen() {
 FORMATOS:
 
 TARJETA: {"tipo":"tarjeta","tarjeta":"SOLO16DIGITOS","titular":"NOMBRE COMPLETO","banco":"bandec|bpa|metropolitano|otro","valida":true}
-COMPROBANTE: {"tipo":"comprovante_pix","valor":200,"fecha":"DD/MM/AAAA","hora":"HH:MM","banco":"banco origen","destinatario":"nombre","destino_correcto":true,"valido":true}
+COMPROBANTE: {"tipo":"comprovante_pix",${CAMPOS_COMPROBANTE_JSON}}
 OTRO: {"tipo":"otro"}
 
 REGLAS TARJETA:
@@ -39,10 +59,9 @@ REGLAS COMPROBANTE:
 - Un comprobante PIX es una captura de pantalla de una app bancaria brasileña:
   tiene monto transferido, fecha, hora, y datos de origen/destino del pago.
   NUNCA muestra 16 dígitos de una tarjeta física cubana.
-- valor: número puro sin símbolo (200, no "R$200,00")
 - destino_correcto=true si destinatario coincide con: ${aliases}
 ${key ? `- destino_correcto=true si aparece la clave PIX: ${key}` : ""}
-- datos faltantes → null
+${REGLAS_EXTRACCION_COMPROBANTE}
 
 DESAMBIGUACIÓN (importante):
 - Si la imagen tiene fecha+hora+monto de una transacción → es "comprovante_pix", nunca "tarjeta".
@@ -56,10 +75,11 @@ function promptPDF() {
     const aliases = getPIXAliases().join(", ");
     const key     = getPIXKey();
     return `Analiza el texto del comprobante. Responde SOLO en JSON.
-{"tipo":"comprovante_pdf","valor":200,"fecha":"DD/MM/AAAA","hora":"HH:MM","banco":"banco origen","destinatario":"nombre","destino_correcto":true,"valido":true}
-- valor: número puro. datos faltantes → null. Sin texto extra.
+{"tipo":"comprovante_pdf",${CAMPOS_COMPROBANTE_JSON}}
 - destino_correcto=true si destinatario coincide con: ${aliases}.
-${key ? `- destino_correcto=true si el texto contiene: ${key}` : ""}`;
+${key ? `- destino_correcto=true si el texto contiene: ${key}` : ""}
+${REGLAS_EXTRACCION_COMPROBANTE}
+- Sin texto extra.`;
 }
 
 // ─────────────────────────────────────────

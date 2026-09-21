@@ -7,6 +7,9 @@ const { calcularOperacion }                                                     
 const { enviarMensaje, enviarImagen }                                              = require("../services/zapi");
 const crm                                                                          = require("../services/crm");
 const { esRecarga: esRecargaCliente }                                              = require("../services/reglas-bot");
+const {
+    extraerIdentidadComprobante, calcularDestinatarioMatch, buscarOperacionPorIdentidad
+} = require("../services/comprobante-identidad");
 
 // Trae la descripción configurada para este tipo de recarga (la misma que se le
 // muestra al cliente al elegir "Nacional"/"Internacional" en recarga-flow.js) —
@@ -195,6 +198,26 @@ async function intentarCompletarOperacion(phone, pushName, cliente, esEs) {
     const yaExiste = await existeOperacionPendiente(phone, cliente.ultimo_monto);
     if (yaExiste) return true;
 
+    // Red de seguridad adicional (la comprobación principal ya corrió en
+    // procesarComprobante): si el comprobante llegó ANTES de que monto/
+    // tarjeta estuvieran completos, esta función puede correr varios
+    // mensajes después -- se revalida la identidad justo antes de crear la
+    // fila real, por si en el medio ya se creó una operación con el mismo
+    // E2E/ID de transacción (ver src/services/comprobante-identidad.js).
+    if (cliente.comprobante_e2e || cliente.comprobante_transaccion_id) {
+        const identidadStaged = cliente.comprobante_e2e
+            ? { tipo: "e2e", columna: "comprobante_e2e", valor: cliente.comprobante_e2e }
+            : { tipo: "transaccion_id", columna: "comprobante_transaccion_id", valor: cliente.comprobante_transaccion_id };
+        const dup = await buscarOperacionPorIdentidad(identidadStaged);
+        if (dup) {
+            const m = (dup.status === "confirmada" || dup.status === "completada")
+                ? (esEs ? "Este comprobante ya corresponde a una operación procesada. ✅" : "Este comprovante já corresponde a uma operação processada. ✅")
+                : (esEs ? "Ya tengo ese comprobante registrado 👍 Sigue pendiente de revisión." : "Já tenho esse comprovante registrado 👍 Continua pendente de revisão.");
+            await enviarSeguro(phone, m);
+            return true;
+        }
+    }
+
     const resultado = await calcularOperacion({ tipo: cliente.tipo_favorito, valor: cliente.ultimo_monto, nivelVip: Number(cliente.nivel_vip || 0) });
 
     await guardarCliente({ phone, comprobantePendiente: false });
@@ -206,7 +229,10 @@ async function intentarCompletarOperacion(phone, pushName, cliente, esEs) {
         tarjeta: cliente.tarjeta || cliente.tarjeta_frecuente || "",
         titular: cliente.titular || cliente.titular_frecuente || "",
         banco:   cliente.banco_detectado || "",
-        tipo:    cliente.tipo_favorito
+        tipo:    cliente.tipo_favorito,
+        comprobanteE2E:           cliente.comprobante_e2e || null,
+        comprobanteTransaccionId: cliente.comprobante_transaccion_id || null,
+        comprobanteDatos:         cliente.comprobante_datos || null
     });
 
     const opId      = operacion?.id ? `#${operacion.id} ` : "";
@@ -254,8 +280,17 @@ Pendiente de validación`;
 
     await enviarSeguro(phone, msgOperacion);
 
+    // El destinatario del comprobante es una SEÑAL, no un bloqueo (ver
+    // procesarComprobante) -- se agrega SOLO a la notificación del admin,
+    // que es quien de verdad confirma manualmente. Al cliente no se le
+    // alarma por algo que puede ser un simple falso positivo de OCR.
+    const destinatarioMatch = cliente.comprobante_datos?.destinatarioMatch;
+    const avisoAdmin = destinatarioMatch === "diferente"
+        ? `\n\n⚠️ Destinatario del comprobante NO coincide con el esperado -- revisar antes de confirmar.`
+        : "";
+
     const adminPhone = getAdminPhone();
-    if (adminPhone) await enviarSeguro(adminPhone, msgOperacion);
+    if (adminPhone) await enviarSeguro(adminPhone, msgOperacion + avisoAdmin);
     else console.warn("⚠️ ADMIN_PHONE no configurado");
 
     await etiquetarNuevoPedido(phone);
@@ -267,14 +302,40 @@ Pendiente de validación`;
 // PROCESAR COMPROBANTE
 // ─────────────────────────────────────────
 
+// COMPROBANTE LEÍDO ≠ DINERO CONFIRMADO (ver src/services/comprobante-identidad.js):
+// esta función EXTRAE, COMPARA, ASOCIA y DETECTA duplicados/inconsistencias --
+// nunca confirma un pago ni completa la operación por sí sola. La ruta es la
+// MISMA para imagen y PDF (ambas llaman aquí con el mismo shape de `datos`),
+// así que la deduplicación y el chequeo de destinatario no se duplican entre
+// canales.
 async function procesarComprobante(phone, pushName, cliente, datos, esEs) {
-    if (datos.destino_correcto === false) {
-        await enviarSeguro(phone, "⚠️ El comprobante no es para nuestra cuenta.\n\nVerifica el destinatario y reenvíalo.");
-        return "";
-    }
+    const identidad         = extraerIdentidadComprobante(datos);
+    const destinatarioMatch = calcularDestinatarioMatch(datos);
 
-    // Validar duplicado
-    if (datos.valor && datos.fecha && datos.hora) {
+    // 1) DEDUPLICACIÓN -- identidad fuerte primero (E2E, luego ID de
+    // transacción). Dos comprobantes con identidad DISTINTA nunca se
+    // consideran el mismo pago, aunque compartan monto/teléfono/fecha (caso
+    // obligatorio: PIX A R$500 con E2E A y PIX B R$500 con E2E B son dos
+    // pagos reales). Si hay identidad fuerte, esto REEMPLAZA el chequeo de
+    // monto+ventana de abajo -- nunca corren los dos a la vez para el mismo
+    // comprobante.
+    if (identidad.tipo !== "fallback") {
+        const opExistente = await buscarOperacionPorIdentidad(identidad);
+        if (opExistente) {
+            const m = (opExistente.status === "confirmada" || opExistente.status === "completada")
+                ? (esEs ? "Este comprobante ya corresponde a una operación procesada. ✅" : "Este comprovante já corresponde a uma operação processada. ✅")
+                : (esEs ? "Ya tengo ese comprobante registrado 👍 Sigue pendiente de revisión." : "Já tenho esse comprovante registrado 👍 Continua pendente de revisão.");
+            await enviarSeguro(phone, m);
+            return "";
+        }
+    } else if (datos.valor && datos.fecha && datos.hora) {
+        // FALLBACK sin cambios respecto a la fase anterior: solo corre
+        // cuando NO se pudo leer ni E2E ni ID de transacción. Sigue siendo
+        // una protección basada en monto + ventana de tiempo -- con su
+        // limitación conocida y ya documentada (dos pagos legítimos del
+        // mismo cliente y monto dentro de 2h podrían marcarse como
+        // duplicado). No se tocó a propósito -- ver el reporte de la fase
+        // de comprobantes para la decisión pendiente sobre esto.
         try {
             const dupCheck = await pool.query(`
                 SELECT id FROM operations
@@ -302,10 +363,36 @@ async function procesarComprobante(phone, pushName, cliente, datos, esEs) {
         }
     }
 
+    // 2) DESTINATARIO -- señal, nunca bloqueo automático (ver getPIXAliases()/
+    // getPIXHolder() en src/flows/shared.js + src/config/env.js: ahí vive de
+    // forma centralizada el nombre/alias esperado, nunca hardcodeado aquí).
+    // "diferente" queda marcado para revisión manual del admin; "desconocido"
+    // (ilegible) sigue como un comprobante pendiente normal, sin advertencia.
+    let avisoDestinatario = "";
+    if (destinatarioMatch === "diferente") {
+        avisoDestinatario = esEs
+            ? "\n\n⚠️ El destinatario del comprobante no coincide con el esperado — quedará marcado para revisión manual."
+            : "\n\n⚠️ O destinatário do comprovante não coincide com o esperado — vai ficar marcado para revisão manual.";
+    }
+
+    // 3) Staging en `customers` -- sobrevive aunque falte monto/tarjeta
+    // todavía (mismo patrón que comprobante_pendiente/valor_comprobante ya
+    // usaban). Se traslada a `operations` recién cuando agregarOperacion()
+    // corre en intentarCompletarOperacion().
     await guardarCliente({
         phone,
         comprobantePendiente: true,
         valorComprobante: datos.valor ?? null,
+        comprobanteE2E: identidad.e2e,
+        comprobanteTransaccionId: identidad.transaccionId,
+        comprobanteDatos: {
+            fecha: datos.fecha ?? null,
+            hora: datos.hora ?? null,
+            pagador: datos.pagador ?? null,
+            destinatario: datos.destinatario ?? null,
+            destinatarioMatch,
+            bancoOrigen: datos.banco ?? null
+        },
         ...(datos.valor && !cliente.ultimo_monto && { monto: datos.valor })
     });
 
@@ -323,7 +410,7 @@ async function procesarComprobante(phone, pushName, cliente, datos, esEs) {
     const completado = await intentarCompletarOperacion(phone, pushName, clienteActualizado, esEs);
 
     if (!completado) {
-        await enviarSeguro(phone, esEs ? "¡Comprobante recibido! ✅" : "Comprovante recebido! ✅");
+        await enviarSeguro(phone, (esEs ? "¡Comprobante recibido! ✅" : "Comprovante recebido! ✅") + avisoDestinatario);
     }
 
     return "";
