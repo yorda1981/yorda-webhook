@@ -1,4 +1,5 @@
 const pool = require("../../db");
+const { log } = require("../utils/structured-logger");
 
 // =====================
 // AGREGAR OPERACIÓN
@@ -33,6 +34,7 @@ async function agregarOperacion(data) {
             typeof data.entregaDisponible === "boolean" ? data.entregaDisponible : null
         ]);
         console.log(`⏳ Operación PENDIENTE: R$${data.monto}`);
+        log("OPERATION_CREATED", { operationId: result.rows[0].id, tipo: result.rows[0].tipo, monto: result.rows[0].monto, phone: result.rows[0].phone });
         return result.rows[0];
     } catch (err) {
         console.error("❌ Error agregando operación:", err.message);
@@ -44,14 +46,21 @@ async function agregarOperacion(data) {
 // CONFIRMAR OPERACIÓN
 // =====================
 
+// Idempotente por diseño: el WHERE status='pendiente' hace que una segunda
+// llamada (doble clic en el dashboard, reintento) no encuentre filas para
+// actualizar y devuelva false — el caller (index.js) ya trata ese false
+// como "operación no encontrada" y NO reenvía el mensaje de WhatsApp al
+// cliente. Antes esto actualizaba sin condición y podía reconfirmar (y
+// renotificar) una operación ya confirmada o incluso completada.
 async function confirmarOperacion(id) {
     try {
         const result = await pool.query(`
             UPDATE operations SET status = 'confirmada', confirmed_at = NOW()
-            WHERE id = $1 RETURNING *
+            WHERE id = $1 AND status = 'pendiente' RETURNING *
         `, [id]);
         if (result.rows.length === 0) return false;
         console.log(`✅ Operación CONFIRMADA: ${id}`);
+        log("OPERATION_CONFIRMED", { operationId: id });
         return result.rows[0];
     } catch (err) {
         console.error("❌ Error confirmando operación:", err.message);
@@ -63,15 +72,20 @@ async function confirmarOperacion(id) {
 // COMPLETAR OPERACIÓN (entrega/transferencia finalizada)
 // =====================
 
+// Idempotente igual que confirmarOperacion: solo transiciona desde
+// 'confirmada'. Antes actualizaba sin condición — una doble llamada podía
+// reenviar el mensaje de "completada" al cliente y volver a recalcular el
+// nivel VIP innecesariamente (ver el caller en index.js).
 async function completarOperacion(id) {
     try {
         const result = await pool.query(`
             UPDATE operations SET status = 'completada', completed_at = NOW()
-            WHERE id = $1
+            WHERE id = $1 AND status = 'confirmada'
             RETURNING *
         `, [id]);
         if (result.rows.length === 0) return null;
         console.log(`🏁 Operación COMPLETADA: ${id}`);
+        log("OPERATION_COMPLETED", { operationId: id });
         return result.rows[0];
     } catch (err) {
         console.error("❌ Error completando operación:", err.message);

@@ -4,6 +4,7 @@ const OpenAI   = require("openai");
 const pdfParse = require("pdf-parse");
 const env      = require("../config/env");
 const { parseGPT, getPIXKey, getPIXAliases } = require("./shared");
+const { log } = require("../utils/structured-logger");
 
 const openai = new OpenAI({ apiKey: env.OPENAI_API_KEY });
 
@@ -75,9 +76,12 @@ async function detectarImagenUnificada(imageUrl) {
             ]}],
             max_tokens: 220
         });
-        return parseGPT(r.choices?.[0]?.message?.content);
+        const parsed = parseGPT(r.choices?.[0]?.message?.content);
+        log("OCR_SUCCESS", { origen: "imagen", tipo: parsed.tipo || "sin_clasificar" });
+        return parsed;
     } catch (e) {
         console.error("❌ OCR:", e.message);
+        log("OCR_FAILED", { origen: "imagen", error: e.message });
         return { tipo: "otro" };
     }
 }
@@ -96,9 +100,12 @@ async function detectarComprobantePDF(pdfUrl) {
             messages: [{ role: "user", content: promptPDF() + `\n\nTexto:\n${text}` }],
             max_tokens: 200
         });
-        return parseGPT(r.choices?.[0]?.message?.content);
+        const parsed = parseGPT(r.choices?.[0]?.message?.content);
+        log("OCR_SUCCESS", { origen: "pdf", tipo: parsed.tipo || "sin_clasificar" });
+        return parsed;
     } catch (e) {
         console.error("❌ PDF:", e.message);
+        log("OCR_FAILED", { origen: "pdf", error: e.message });
         return {};
     }
 }
