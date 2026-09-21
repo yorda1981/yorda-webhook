@@ -21,10 +21,9 @@ test("mensajeCompletarOperacion: transferencia normal -> 'tu transferencia fue c
     assert.doesNotMatch(m, /recarga/i);
 });
 
-test("mensajeCompletarOperacion: entrega en efectivo -> 'tu entrega fue completada'", () => {
+test("mensajeCompletarOperacion: entrega en efectivo -> no existe mensaje final en el circuito general", () => {
     const m = mensajeCompletarOperacion({ tipo: "cup_efectivo", monto: 100 });
-    assert.match(m, /tu entrega fue completada/i);
-    assert.doesNotMatch(m, /transferencia|recarga/i);
+    assert.equal(m, null);
 });
 
 test("mensajeCompletarOperacion: recarga_nacional -> 'tu recarga Nacional fue completada', nunca 'transferencia'", () => {

@@ -85,6 +85,7 @@ async function completarOperacion(id) {
         const result = await pool.query(`
             UPDATE operations SET status = 'completada', completed_at = NOW()
             WHERE id = $1 AND status = 'confirmada'
+              AND tipo NOT IN ('cup_efectivo', 'usd_efectivo')
             RETURNING *
         `, [id]);
         if (result.rows.length === 0) return null;

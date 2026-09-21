@@ -229,8 +229,11 @@ async function obtenerEntregas(filtros = {}) {
 // El WHERE estado_entrega='PENDIENTE' evita reabrir una entrega ya
 // cerrada (ENTREGADO o CANCELADO) por error o doble clic.
 async function marcarEntregado(id, usuario) {
+    let client;
     try {
-        const result = await pool.query(`
+        client = await pool.connect();
+        await client.query("BEGIN");
+        const result = await client.query(`
             UPDATE entregas
             SET estado_entrega = 'ENTREGADO',
                 fecha_entrega  = NOW(),
@@ -240,37 +243,82 @@ async function marcarEntregado(id, usuario) {
             WHERE id = $1 AND estado_entrega = 'PENDIENTE'
             RETURNING *
         `, [id, usuario || null]);
-        if (result.rows.length === 0) return null;
+        if (result.rows.length === 0) {
+            await client.query("ROLLBACK");
+            return null;
+        }
         const entrega = result.rows[0];
-        await registrarHistorial(
-            entrega.id,
-            `${entrega.codigo} marcada ENTREGADO${usuario ? ` por ${usuario}` : ""} — pago al contacto: PENDIENTE DE PAGO`
+        if (entrega.operation_id) {
+            await client.query(`
+                UPDATE operations
+                SET status = 'completada',
+                    confirmed_at = COALESCE(confirmed_at, NOW()),
+                    completed_at = COALESCE(completed_at, NOW()),
+                    updated_at = NOW()
+                WHERE id = $1
+            `, [entrega.operation_id]);
+        }
+        await client.query(
+            "UPDATE customers SET estado = NULL WHERE phone = $1 AND estado = 'pedido_web_pendiente'",
+            [entrega.phone]
         );
+        await client.query(
+            "INSERT INTO entregas_historial (entrega_id, evento) VALUES ($1, $2)",
+            [entrega.id, `${entrega.codigo} marcada ENTREGADO${usuario ? ` por ${usuario}` : ""} — pago al contacto: PENDIENTE DE PAGO`]
+        );
+        await client.query("COMMIT");
         console.log(`✅ Entrega ${entrega.codigo} marcada ENTREGADO`);
         log("DELIVERY_COMPLETED", { entregaId: entrega.id, codigo: entrega.codigo });
         return entrega;
     } catch (err) {
+        try { if (client) await client.query("ROLLBACK"); } catch (_) {}
         console.error("❌ Error marcando entrega como ENTREGADO:", err.message);
         return null;
+    } finally {
+        if (client) client.release();
     }
 }
 
 async function marcarCancelado(id, motivo) {
+    let client;
     try {
-        const result = await pool.query(`
+        client = await pool.connect();
+        await client.query("BEGIN");
+        const result = await client.query(`
             UPDATE entregas
             SET estado_entrega = 'CANCELADO', updated_at = NOW()
             WHERE id = $1 AND estado_entrega = 'PENDIENTE'
             RETURNING *
         `, [id]);
-        if (result.rows.length === 0) return null;
+        if (result.rows.length === 0) {
+            await client.query("ROLLBACK");
+            return null;
+        }
         const entrega = result.rows[0];
-        await registrarHistorial(entrega.id, `${entrega.codigo} CANCELADA${motivo ? `: ${motivo}` : ""}`);
+        if (entrega.operation_id) {
+            await client.query(`
+                UPDATE operations
+                SET status = 'rechazada', updated_at = NOW()
+                WHERE id = $1
+            `, [entrega.operation_id]);
+        }
+        await client.query(
+            "UPDATE customers SET estado = NULL WHERE phone = $1 AND estado = 'pedido_web_pendiente'",
+            [entrega.phone]
+        );
+        await client.query(
+            "INSERT INTO entregas_historial (entrega_id, evento) VALUES ($1, $2)",
+            [entrega.id, `${entrega.codigo} CANCELADA${motivo ? `: ${motivo}` : ""}`]
+        );
+        await client.query("COMMIT");
         console.log(`🚫 Entrega ${entrega.codigo} cancelada`);
         return entrega;
     } catch (err) {
+        try { if (client) await client.query("ROLLBACK"); } catch (_) {}
         console.error("❌ Error cancelando entrega:", err.message);
         return null;
+    } finally {
+        if (client) client.release();
     }
 }
 
@@ -542,11 +590,16 @@ function mensajeEntregaMarcada(entrega) {
         `💵 *Pago al contacto:* PENDIENTE DE PAGO`;
 }
 
+function mensajeEntregaCompletadaCliente(entrega) {
+    return `🎉 ¡Tu entrega ${entrega.codigo} fue completada con éxito! Gracias por preferir nuestros servicios. 🇨🇺💜`;
+}
+
 module.exports = {
     agregarEntrega,
     obtenerEntregaPorId,
     obtenerEntregaPorCodigo,
     mensajeEntregaMarcada,
+    mensajeEntregaCompletadaCliente,
     nombreReceptor,
     buscarEntregaPorRefWeb,
     obtenerEntregas,

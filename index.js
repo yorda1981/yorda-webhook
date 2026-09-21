@@ -26,6 +26,7 @@ const { verificarToken, verificarTokenEntregas } = require("./src/middleware/adm
 const blockedNumbers = require("./src/services/blocked-numbers");
 const operadoresService = require("./src/services/operadores");
 const entregasAvisos = require("./src/services/entregas-avisos");
+const entregasCoordinator = require("./src/services/entregas-coordinator");
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -474,6 +475,7 @@ app.post("/admin/completar-todas-antiguas", adminWriteLimiter, verificarToken, a
         const r = await pool.query(`
             UPDATE operations SET status = 'completada', completed_at = NOW()
             WHERE status = 'confirmada'
+              AND tipo NOT IN ('cup_efectivo', 'usd_efectivo')
             RETURNING id
         `);
         res.json({ success: true, actualizadas: r.rows.length });
@@ -596,16 +598,9 @@ app.post("/admin/entregas/:id/avisos", adminWriteLimiter, verificarTokenEntregas
 
 app.post("/admin/entregas/:id/entregado", adminWriteLimiter, verificarTokenEntregas, async (req, res) => {
     try {
-        const entrega = await entregasService.marcarEntregado(req.params.id, req.body.usuario || "Panel admin");
-        if (!entrega) return res.status(404).json({ success: false, error: "Entrega no encontrada o ya no está PENDIENTE" });
-
-        // Aviso a tu número — así te enteras aunque el cambio lo haga tu
-        // compañera desde el acceso reducido (/entregas).
-        try {
-            await enviarSeguro(getAdminPhone(), entregasService.mensajeEntregaMarcada(entrega));
-        } catch (e) { console.error("⚠️ No se pudo notificar entrega marcada:", e.message); }
-
-        res.json({ success: true, entrega });
+        const resultado = await entregasCoordinator.finalizarEntrega(req.params.id, req.body.usuario || "Panel admin");
+        if (!resultado) return res.status(404).json({ success: false, error: "Entrega no encontrada o ya no está PENDIENTE" });
+        res.json({ success: true, ...resultado });
     } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 

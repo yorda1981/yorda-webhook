@@ -16,58 +16,64 @@ const assert = require("node:assert/strict");
 const pool = require("../db");
 const { marcarEntregado, marcarCancelado, registrarPago } = require("../src/services/entregas");
 
+function mockTransicion(t, responderUpdateEntrega) {
+    const consultas = [];
+    const client = {
+        query: async (sql, params = []) => {
+            consultas.push({ sql, params });
+            if (/UPDATE entregas\b/.test(sql)) return responderUpdateEntrega(sql, params);
+            return { rows: [] };
+        },
+        release() {}
+    };
+    t.mock.method(pool, "connect", async () => client);
+    return consultas;
+}
+
 test("marcarEntregado: usa el guard WHERE estado_entrega='PENDIENTE'", async (t) => {
     let sqlUpdate = "";
-    t.mock.method(pool, "query", async (sql) => {
-        if (/UPDATE entregas\b/.test(sql)) {
-            sqlUpdate = sql;
-            return { rows: [{ id: 1, codigo: "E-1000", estado_entrega: "ENTREGADO" }] };
-        }
-        return { rows: [] }; // INSERT INTO entregas_historial
+    mockTransicion(t, async (sql) => {
+        sqlUpdate = sql;
+        return { rows: [{ id: 1, codigo: "E-1000", estado_entrega: "ENTREGADO" }] };
     });
     await marcarEntregado(1, "Panel admin");
     assert.match(sqlUpdate, /estado_entrega\s*=\s*'PENDIENTE'/);
 });
 
 test("marcarEntregado: primera vez (estaba PENDIENTE) -> devuelve la entrega actualizada", async (t) => {
-    t.mock.method(pool, "query", async (sql) => {
-        if (/UPDATE entregas/.test(sql)) return { rows: [{ id: 1, codigo: "E-1000", estado_entrega: "ENTREGADO" }] };
-        return { rows: [] };
-    });
+    mockTransicion(t, async () => ({ rows: [{ id: 1, codigo: "E-1000", estado_entrega: "ENTREGADO" }] }));
     const r = await marcarEntregado(1, "Panel admin");
     assert.equal(r.estado_entrega, "ENTREGADO");
 });
 
 test("marcarEntregado: doble clic / segunda llamada (ya no está PENDIENTE) -> null, no reabre ni renotifica", async (t) => {
-    t.mock.method(pool, "query", async () => ({ rows: [] })); // el WHERE ya no matchea
+    mockTransicion(t, async () => ({ rows: [] }));
     assert.equal(await marcarEntregado(1, "Panel admin"), null);
 });
 
 test("marcarEntregado: entrega inexistente -> null", async (t) => {
-    t.mock.method(pool, "query", async () => ({ rows: [] }));
+    mockTransicion(t, async () => ({ rows: [] }));
     assert.equal(await marcarEntregado(999999, "x"), null);
 });
 
 test("marcarEntregado: error de DB -> null, nunca revienta", async (t) => {
-    t.mock.method(pool, "query", async () => { throw new Error("DB caída"); });
+    const client = { query: async (sql) => { if (sql === "ROLLBACK") return {}; throw new Error("DB caída"); }, release() {} };
+    t.mock.method(pool, "connect", async () => client);
     assert.equal(await marcarEntregado(1, "x"), null);
 });
 
 test("marcarCancelado: usa el guard WHERE estado_entrega='PENDIENTE'", async (t) => {
     let sqlUpdate = "";
-    t.mock.method(pool, "query", async (sql) => {
-        if (/UPDATE entregas\b/.test(sql)) {
-            sqlUpdate = sql;
-            return { rows: [{ id: 1, codigo: "E-1000", estado_entrega: "CANCELADO" }] };
-        }
-        return { rows: [] };
+    mockTransicion(t, async (sql) => {
+        sqlUpdate = sql;
+        return { rows: [{ id: 1, codigo: "E-1000", estado_entrega: "CANCELADO" }] };
     });
     await marcarCancelado(1, "cliente se arrepintió");
     assert.match(sqlUpdate, /estado_entrega\s*=\s*'PENDIENTE'/);
 });
 
 test("marcarCancelado: ya entregada -> no se puede cancelar (null)", async (t) => {
-    t.mock.method(pool, "query", async () => ({ rows: [] }));
+    mockTransicion(t, async () => ({ rows: [] }));
     assert.equal(await marcarCancelado(1, "motivo"), null);
 });
 

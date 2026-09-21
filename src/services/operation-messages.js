@@ -43,9 +43,9 @@ function mensajeCompletarOperacion(operacion) {
         const label = etiquetaModalidadRecarga(operacion);
         return `🎉 ¡Tu recarga ${label} fue completada con éxito! Gracias por preferir nuestros servicios. 🇨🇺💜`;
     }
-    if (esEntregaEfectivo(operacion)) {
-        return "🎉 ¡Tu entrega fue completada con éxito! Gracias por preferir nuestros servicios. 🇨🇺💜";
-    }
+    // Las entregas se finalizan exclusivamente desde su CRM. Devolver null
+    // evita que un caller futuro reutilice por accidente el circuito general.
+    if (esEntregaEfectivo(operacion)) return null;
     return "🎉 ¡Tu transferencia fue completada con éxito! Gracias por preferir nuestros servicios. 🇨🇺💜";
 }
 

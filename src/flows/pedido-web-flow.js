@@ -133,7 +133,7 @@ async function notificarNuevaEntrega(entrega) {
         (entrega.observaciones ? `\nObservaciones: ${entrega.observaciones}` : "") +
         `\n\nEstado: PENDIENTE`;
 
-    const destinatarios = [getAdminPhone(), getEntregaContactPhone()].filter(Boolean);
+    const destinatarios = [...new Set([getAdminPhone(), getEntregaContactPhone()].filter(Boolean))];
     for (const numero of destinatarios) {
         try {
             await enviarSeguro(numero, msg);

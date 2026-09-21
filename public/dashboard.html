@@ -1024,7 +1024,7 @@
 
                 // En proceso de entrega (pago confirmado, pendiente de completar)
                 const tablaEnProceso = document.getElementById("tablaEnProceso");
-                const enProceso = operaciones.filter(o => o.status === "confirmada" && !esOperacionDeRecarga(o));
+                const enProceso = operaciones.filter(o => o.status === "confirmada" && !esOperacionDeRecarga(o) && o.tipo !== "cup_efectivo" && o.tipo !== "usd_efectivo");
                 document.getElementById("countEnProceso").innerText = enProceso.length;
                 document.getElementById("btnLimpiarAntiguas").style.display = enProceso.length > 0 ? "inline-block" : "none";
                 if (enProceso.length === 0) {

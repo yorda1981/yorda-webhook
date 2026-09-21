@@ -30,10 +30,15 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const pool = require("../db");
+const env = require("../src/config/env");
 const { notificarNuevaEntrega, procesarPedidoWeb } = require("../src/flows/pedido-web-flow");
 const { mensajeEntregaMarcada, nombreReceptor } = require("../src/services/entregas");
 
-test.beforeEach(() => { mensajesEnviados = []; });
+test.beforeEach(() => {
+    mensajesEnviados = [];
+    env.ADMIN_PHONE = "5511900000999";
+    env.ENTREGA_CONTACT_PHONE = "5491179017718";
+});
 
 const ENTREGA_COMPLETA = {
     codigo: "E-1050", cliente_nombre: "María Paga (cliente)", receptor_nombre: "Ana García (receptora)",
@@ -106,6 +111,19 @@ test("notificarNuevaEntrega: se envía tanto al admin como al contacto de entreg
     await notificarNuevaEntrega(ENTREGA_COMPLETA);
     assert.equal(mensajesEnviados.length, 2);
     assert.equal(mensajesEnviados[0].msg, mensajesEnviados[1].msg);
+});
+
+test("notificarNuevaEntrega: destinatarios internos iguales -> un solo WhatsApp", async () => {
+    env.ENTREGA_CONTACT_PHONE = env.ADMIN_PHONE;
+    await notificarNuevaEntrega(ENTREGA_COMPLETA);
+    assert.equal(mensajesEnviados.length, 1);
+    assert.equal(mensajesEnviados[0].phone, env.ADMIN_PHONE);
+});
+
+test("notificarNuevaEntrega: destinatarios distintos -> uno para cada destinatario", async () => {
+    await notificarNuevaEntrega(ENTREGA_COMPLETA);
+    assert.equal(mensajesEnviados.length, 2);
+    assert.deepEqual(new Set(mensajesEnviados.map(m => m.phone)), new Set([env.ADMIN_PHONE, env.ENTREGA_CONTACT_PHONE]));
 });
 
 // ── mensajeEntregaMarcada (aviso al admin al marcar ENTREGADO) ──
