@@ -404,6 +404,70 @@ async function obtenerEntregasAtrasadasSinAvisar(horasUmbral) {
     }
 }
 
+// =====================
+// AVISOS AUTOMÁTICOS AL CLIENTE (mañana/tarde) -- src/services/entregas-avisos.js
+// Distinto del aviso de atraso de arriba (que avisa al ADMIN cuando una
+// entrega lleva 48h+ sin resolver). Esto avisa al CLIENTE, dos veces al
+// día como máximo, mientras la entrega siga PENDIENTE y no esté
+// desactivado individualmente (avisos_automaticos).
+// =====================
+
+// `franja` es "manana" | "tarde" -- valor interno fijo, nunca viene de
+// input externo, por eso es seguro interpolar el nombre de columna.
+const COLUMNA_POR_FRANJA = Object.freeze({
+    manana: "ultimo_aviso_manana_at",
+    tarde: "ultimo_aviso_tarde_at"
+});
+
+// Trae las entregas PENDIENTE, con avisos_automaticos=true, que todavía no
+// recibieron el aviso de esta franja en el día de calendario de Brasil que
+// empieza en `inicioDiaUTC` (ver src/utils/timezone.js:inicioDiaSaoPauloUTC).
+async function obtenerEntregasPendientesParaAviso(franja, inicioDiaUTC) {
+    const columna = COLUMNA_POR_FRANJA[franja];
+    if (!columna) throw new Error(`franja inválida: "${franja}"`);
+    try {
+        const result = await pool.query(`
+            SELECT * FROM entregas
+            WHERE estado_entrega = 'PENDIENTE'
+              AND avisos_automaticos = true
+              AND (${columna} IS NULL OR ${columna} < $1)
+            ORDER BY created_at ASC
+        `, [inicioDiaUTC]);
+        return result.rows;
+    } catch (err) {
+        console.error(`❌ Error obteniendo entregas pendientes para aviso (${franja}):`, err.message);
+        return [];
+    }
+}
+
+async function marcarAvisoEntregaEnviado(id, franja, indicePlantilla) {
+    const columna = COLUMNA_POR_FRANJA[franja];
+    if (!columna) return;
+    try {
+        await pool.query(
+            `UPDATE entregas SET ${columna} = NOW(), ultimo_aviso_plantilla_idx = $2 WHERE id = $1`,
+            [id, indicePlantilla]
+        );
+    } catch (err) {
+        console.error("❌ Error marcando aviso de entrega pendiente:", err.message);
+    }
+}
+
+// Control ON/OFF individual (sección L) -- nunca cambia estado_entrega ni
+// estado_pago, solo si esta entrega puede recibir los avisos automáticos.
+async function cambiarAvisosAutomaticos(id, activo) {
+    try {
+        const r = await pool.query(
+            "UPDATE entregas SET avisos_automaticos = $1, updated_at = NOW() WHERE id = $2 RETURNING *",
+            [!!activo, id]
+        );
+        return r.rows[0] || null;
+    } catch (err) {
+        console.error("❌ Error cambiando avisos_automaticos:", err.message);
+        return null;
+    }
+}
+
 async function marcarAvisoAtrasoEnviado(ids) {
     if (!Array.isArray(ids) || ids.length === 0) return;
     try {
@@ -463,6 +527,9 @@ module.exports = {
     obtenerEstadisticasEntregas,
     obtenerEntregasAtrasadasSinAvisar,
     marcarAvisoAtrasoEnviado,
+    obtenerEntregasPendientesParaAviso,
+    marcarAvisoEntregaEnviado,
+    cambiarAvisosAutomaticos,
     obtenerTasasUsdt,
     actualizarTasasUsdt
 };

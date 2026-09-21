@@ -31,7 +31,9 @@ const LOCK_IDS = Object.freeze({
     tasasDiarias: 911003,
     saludosMatutinos: 911004,
     entregasAtrasadas: 911005,
-    limpiezaWebhookEvents: 911006
+    limpiezaWebhookEvents: 911006,
+    entregasAvisoManana: 911007,
+    entregasAvisoTarde: 911008
 });
 
 // Ejecuta fn() solo si ninguna otra instancia tiene el lock de este job en

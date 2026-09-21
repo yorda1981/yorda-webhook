@@ -372,7 +372,13 @@ async function manejarTransferencia(phone, texto, pushName, esEs) {
         phone,
         nombre:  pushName || datos.nombreBenef || "Cliente",
         monto:   datos.monto,
-        cup:     datos.moneda === "CUP" ? montoRecibeFinal : 0,
+        // Antes solo se guardaba el destino (montoRecibeFinal) cuando la
+        // moneda era CUP -- para USD/MLC vía este canal quedaba en 0 y el
+        // monto/destino real se perdía (solo existía en el texto original
+        // del mensaje, nunca en una columna consultable). Ahora se guarda
+        // siempre -- ver src/services/operadores.js:datosMontoOperador(),
+        // que lo necesita para el aviso al operador.
+        cup:     montoRecibeFinal,
         tarjeta: datos.tarjeta,
         titular: datos.nombreBenef,
         banco:   datos.banco,

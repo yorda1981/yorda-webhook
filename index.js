@@ -24,6 +24,8 @@ const { mensajeConfirmarOperacion, mensajeCompletarOperacion } = require("./src/
 const { adminReadLimiter, adminWriteLimiter } = require("./src/middleware/admin-rate-limiters");
 const { verificarToken, verificarTokenEntregas } = require("./src/middleware/admin-auth");
 const blockedNumbers = require("./src/services/blocked-numbers");
+const operadoresService = require("./src/services/operadores");
+const entregasAvisos = require("./src/services/entregas-avisos");
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -426,6 +428,47 @@ app.post("/admin/bloqueados/:telefono/desbloquear", adminWriteLimiter, verificar
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ─────────────────────────────────────────
+// OPERADORES DE TRANSFERENCIAS — EXCLUSIVAMENTE Transferencias (CUP/USD/
+// MLC). Nunca Recargas ni Entregas de efectivo, ver src/services/operadores.js.
+// ─────────────────────────────────────────
+
+app.get("/admin/operadores", adminReadLimiter, verificarToken, async (req, res) => {
+    try { res.json(await operadoresService.listarOperadores()); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post("/admin/operadores", adminWriteLimiter, verificarToken, async (req, res) => {
+    try {
+        const { nombre, telefono, modalidades, activo } = req.body || {};
+        const r = await operadoresService.crearOperador({ nombre, telefono, modalidades, activo });
+        if (r.error) return res.status(400).json({ success: false, error: r.error });
+        res.json({ success: true, operador: r.operador });
+    } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+app.post("/admin/operadores/:id", adminWriteLimiter, verificarToken, async (req, res) => {
+    try {
+        const { nombre, telefono, modalidades, activo } = req.body || {};
+        const r = await operadoresService.editarOperador(req.params.id, { nombre, telefono, modalidades, activo });
+        if (r.error) return res.status(400).json({ success: false, error: r.error });
+        res.json({ success: true, operador: r.operador });
+    } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+app.post("/admin/operadores/:id/activo", adminWriteLimiter, verificarToken, async (req, res) => {
+    try {
+        const operador = await operadoresService.cambiarActivo(req.params.id, !!(req.body || {}).activo);
+        if (!operador) return res.status(404).json({ success: false, error: "Operador no encontrado" });
+        res.json({ success: true, operador });
+    } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// Trazabilidad (sección F): qué operador(es) recibieron el aviso de una
+// operación y cuándo -- solo lectura, nunca borra historial financiero.
+app.get("/admin/operaciones/:id/avisos-operador", adminReadLimiter, verificarToken, async (req, res) => {
+    try { res.json(await operadoresService.obtenerTrazabilidad(req.params.id)); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post("/admin/completar-todas-antiguas", adminWriteLimiter, verificarToken, async (req, res) => {
     try {
         const r = await pool.query(`
@@ -447,6 +490,20 @@ app.post("/admin/confirmar-operacion/:id", adminWriteLimiter, verificarToken, as
         const { enviarMensaje } = require("./src/services/zapi");
         const notificado = await enviarMensaje(operacion.phone, mensajeConfirmarOperacion(operacion));
         if (!notificado) console.error(`⚠️ No se pudo notificar al cliente de la operación #${operacion.id} (phone: ${operacion.phone})`);
+
+        // Operadores de Transferencias (sección D): el pago YA está
+        // verificado por el admin en este punto (confirmar = "vamos a
+        // ejecutarla") -- nunca antes, para no violar el invariante de que
+        // un comprobante leído no es un pago confirmado. Exclusivo de
+        // Transferencias -- esOperacionDeTransferencia() excluye Recargas
+        // y Entregas de efectivo por diseño.
+        try {
+            if (operadoresService.esOperacionDeTransferencia(operacion)) {
+                await operadoresService.notificarOperadoresDeOperacion(operacion);
+            }
+        } catch (e) {
+            console.error(`⚠️ Error notificando operadores de la operación #${operacion.id}:`, e.message);
+        }
 
         res.json({ success: true, notificado });
     } catch (e) {
@@ -524,6 +581,17 @@ app.get("/admin/entregas", adminReadLimiter, verificarTokenEntregas, async (req,
 app.get("/admin/entregas/stats", adminReadLimiter, verificarTokenEntregas, async (req, res) => {
     try { res.json(await entregasService.obtenerEstadisticasEntregas()); }
     catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Control ON/OFF individual de avisos automáticos (sección L) -- nunca
+// cambia estado_entrega ni estado_pago, solo si esta entrega en particular
+// puede recibir los recordatorios de mañana/tarde.
+app.post("/admin/entregas/:id/avisos", adminWriteLimiter, verificarTokenEntregas, async (req, res) => {
+    try {
+        const entrega = await entregasService.cambiarAvisosAutomaticos(req.params.id, !!(req.body || {}).activo);
+        if (!entrega) return res.status(404).json({ success: false, error: "Entrega no encontrada" });
+        res.json({ success: true, entrega });
+    } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
 app.post("/admin/entregas/:id/entregado", adminWriteLimiter, verificarTokenEntregas, async (req, res) => {
@@ -880,6 +948,42 @@ function avisarEntregasAtrasadasConLock() {
 }
 setTimeout(avisarEntregasAtrasadasConLock, 30 * 1000); // espera a que terminen las migraciones al arrancar
 setInterval(avisarEntregasAtrasadasConLock, 6 * 60 * 60 * 1000); // revisa cada 6 horas
+
+// ══════════════════════════════════════
+// CRM DE ENTREGAS — AVISOS AUTOMÁTICOS AL CLIENTE (mañana/tarde)
+// Distinto del aviso de atraso de arriba (ese avisa al ADMIN a las 48h).
+// Esto avisa al CLIENTE, como máximo una vez por franja por día, mientras
+// la entrega siga PENDIENTE -- ver src/services/entregas-avisos.js para
+// las plantillas, la idempotencia por columna (gate igual que
+// ultimo_aviso_atraso) y el respeto de blocklist/pausa humana.
+//
+// Mañana: 11:00 UTC = 08:00 America/Sao_Paulo -- mismo horario objetivo
+// que ya usa enviarSaludosMatutinos() arriba (Brasil no tiene horario de
+// verano desde 2019, el offset -03:00 es fijo todo el año).
+// Tarde: 21:00 UTC = 18:00 America/Sao_Paulo -- elegido por ser una hora
+// de tarde razonable y coherente con el resto de horarios de negocio de
+// este archivo (después del mensaje diario de tasas de las 10:15 y del
+// saludo matutino de las 8:00, antes del cierre del día).
+// ══════════════════════════════════════
+let ultimoAvisoEntregaManana = "";
+let ultimoAvisoEntregaTarde = "";
+
+setInterval(() => {
+    const ahora = new Date();
+    const hoyKey = ahora.toISOString().slice(0, 10);
+
+    if (ahora.getUTCHours() === 11 && ahora.getUTCMinutes() === 0 && ultimoAvisoEntregaManana !== hoyKey) {
+        ultimoAvisoEntregaManana = hoyKey;
+        conLockExclusivo("entregasAvisoManana", () => entregasAvisos.enviarAvisosEntregasPendientes("manana"))
+            .catch(e => console.error("❌ Avisos de entrega (mañana):", e.message));
+    }
+
+    if (ahora.getUTCHours() === 21 && ahora.getUTCMinutes() === 0 && ultimoAvisoEntregaTarde !== hoyKey) {
+        ultimoAvisoEntregaTarde = hoyKey;
+        conLockExclusivo("entregasAvisoTarde", () => entregasAvisos.enviarAvisosEntregasPendientes("tarde"))
+            .catch(e => console.error("❌ Avisos de entrega (tarde):", e.message));
+    }
+}, 60 * 1000);
 
 // ══════════════════════════════════════
 // LIMPIEZA DE webhook_events (Fase 6) — borra eventos de dedup de más de

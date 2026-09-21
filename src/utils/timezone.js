@@ -60,4 +60,22 @@ function utcASaoPauloLocal(fecha) {
     return `${partes.year}-${partes.month}-${partes.day}T${hora}:${partes.minute}`;
 }
 
-module.exports = { ZONA_NEGOCIO, saoPauloLocalAUTC, utcASaoPauloLocal };
+// Fecha (YYYY-MM-DD) del día calendario ACTUAL en America/Sao_Paulo, para
+// un instante dado (por defecto ahora mismo). Es la base para comparar
+// "¿ya se mandó el aviso de hoy?" sin depender de la zona horaria del
+// proceso (Railway corre en UTC) -- ver avisos de recargas/entregas.
+function fechaSaoPaulo(fecha = new Date()) {
+    const partes = partesEnZona(fecha, ZONA_NEGOCIO);
+    return `${partes.year}-${partes.month}-${partes.day}`;
+}
+
+// Instante UTC correspondiente a las 00:00 de HOY en America/Sao_Paulo
+// (para un instante dado, por defecto ahora). Se usa para comparar
+// "¿el último aviso fue antes de que empezara el día de hoy en Brasil?"
+// -- nunca una ventana deslizante de "hace X horas", porque los avisos de
+// mañana/tarde son horarios FIJOS del calendario, no relativos.
+function inicioDiaSaoPauloUTC(fecha = new Date()) {
+    return saoPauloLocalAUTC(`${fechaSaoPaulo(fecha)}T00:00`);
+}
+
+module.exports = { ZONA_NEGOCIO, saoPauloLocalAUTC, utcASaoPauloLocal, fechaSaoPaulo, inicioDiaSaoPauloUTC };
