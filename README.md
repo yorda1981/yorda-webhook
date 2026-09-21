@@ -174,10 +174,13 @@ migrar). Probado localmente contra Postgres efímero, en dos escenarios
 (base vacía y una base "legacy" simulada con datos) — nunca contra
 producción.
 
-**A la fecha de este documento, las migraciones 0001-0008 todavía NO se
-corrieron contra la base real de producción** — ver "Deuda técnica
-conocida". Correrlas ahí es una decisión y una acción que le
-corresponde al dueño del proyecto, no a este documento.
+**Estado en producción (2026-09-21): las migraciones 0001-0009 ya se
+aplicaron contra la base real** (`railway run --service yorda-webhook --
+node scripts/migrate.js`), verificado con `--dry-run` devolviendo 0
+pendientes. `webhook_events` (dedup persistente) e `idempotency_keys`
+(idempotencia de entrega manual) están operativas. Cualquier migración
+*futura* (0010 en adelante) sigue siendo una decisión y una acción
+manual aparte, nunca automática.
 
 ## Seguridad del webhook
 
@@ -350,9 +353,10 @@ Registrada a propósito, sin resolver en este bloque:
 2. **`WEBHOOK_SHARED_SECRET` implementado pero no activado en
    producción.** Requiere coordinar la variable en Railway + la URL en
    el panel de Z-API al mismo tiempo (ver "Seguridad del webhook").
-3. **Migraciones 0001-0008 todavía no se corrieron contra la base
-   real.** Solo se probaron contra Postgres local efímero. Correrlas en
-   producción es una decisión explícita del dueño del proyecto.
+3. ~~Migraciones 0001-0008 sin correr contra la base real~~ — **cerrado
+   2026-09-21**: 0001-0009 aplicadas en producción, 0 pendientes
+   (verificado con `--dry-run`). `webhook_events` e `idempotency_keys`
+   operativas.
 4. **Variables de entorno obsoletas que podrían seguir existiendo en
    Railway** aunque el código ya no las lea: `ODOO_URL`, `ODOO_DB`,
    `ODOO_USER`, `ODOO_API_KEY`, `REDIS_URL`, `OPENAI_ASSISTANT_ID`. No
