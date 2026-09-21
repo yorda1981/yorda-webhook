@@ -21,6 +21,7 @@ const { conLockExclusivo } = require("./src/services/job-lock");
 const { log } = require("./src/utils/structured-logger");
 const { adminReadLimiter, adminWriteLimiter } = require("./src/middleware/admin-rate-limiters");
 const { verificarToken, verificarTokenEntregas } = require("./src/middleware/admin-auth");
+const blockedNumbers = require("./src/services/blocked-numbers");
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -240,6 +241,14 @@ app.post("/webhook", verificarSecretoWebhook, webhookLimiter, validarPayloadWebh
         const messageId = body.messageId || body.id || body.zeId;
         if (await yaFueProcesado(messageId)) return;
 
+        // Número bloqueado: cero automatización, ni siquiera llega al portón
+        // de gatillos ni a la pausa humana. No borra ni toca nada de
+        // customers/operations/entregas — ver src/services/blocked-numbers.js.
+        if (await blockedNumbers.estaBloqueado(phoneRaw)) {
+            console.log(`🚫 Número bloqueado, sin respuesta: ${phoneRaw}`);
+            return;
+        }
+
         const pushName = body.senderName || "Cliente";
 
         if (await enPausaHumana(phoneRaw)) {
@@ -394,6 +403,27 @@ app.get("/admin/crm/stats", adminReadLimiter, verificarToken, async (req, res) =
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.get("/admin/bloqueados", adminReadLimiter, verificarToken, async (req, res) => {
+    try { res.json(await blockedNumbers.listarBloqueados()); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post("/admin/bloqueados", adminWriteLimiter, verificarToken, async (req, res) => {
+    try {
+        const { telefono, motivo } = req.body || {};
+        if (!telefono) return res.status(400).json({ error: "Falta el teléfono" });
+        const r = await blockedNumbers.bloquear(telefono, motivo);
+        if (r.error) return res.status(500).json({ error: r.error });
+        res.json({ success: true, ...r });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post("/admin/bloqueados/:telefono/desbloquear", adminWriteLimiter, verificarToken, async (req, res) => {
+    try {
+        const ok = await blockedNumbers.desbloquear(req.params.telefono);
+        res.json({ success: ok });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post("/admin/completar-todas-antiguas", adminWriteLimiter, verificarToken, async (req, res) => {
     try {
         const r = await pool.query(`
@@ -463,7 +493,7 @@ app.post("/admin/completar-operacion/:id", adminWriteLimiter, verificarToken, as
         // manda un mensaje negativo al cliente).
         try {
             const { nivelAnterior, nivelNuevo } = await crm.recalcularNivelVipUno(operacion.phone);
-            if (nivelNuevo > nivelAnterior) {
+            if (nivelNuevo > nivelAnterior && !(await blockedNumbers.estaBloqueado(operacion.phone))) {
                 const estrellas = "⭐".repeat(nivelNuevo);
                 const mVip = `🌟 *¡Felicidades! Ahora eres cliente VIP ${estrellas} de Yorda Envíos!*\n\nDesde ahora tienes:\n💰 Tasa preferencial en tus próximas transferencias\n🚚 Descuento en tus pedidos de entrega en efectivo\n🎁 Promociones exclusivas para ti\n\n¡Gracias por confiar en nosotros! 💜🇨🇺`;
                 await enviarMensaje(operacion.phone, mVip);
@@ -718,7 +748,7 @@ setInterval(() => {
 async function recalcularNivelesVipYAvisar() {
     try {
         const cambios = await crm.recalcularNivelesVip();
-        for (const c of cambios) {
+        for (const c of await blockedNumbers.filtrarNoBloqueados(cambios)) {
             if (c.nivel_nuevo > c.nivel_anterior) {
                 const estrellas = "⭐".repeat(c.nivel_nuevo);
                 const mVip = `🌟 *¡Felicidades! Ahora eres cliente VIP ${estrellas} de Yorda Envíos!*\n\nDesde ahora tienes:\n💰 Tasa preferencial en tus próximas transferencias\n🚚 Descuento en tus pedidos de entrega en efectivo\n🎁 Promociones exclusivas para ti\n\n¡Gracias por confiar en nosotros! 💜🇨🇺`;

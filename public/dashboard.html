@@ -370,6 +370,35 @@
             </div>
         </div>
 
+        <div class="config-section" style="border-left: 5px solid #ef4444;">
+            <h3 style="color:#ef4444;">🚫 Números Bloqueados</h3>
+            <p style="color:#8b949e; font-size:13px; margin-bottom:14px;">
+                Un número bloqueado no recibe ninguna respuesta ni automatización de YordaBot
+                (ni recordatorios, ni saludos, ni avisos VIP). No borra ni afecta su historial
+                ni sus operaciones, y no bloquea acciones manuales del operador.
+            </p>
+            <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:16px;">
+                <input type="tel" id="bloq_telefono" placeholder="Teléfono (ej: 5511999999999)" style="flex:1; min-width:200px; background:#0b0e1a;border:1px solid #2d355a;padding:12px 14px;border-radius:10px;color:white;font-size:13px;outline:none;">
+                <input type="text" id="bloq_motivo" placeholder="Motivo (opcional)" style="flex:1; min-width:200px; background:#0b0e1a;border:1px solid #2d355a;padding:12px 14px;border-radius:10px;color:white;font-size:13px;outline:none;">
+                <button class="btn-save" id="btnBloquear" onclick="bloquearNumero()">Bloquear</button>
+            </div>
+            <div class="table-wrapper">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Teléfono</th>
+                            <th>Motivo</th>
+                            <th>Fecha</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody id="tablaBloqueados">
+                        <tr><td colspan="4" style="text-align:center; padding:20px; color:#8b949e;">—</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
         <!-- EMBUDO CRM -->
         <div class="config-section" style="border-left: 5px solid #a78bfa; margin-bottom: 30px;">
             <h3 style="color:#a78bfa;">📊 Embudo de Conversión <small style="color:#8b949e;font-size:12px;font-weight:400;">· últimos 30 días</small></h3>
@@ -475,6 +504,66 @@
             finally { btn.innerText = "Guardar Oferta"; }
         }
 
+        function escapeHtml(s) {
+            return String(s || "").replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
+        }
+
+        async function cargarBloqueados() {
+            if (!token) return;
+            try {
+                const r = await fetch("/admin/bloqueados", { headers: authH() });
+                const lista = await r.json();
+                const tbody = document.getElementById("tablaBloqueados");
+                if (!Array.isArray(lista) || lista.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:20px; color:#8b949e;">Sin números bloqueados</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = lista.map(b => `
+                    <tr>
+                        <td>${escapeHtml(b.phone)}</td>
+                        <td>${escapeHtml(b.motivo || "—")}</td>
+                        <td>${new Date(b.created_at).toLocaleString("es-ES")}</td>
+                        <td><button class="btn-save" style="padding:6px 12px;font-size:12px;" onclick="desbloquearNumero('${escapeHtml(b.phone)}')">Desbloquear</button></td>
+                    </tr>
+                `).join("");
+            } catch(e) { console.error("Error cargando bloqueados:", e); }
+        }
+
+        async function bloquearNumero() {
+            const btn = document.getElementById("btnBloquear");
+            const telefono = document.getElementById("bloq_telefono").value.trim();
+            const motivo   = document.getElementById("bloq_motivo").value.trim();
+            if (!telefono) { alert("Ingresa un teléfono"); return; }
+            btn.disabled = true;
+            btn.innerText = "Bloqueando...";
+            try {
+                const res = await fetch("/admin/bloqueados", {
+                    method: "POST",
+                    headers: authH(),
+                    body: JSON.stringify({ telefono, motivo })
+                });
+                const d = await res.json();
+                if (d.success) {
+                    document.getElementById("bloq_telefono").value = "";
+                    document.getElementById("bloq_motivo").value = "";
+                    cargarBloqueados();
+                } else alert("❌ Error bloqueando: " + (d.error || ""));
+            } catch(e) { alert("❌ Error de conexión"); }
+            finally { btn.disabled = false; btn.innerText = "Bloquear"; }
+        }
+
+        async function desbloquearNumero(telefono) {
+            try {
+                const res = await fetch("/admin/bloqueados/" + encodeURIComponent(telefono) + "/desbloquear", {
+                    method: "POST",
+                    headers: authH()
+                });
+                const d = await res.json();
+                if (d.success) cargarBloqueados();
+                else alert("❌ Error desbloqueando");
+            } catch(e) { alert("❌ Error de conexión"); }
+        }
+
         function conectar() {
             token = document.getElementById("tokenField").value.trim();
             if (!token) return;
@@ -511,6 +600,7 @@
                 document.getElementById("statusBadge").style.color = "#4ade80";
                 cargarOferta();
                 cargarRecargas();
+                cargarBloqueados();
 
                 const tasas      = await resTasas.json();
                 const clientes   = await resClientes.json();

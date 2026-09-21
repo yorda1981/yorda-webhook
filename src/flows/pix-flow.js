@@ -78,6 +78,11 @@ async function enviarPIX(phone, cliente, esEs) {
         const msg = esEs
             ? "Solo me falta la tarjeta de destino 💳\n\nEnvíame una foto o los 16 dígitos."
             : "Só falta o cartão de destino 💳\n\nEnvie uma foto ou os 16 dígitos.";
+        // Marca la pregunta pendiente para que, si el cliente ya tenía una
+        // tarjeta_frecuente guardada de antes y responde solo "tarjeta", se
+        // reutilice sin volver a pedirla (ver interpretarTarjetaPorPalabra
+        // en reglas-bot.js). Si no hay ninguna guardada, no cambia nada.
+        await guardarCliente({ phone, ultimaPregunta: "tarjeta_pendiente" });
         await enviarSeguro(phone, msg);
         return msg;
     }
@@ -91,7 +96,14 @@ async function enviarPIX(phone, cliente, esEs) {
             return `${i + 1}️⃣ •••• ${ultimos}${titular ? " — " + titular.split(" ")[0] : ""}`;
         }).join("\n");
         const msg = `¿A cuál tarjeta envío hoy? 💳\n\n${opciones}`;
-        await guardarCliente({ phone, estado: "seleccionando_tarjeta", fechaEstado: new Date().toISOString() });
+        // ultimasOpciones guarda los mismos números que se ofrecen (ya
+        // filtrados a 15-16 dígitos) para poder interpretar "la primera"/
+        // "la otra"/"esa" además del número -- ver interpretarSeleccionOpcion
+        // en reglas-bot.js.
+        await guardarCliente({
+            phone, estado: "seleccionando_tarjeta", fechaEstado: new Date().toISOString(),
+            ultimaPregunta: "seleccion_tarjeta", ultimasOpciones: tarjetas
+        });
         await enviarSeguro(phone, msg);
         return msg;
     }
@@ -147,6 +159,9 @@ async function intentarCompletarOperacion(phone, pushName, cliente, esEs) {
             return false;
         }
         if (!tieneTarjeta && !esRecarga) {
+            // Igual que en enviarPIX: marca la pregunta pendiente para poder
+            // reutilizar una tarjeta_frecuente si el cliente responde "tarjeta".
+            await guardarCliente({ phone, ultimaPregunta: "tarjeta_pendiente" });
             await enviarSeguro(phone, esEs
                 ? "Solo me falta la tarjeta de destino 💳\n\nEnvíame foto o los 16 dígitos."
                 : "Só falta o cartão 💳\n\nFoto ou 16 dígitos."

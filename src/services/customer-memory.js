@@ -1,5 +1,6 @@
 
 const pool = require("../../db");
+const { filtrarNoBloqueados } = require("./blocked-numbers");
 
 // ─────────────────────────────────────────
 // GUARDAR / ACTUALIZAR CLIENTE
@@ -25,9 +26,17 @@ async function guardarCliente({
     ultimaInteraccion   = null,
     saludoEnviado       = null,   // nuevo — saludo único
     lastResponseId      = null,   // nuevo — Responses API
-    ultimoAvisoEntrega  = null    // nuevo — para no repetir la explicación de entrega seguido
+    ultimoAvisoEntrega  = null,   // nuevo — para no repetir la explicación de entrega seguido
+    ultimaPregunta      = null,   // nuevo — contexto conversacional corto (migración 0011)
+    ultimasOpciones     = null    // nuevo — idem, array de opciones mostradas junto a ultimaPregunta
 }) {
     if (!phone) return null;
+
+    // contexto_actualizado_at se estampa SOLO cuando se está grabando una
+    // pregunta nueva -- así el TTL corto (ver reglas-bot.js) cuenta desde
+    // la última vez que el bot realmente preguntó algo, no desde
+    // cualquier otro guardarCliente() sin relación (ej. guardar el monto).
+    const contextoActualizadoAt = ultimaPregunta !== null ? new Date().toISOString() : null;
 
     try {
         const existe = await pool.query(
@@ -43,18 +52,20 @@ async function guardarCliente({
                     banco_detectado, estado, fecha_estado, fecha_cotizacion,
                     fecha_pix, created_at, updated_at,
                     tarjetas, comprobante_pendiente, valor_comprobante,
-                    ultima_interaccion, saludo_enviado, last_response_id, ultimo_aviso_entrega
+                    ultima_interaccion, saludo_enviado, last_response_id, ultimo_aviso_entrega,
+                    ultima_pregunta, ultimas_opciones, contexto_actualizado_at
                 ) VALUES (
                     $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,
                     NOW(), NOW(),
-                    $13,$14,$15,$16,$17,$18,$19
+                    $13,$14,$15,$16,$17,$18,$19,$20,$21,$22
                 )
             `, [
                 phone, nombre, monto, tipo, banco, tarjeta, titular,
                 bancoDetectado, estado, fechaEstado, fechaCotizacion, fechaPix,
                 tarjetas ? JSON.stringify(tarjetas) : null,
                 comprobantePendiente, valorComprobante, ultimaInteraccion,
-                saludoEnviado, lastResponseId, ultimoAvisoEntrega
+                saludoEnviado, lastResponseId, ultimoAvisoEntrega,
+                ultimaPregunta, ultimasOpciones ? JSON.stringify(ultimasOpciones) : null, contextoActualizadoAt
             ]);
 
         } else {
@@ -78,6 +89,9 @@ async function guardarCliente({
                     saludo_enviado       = COALESCE($17, saludo_enviado),
                     last_response_id     = COALESCE($18, last_response_id),
                     ultimo_aviso_entrega = COALESCE($19, ultimo_aviso_entrega),
+                    ultima_pregunta          = COALESCE($20, ultima_pregunta),
+                    ultimas_opciones         = COALESCE($21, ultimas_opciones),
+                    contexto_actualizado_at  = COALESCE($22, contexto_actualizado_at),
                     updated_at           = NOW()
                 WHERE phone = $1
             `, [
@@ -85,7 +99,8 @@ async function guardarCliente({
                 bancoDetectado, estado, fechaEstado, fechaCotizacion, fechaPix,
                 tarjetas ? JSON.stringify(tarjetas) : null,
                 comprobantePendiente, valorComprobante, ultimaInteraccion,
-                saludoEnviado, lastResponseId, ultimoAvisoEntrega
+                saludoEnviado, lastResponseId, ultimoAvisoEntrega,
+                ultimaPregunta, ultimasOpciones ? JSON.stringify(ultimasOpciones) : null, contextoActualizadoAt
             ]);
         }
 
@@ -121,12 +136,39 @@ async function limpiarSesionDB(phone) {
                 tarjeta_frecuente     = NULL,
                 titular_frecuente     = NULL,
                 banco_favorito        = NULL,
+                -- Contexto conversacional corto (migración 0011): una
+                -- sesión cerrada no debe dejar una "pregunta pendiente"
+                -- colgada para la próxima conversación.
+                ultima_pregunta          = NULL,
+                ultimas_opciones         = NULL,
+                contexto_actualizado_at  = NULL,
                 updated_at            = NOW()
             WHERE phone = $1
         `, [phone]);
         return true;
     } catch (err) {
         console.error("❌ limpiarSesionDB:", err.message);
+        return false;
+    }
+}
+
+// Limpia SOLO el contexto conversacional corto (sin tocar estado, monto,
+// tarjeta, etc.) — se usa cuando esa pregunta puntual ya se respondió
+// (ej. el cliente ya eligió la tarjeta) y no tiene sentido dejarla
+// vigente para el próximo mensaje.
+async function limpiarContextoCorto(phone) {
+    if (!phone) return false;
+    try {
+        await pool.query(`
+            UPDATE customers SET
+                ultima_pregunta         = NULL,
+                ultimas_opciones        = NULL,
+                contexto_actualizado_at = NULL
+            WHERE phone = $1
+        `, [phone]);
+        return true;
+    } catch (err) {
+        console.error("❌ limpiarContextoCorto:", err.message);
         return false;
     }
 }
@@ -181,6 +223,7 @@ async function eliminarCliente(phone) {
 module.exports = {
     guardarCliente,
     limpiarSesionDB,
+    limpiarContextoCorto,
     obtenerCliente,
     obtenerTodos,
     eliminarCliente,
@@ -198,7 +241,10 @@ async function marcarSaludoPendiente(phone) {
 async function obtenerSaludosPendientes() {
     try {
         const r = await pool.query("SELECT phone, nombre FROM customers WHERE saludo_pendiente = true");
-        return r.rows || [];
+        // Filtrado en JS (no en el SQL) a propósito: filtrarNoBloqueados() ya
+        // degrada solo a "no bloqueado" si blocked_numbers no existe todavía
+        // (migración 0010 sin correr), sin romper el saludo matutino.
+        return await filtrarNoBloqueados(r.rows || []);
     } catch (err) { console.error("❌ obtenerSaludosPendientes:", err.message); return []; }
 }
 async function limpiarSaludoPendiente(phone) {

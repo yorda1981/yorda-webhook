@@ -20,6 +20,7 @@
 
 const pool          = require("../../db");
 const { enviarMensaje } = require("./zapi");
+const { filtrarNoBloqueados } = require("./blocked-numbers");
 
 // ─────────────────────────────────────────
 // DETECCIÓN DE IDIOMA
@@ -362,7 +363,7 @@ async function onda30min() {
           AND tipo_ultimo_recordatorio IS DISTINCT FROM 'recuperar_30m'
     `);
 
-    for (const c of r.rows) {
+    for (const c of await filtrarNoBloqueados(r.rows)) {
         try {
             const lang   = c.idioma === "pt" ? "pt" : "es";
             const nombre = c.nombre ? c.nombre.split(" ")[0] : null;
@@ -387,7 +388,7 @@ async function onda24h() {
           AND (ultimo_recordatorio IS NULL OR ultimo_recordatorio < NOW() - INTERVAL '23 hours')
     `);
 
-    for (const c of r.rows) {
+    for (const c of await filtrarNoBloqueados(r.rows)) {
         try {
             const lang   = c.idioma === "pt" ? "pt" : "es";
             const nombre = c.nombre ? c.nombre.split(" ")[0] : null;
@@ -413,7 +414,7 @@ async function onda7d() {
           AND (ultimo_recordatorio IS NULL OR ultimo_recordatorio < NOW() - INTERVAL '7 days')
     `);
 
-    for (const c of r.rows) {
+    for (const c of await filtrarNoBloqueados(r.rows)) {
         try {
             const lang   = c.idioma === "pt" ? "pt" : "es";
             const nombre = c.nombre ? c.nombre.split(" ")[0] : null;
