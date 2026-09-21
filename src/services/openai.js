@@ -2,14 +2,16 @@
 
 require("dotenv").config();
 
-const { guardarCliente, obtenerCliente, marcarSaludoPendiente, limpiarContextoCorto }          = require("./customer-memory");
+const { guardarCliente, obtenerCliente, marcarSaludoPendiente, limpiarContextoCorto, limpiarTarjetaFrecuente }          = require("./customer-memory");
 const { obtenerUltimaOperacion, obtenerPendienteCliente }                   = require("./operations");
+const { activarPausaHumana }                       = require("./webhook-guard");
 const crm                                          = require("./crm");
 const {
     esTarjetaDuplicada, esConsultaEntrega, esBareMontoValido, esEnvioNuevoSobreAbandonado, puedeCotizarBRL,
     clienteEstaOcupado, tieneContextoReemplazable, esFraseDeAbandonoExplicito,
     debeCompletarConMontoPendiente, debeConfirmarCotizacion, tieneTarjetaGuardada, esConsultaTasas, esIntencionSinMonto, yaAvisoEntregaReciente,
-    contextoCortoVigente, interpretarSeleccionOpcion, interpretarTarjetaPorPalabra
+    contextoUtilizable, interpretarSeleccionOpcion, interpretarTarjetaPorPalabra,
+    esRechazoTarjeta, esPausaTemporal, esSenalConfusion, esCierreNatural, esPreguntaExploratoria
 } = require("./reglas-bot");
 
 // Flows
@@ -133,6 +135,74 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             return m;
         }
 
+        // ── Corrección de dato: rechazo de la tarjeta sugerida/guardada ──
+        // "esa tarjeta no"/"otra tarjeta" -- corrige SOLO el dato tarjeta, no
+        // reinicia toda la operación (a diferencia del abandono explícito de
+        // arriba). Solo aplica si de verdad hay una tarjeta que rechazar.
+        if (esRechazoTarjeta(txt) && (cliente?.tarjeta_frecuente || cliente?.estado === "seleccionando_tarjeta")) {
+            await limpiarTarjetaFrecuente(phone);
+            const m = esEs
+                ? "Sin problema 😊 ¿Cuál usamos entonces? Mándame la nueva o los 16 dígitos."
+                : "Sem problema 😊 Qual usamos então? Manda o novo ou os 16 dígitos.";
+            await enviarSeguro(phone, m);
+            return m;
+        }
+
+        // ── Abandono TEMPORAL ── ("espera"/"todavía no"/"después te mando el
+        // comprobante"/"no tengo dinero ahora") -- a diferencia del abandono
+        // explícito, NO se toca nada: ni el estado financiero ni el contexto
+        // corto. Solo se reconoce brevemente para no sonar insistente.
+        if (esPausaTemporal(txt) && (cliente?.estado || cliente?.comprobante_pendiente)) {
+            const m = pickL(
+                ["Sin problema 😊 Aquí quedo, avísame cuando estés listo.", "Tranquilo, tómate tu tiempo 😊 Te espero."],
+                ["Sem problema 😊 Fico por aqui, me avisa quando estiver pronto.", "Tranquilo, sem pressa 😊 Te espero."],
+                lang
+            );
+            await enviarSeguro(phone, m);
+            return m;
+        }
+
+        // ── Despedida / cierre natural ── ("gracias"/"listo"/"perfecto"/
+        // "entendido"/"después te aviso"/"ya pagué, después te aviso") -- van
+        // ANTES que "comprobante verbal" más abajo (que si no, respondería
+        // "mándame el comprobante" a un cliente que ya avisó que lo manda
+        // después). No deben alargar la conversación: si hay un flujo
+        // realmente abierto (esperando comprobante), se reconoce breve en
+        // vez del cierre genérico.
+        if (/^(gracias|ok gracias|hasta luego|chau|tchau|obrigado|obrigada|flw|valeu|até mais)[\s!.]*$/.test(txt.trim()) || esCierreNatural(txt)) {
+            if (cliente?.estado === "aguardando_comprovante") {
+                const m = esEs ? "¡De nada! 😊 Quedo atento al comprobante 📎" : "De nada! 😊 Fico esperando o comprovante 📎";
+                await enviarSeguro(phone, m); return m;
+            }
+            const n = pushName ? `, ${pushName.split(" ")[0]}` : "";
+            const m = `¡Fue un placer${n}! 😊 Gracias por la confianza. Aquí estaremos cuando nos necesites. 👋`;
+            await enviarSeguro(phone, m); return m;
+        }
+
+        // ── Confusión/frustración ── ("no entendí"/"no fue eso") -- la
+        // primera vez se responde más simple; si se repite dentro de los 30
+        // min (mismo mecanismo de contexto corto), se ofrece el handoff
+        // humano usando la infraestructura ya existente (activarPausaHumana),
+        // sin inventar ninguna respuesta nueva.
+        if (esSenalConfusion(txt)) {
+            const yaHuboConfusionReciente = contextoUtilizable(cliente) && cliente?.ultima_pregunta === "confusion_detectada";
+            const intentosPrevios = yaHuboConfusionReciente ? Number(cliente?.ultimas_opciones?.intentos || 1) : 0;
+            if (intentosPrevios >= 1) {
+                await activarPausaHumana(phone);
+                const m = esEs
+                    ? "Perdona la confusión 😊 Te conecto directo con Yordanys para resolverlo mejor."
+                    : "Desculpa a confusão 😊 Vou te conectar direto com o Yordanys para resolver melhor.";
+                await enviarSeguro(phone, m);
+                return m;
+            }
+            await guardarCliente({ phone, ultimaPregunta: "confusion_detectada", ultimasOpciones: { intentos: 1 } });
+            const m = esEs
+                ? "Perdona, te explico más simple 😊 ¿Cuánto quieres enviar y en qué moneda (reales, dólares o CUP)?"
+                : "Desculpa, te explico mais simples 😊 Quanto você quer enviar e em qual moeda (reais, dólares ou CUP)?";
+            await enviarSeguro(phone, m);
+            return m;
+        }
+
         // ── Derivación humano ──
         if (/yordanys|hablar con alguien|operador|asesor humano|hablar con una persona/.test(txt)) {
             const msg = esEs ? "Yordanys te atiende enseguida 😊 👌" : "Yordanys te atende agora 😊 👌";
@@ -184,6 +254,19 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                 await limpiarContextoCorto(phone);
                 return await _enviarPIXFinal(phone, await obtenerCliente(phone), esEs);
             }
+        }
+
+        // ── Confirmación de reutilizar la tarjeta frecuente ──
+        // Respuesta a "¿Usamos nuevamente la tarjeta terminada en XXXX?" (ver
+        // enviarPIX en pix-flow.js). "sí/dale/ok" -> se reutiliza y se llama
+        // directo a _enviarPIXFinal (no a enviarPIX, para no volver a
+        // preguntar). Se limpia el contexto ANTES de seguir para que una
+        // futura operación con la misma tarjeta sí vuelva a confirmar.
+        // Rechazo ya se maneja arriba (esRechazoTarjeta); este bloque cubre
+        // el "sí".
+        if (contextoUtilizable(cliente) && cliente?.ultima_pregunta === "confirmar_tarjeta_frecuente" && esConfirma) {
+            await limpiarContextoCorto(phone);
+            return await _enviarPIXFinal(phone, await obtenerCliente(phone), esEs);
         }
 
         // ── Selección tipo (comprobante sin tipo) ──
@@ -294,7 +377,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         // EN CUP anterior -- NUNCA se interpreta como un monto nuevo a enviar
         // en reales. Va ANTES del bloque de "número suelto = monto BRL" de
         // abajo, que si corriera primero cotizaría el número como reales.
-        if (contextoCortoVigente(cliente) && cliente?.ultima_pregunta === "cotizacion_inversa_pendiente") {
+        if (contextoUtilizable(cliente) && cliente?.ultima_pregunta === "cotizacion_inversa_pendiente") {
             const soloNumero = txt.replace(/^(mejor|que sean|seria|seriam|melhor|prefiro)\s+/, "").trim();
             const nuevoCupObjetivo = /^\d{3,7}$/.test(soloNumero) ? Number(soloNumero) : null;
             if (nuevoCupObjetivo && nuevoCupObjetivo >= 1000 && nuevoCupObjetivo <= 5000000) {
@@ -372,6 +455,17 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         if (esConsultaTasas(txt))
             return await consultarTasas(phone) || "";
 
+        // ── Cliente EXPLORANDO (no decidido todavía) ──
+        // "¿cómo funciona?"/"qué opciones tienen?"/"¿cuánto sería?" -- explica
+        // y cotiza (vía la misma consulta de tasas determinista) SIN empujarlo
+        // a dar tarjeta o pagar. No cambia ninguna regla financiera: es la
+        // misma información que consultarTasas(), solo que aquí también se
+        // dispara para frases que hoy no matchean esConsultaTasas().
+        if (esPreguntaExploratoria(txt)) {
+            const t = await consultarTasas(phone);
+            if (t) return t;
+        }
+
         // ── Estado de operación ──
         if (/estado|mi operacion|mi envio|cuando llega|cuando llego|cuanto falta|ya llego|esta listo/.test(txt)) {
             const ultima = await obtenerUltimaOperacion(phone);
@@ -414,7 +508,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         const estadoBloquea    = clienteEstaOcupado(cliente);
         const hayContextoBRL   = valorMonetario !== null ||
             (!estadoBloquea && !!cliente?.estado) ||
-            /enviar|mandar|envio|cotiz|transfer|pagar|monto|quant|cuant|quanto|quiero/.test(txt) ||
+            /enviar|mandar|envio|cotiz|transfer|pagar|monto|quant|cuant|quanto|quiero|mejor|eran/.test(txt) ||
             esMonedaNacional;
 
         // FIX ENVÍO NUEVO SOBRE UNO ABANDONADO: si el cliente quedó "esperando comprobante"
@@ -446,13 +540,6 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         if (esIntencionSinMonto(txt)) {
             const m = esEs ? "Perfecto 😊\n\n¿Cuánto deseas enviar?" : "Perfeito 😊\n\nQuanto você quer enviar?";
             await enviarSeguro(phone, m); return "";
-        }
-
-        // ── Despedida ──
-        if (/^(gracias|ok gracias|hasta luego|chau|tchau|obrigado|obrigada|flw|valeu|até mais)[\s!.]*$/.test(txt.trim())) {
-            const n = pushName ? `, ${pushName.split(" ")[0]}` : "";
-            const m = `¡Fue un placer${n}! 😊 Gracias por la confianza. Aquí estaremos cuando nos necesites. 👋`;
-            await enviarSeguro(phone, m); return m;
         }
 
         // ── Cierre inteligente ──
@@ -519,8 +606,12 @@ function extraerMonto(txt, text) {
     // "número suelto junto a una palabra de intención" puede usarlo.
     const soloTieneCUP = !valorMonetario && !!matchCup;
 
+    // "mejor"/"eran" habilitan corregir un monto ya cotizado ("mejor 500",
+    // "no, eran 700") sin necesitar además una palabra de envío -- ver
+    // esEnvioNuevoSobreAbandonado en reglas-bot.js, que decide si el nuevo
+    // monto reemplaza al viejo.
     let valorContextual = null;
-    if (!valorMonetario && !soloTieneCUP && /enviar|mandar|envio|cotiz|transfer|pagar|monto|quant|cuant|quanto|quiero/.test(txt)) {
+    if (!valorMonetario && !soloTieneCUP && /enviar|mandar|envio|cotiz|transfer|pagar|monto|quant|cuant|quanto|quiero|mejor|eran/.test(txt)) {
         const mc = /\b(\d{2,5})\b/g;
         let m;
         while ((m = mc.exec(txt)) !== null) { const n = Number(m[1]); if (n >= 10 && n <= 50000) { valorContextual = n; break; } }

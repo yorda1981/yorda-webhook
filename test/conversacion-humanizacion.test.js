@@ -98,6 +98,15 @@ function mockMundoConversacional(t, { tasas = TASAS_DEFAULT, bloqueados = [] } =
             const row = customers.get(params[0]);
             return { rows: [{ nivel_vip: row?.nivel_vip || 0 }] };
         }
+        // activarPausaHumana (webhook-guard.js) -- UPSERT con columnas propias,
+        // más específico que el INSERT genérico de guardarCliente -- se revisa
+        // primero para no interpretar MINUTOS_PAUSA como si fuera "nombre".
+        if (/INSERT INTO customers \(phone, pausa_hasta/.test(sql)) {
+            const row = customers.get(params[0]) || { phone: params[0] };
+            row.pausa_hasta = new Date(Date.now() + Number(params[1]) * 60000).toISOString();
+            customers.set(params[0], row);
+            return { rows: [] };
+        }
         if (/INSERT INTO customers/.test(sql)) {
             const row = aplicarParams({ phone: params[0] }, params);
             customers.set(params[0], row);
@@ -118,6 +127,17 @@ function mockMundoConversacional(t, { tasas = TASAS_DEFAULT, bloqueados = [] } =
             });
             return { rows: [] };
         }
+        // limpiarTarjetaFrecuente -- se revisa ANTES que limpiarContextoCorto
+        // porque su SQL también contiene "ultima_pregunta = NULL" (más
+        // específico primero, ver src/services/customer-memory.js).
+        if (/UPDATE customers SET[\s\S]*tarjeta_frecuente\s*=\s*NULL/.test(sql)) {
+            const row = customers.get(params[0]);
+            if (row) Object.assign(row, {
+                tarjeta_frecuente: null, titular_frecuente: null,
+                ultima_pregunta: null, ultimas_opciones: null, contexto_actualizado_at: null
+            });
+            return { rows: [] };
+        }
         if (/UPDATE customers SET[\s\S]*ultima_pregunta\s*=\s*NULL/.test(sql)) {
             const row = customers.get(params[0]);
             if (row) Object.assign(row, { ultima_pregunta: null, ultimas_opciones: null, contexto_actualizado_at: null });
@@ -127,6 +147,10 @@ function mockMundoConversacional(t, { tasas = TASAS_DEFAULT, bloqueados = [] } =
             const row = customers.get(params[0]);
             if (row) { row.estado_crm = params[1]; if (params[2] != null) row.idioma = params[2]; }
             return { rows: [] };
+        }
+        if (/^SELECT pausa_hasta FROM customers WHERE phone = \$1/.test(sql)) {
+            const row = customers.get(params[0]);
+            return { rows: row ? [{ pausa_hasta: row.pausa_hasta || null }] : [] };
         }
 
         // rates / ofertas
@@ -358,3 +382,215 @@ for (const frase of CASOS_TRAMOS) {
         assert.match(r, /R\$\d+/);
     });
 }
+
+// ═══════════════════════════════════════════════════════════
+// SEGUNDO SALTO DE NATURALIDAD (fase 2)
+// ═══════════════════════════════════════════════════════════
+
+// ── Corrección de monto / cambio de opinión ──
+
+test("CORRECCIÓN DE MONTO: 'no, eran 700' sobre una cotización de 300 -> recotiza 700", async (t) => {
+    const mundo = mockMundoConversacional(t);
+    mundo.customers.set("5511900010001", {
+        phone: "5511900010001", estado: "aguardando_comprovante", ultimo_monto: 300, comprobante_pendiente: false
+    });
+    const r = await procesarMensaje("5511900010001", "no, eran 700", "Cliente");
+    assert.match(r, /700/);
+    const row = mundo.customers.get("5511900010001");
+    assert.equal(Number(row.ultimo_monto), 700);
+});
+
+test("CAMBIO DE OPINIÓN: 'mejor 500' sobre una cotización de 300 -> recotiza 500", async (t) => {
+    const mundo = mockMundoConversacional(t);
+    mundo.customers.set("5511900010002", {
+        phone: "5511900010002", estado: "cotizacion_realizada", ultimo_monto: 300
+    });
+    const r = await procesarMensaje("5511900010002", "mejor 500", "Cliente");
+    assert.match(r, /500/);
+});
+
+// ── Rechazo de tarjeta ("esa tarjeta no"/"otra tarjeta") ──
+
+test("RECHAZO DE TARJETA: 'esa tarjeta no' limpia la tarjeta guardada y pide una nueva, sin tocar el monto", async (t) => {
+    const mundo = mockMundoConversacional(t);
+    mundo.customers.set("5511900010003", {
+        phone: "5511900010003", estado: "aguardando_comprovante", ultimo_monto: 300,
+        tarjeta_frecuente: "1111222233334444"
+    });
+    const r = await procesarMensaje("5511900010003", "esa tarjeta no", "Cliente");
+    const row = mundo.customers.get("5511900010003");
+    assert.equal(row.tarjeta_frecuente, null);
+    assert.equal(row.estado, "aguardando_comprovante", "la operación sigue abierta, solo se corrige la tarjeta");
+    assert.equal(Number(row.ultimo_monto), 300, "el monto real no se toca");
+    assert.match(r, /nueva|16 dígitos|16 dígitos/i);
+});
+
+test("RECHAZO DE TARJETA: sin ninguna tarjeta que rechazar -> no dispara (cae al resto del árbol)", async (t) => {
+    const mundo = mockMundoConversacional(t);
+    mundo.customers.set("5511900010004", { phone: "5511900010004", estado: "cotizacion_realizada", ultimo_monto: 300 });
+    await procesarMensaje("5511900010004", "otra tarjeta", "Cliente");
+    const row = mundo.customers.get("5511900010004");
+    // No debe reventar ni cambiar el estado por accidente.
+    assert.equal(row.estado, "cotizacion_realizada");
+});
+
+// ── Abandono temporal ("espera"/"todavía no") ──
+
+test("ABANDONO TEMPORAL: 'espera' no toca el estado financiero ni el contexto", async (t) => {
+    const mundo = mockMundoConversacional(t);
+    mundo.customers.set("5511900010005", {
+        phone: "5511900010005", estado: "aguardando_comprovante", ultimo_monto: 300, comprobante_pendiente: false
+    });
+    const r = await procesarMensaje("5511900010005", "espera", "Cliente");
+    const row = mundo.customers.get("5511900010005");
+    assert.equal(row.estado, "aguardando_comprovante");
+    assert.equal(Number(row.ultimo_monto), 300);
+    assert.ok(r && r.length > 0, "debe responder brevemente, no en silencio");
+});
+
+test("ABANDONO TEMPORAL: 'no tengo dinero ahora' se reconoce sin alargar la charla", async (t) => {
+    const mundo = mockMundoConversacional(t);
+    mundo.customers.set("5511900010006", { phone: "5511900010006", estado: "cotizacion_realizada", ultimo_monto: 300 });
+    const r = await procesarMensaje("5511900010006", "no tengo dinero ahora", "Cliente");
+    assert.ok(r && r.length > 0);
+    assert.equal(cuentaLlamadasGPT, 0);
+});
+
+// ── Reutilización segura de tarjeta frecuente ──
+
+test("REUTILIZACIÓN DE TARJETA: cliente recurrente con una sola tarjeta -> se confirma antes de reutilizarla", async (t) => {
+    const mundo = mockMundoConversacional(t);
+    mundo.customers.set("5511900010007", {
+        phone: "5511900010007", estado: "cotizacion_realizada", ultimo_monto: 300, tarjeta_frecuente: "1111222233334521"
+    });
+    const r = await procesarMensaje("5511900010007", "si", "Cliente");
+    assert.match(r, /4521/, "debe mencionar los últimos 4 dígitos, nunca la tarjeta completa");
+    const row = mundo.customers.get("5511900010007");
+    assert.equal(row.ultima_pregunta, "confirmar_tarjeta_frecuente");
+    assert.equal(row.estado, "aguardando_comprovante", "el guardarCliente de debeConfirmarCotizacion ya corrió antes de preguntar");
+});
+
+test("REUTILIZACIÓN DE TARJETA: confirmar con 'sí' reutiliza la tarjeta y sigue el flujo de PIX", async (t) => {
+    const mundo = mockMundoConversacional(t);
+    mundo.customers.set("5511900010008", {
+        phone: "5511900010008", estado: "aguardando_comprovante", ultimo_monto: 300,
+        tarjeta_frecuente: "1111222233334521",
+        ultima_pregunta: "confirmar_tarjeta_frecuente", ultimas_opciones: ["1111222233334521"],
+        contexto_actualizado_at: new Date().toISOString()
+    });
+    await procesarMensaje("5511900010008", "sí", "Cliente");
+    const row = mundo.customers.get("5511900010008");
+    assert.equal(row.ultima_pregunta, null, "la pregunta pendiente se limpia tras confirmar");
+    assert.ok(mensajesEnviados.length > 0, "debe seguir con el envío del PIX");
+});
+
+// ── Cliente exploratorio vs decidido ──
+
+test("CLIENTE EXPLORATORIO: 'que opciones tienen' dentro de un contexto ya gatillado -> explica sin pedir tarjeta", async (t) => {
+    const mundo = mockMundoConversacional(t);
+    mundo.customers.set("5511900010009", { phone: "5511900010009", estado: "cotizacion_realizada", ultimo_monto: 300 });
+    const r = await procesarMensaje("5511900010009", "que opciones tienen", "Cliente");
+    assert.match(r, /CUP|tasa/i);
+    const row = mundo.customers.get("5511900010009");
+    assert.notEqual(row.estado, "aguardando_comprovante", "no debe empujarlo a pagar solo por preguntar");
+});
+
+test("CLIENTE DECIDIDO: 'quiero enviar 500' cotiza directo, camino corto", async (t) => {
+    mockMundoConversacional(t);
+    const r = await procesarMensaje("5511900010010", "quiero enviar 500", "Cliente");
+    assert.match(r, /500/);
+});
+
+// ── Cierre natural de la conversación ──
+
+test("CIERRE NATURAL: 'gracias' con un flujo abierto (aguardando comprobante) -> respuesta corta, no el cierre genérico", async (t) => {
+    const mundo = mockMundoConversacional(t);
+    mundo.customers.set("5511900010011", { phone: "5511900010011", estado: "aguardando_comprovante", ultimo_monto: 300 });
+    const r = await procesarMensaje("5511900010011", "gracias", "Cliente");
+    assert.match(r, /comprobante/i);
+});
+
+test("CIERRE NATURAL: 'listo' sin flujo abierto -> cierre genérico breve", async (t) => {
+    const mundo = mockMundoConversacional(t);
+    mundo.customers.set("5511900010012", { phone: "5511900010012", estado: "cotizacion_realizada", ultimo_monto: 300 });
+    const r = await procesarMensaje("5511900010012", "listo", "Cliente");
+    assert.match(r, /placer|gracias/i);
+});
+
+test("CIERRE NATURAL: 'ya pagué, después te aviso' no reabre el pedido de comprobante", async (t) => {
+    const mundo = mockMundoConversacional(t);
+    mundo.customers.set("5511900010013", { phone: "5511900010013", estado: "aguardando_comprovante", ultimo_monto: 300 });
+    const r = await procesarMensaje("5511900010013", "ya pague, despues te aviso", "Cliente");
+    // No debe ser el mensaje genérico de "mándame el comprobante" repetido sin
+    // reconocer que el cliente ya avisó que lo manda después.
+    assert.match(r, /comprobante/i);
+});
+
+// ── Confusión / frustración: primera vez explica simple, la segunda ofrece handoff humano ──
+
+test("CONFUSIÓN: primera señal de 'no entendí' -> explica más simple, no handoff todavía", async (t) => {
+    const mundo = mockMundoConversacional(t);
+    mundo.customers.set("5511900010014", { phone: "5511900010014", estado: "cotizacion_realizada", ultimo_monto: 300 });
+    const r = await procesarMensaje("5511900010014", "no entendi", "Cliente");
+    assert.match(r, /simple/i);
+    const row = mundo.customers.get("5511900010014");
+    assert.equal(row.ultima_pregunta, "confusion_detectada");
+});
+
+test("CONFUSIÓN: segunda señal consecutiva dentro de los 30 min -> handoff humano (activarPausaHumana)", async (t) => {
+    const mundo = mockMundoConversacional(t);
+    mundo.customers.set("5511900010015", {
+        phone: "5511900010015", estado: "cotizacion_realizada", ultimo_monto: 300,
+        ultima_pregunta: "confusion_detectada", ultimas_opciones: { intentos: 1 },
+        contexto_actualizado_at: new Date().toISOString()
+    });
+    const r = await procesarMensaje("5511900010015", "no fue eso", "Cliente");
+    assert.match(r, /yordanys|conecto/i);
+    const row = mundo.customers.get("5511900010015");
+    assert.ok(row.pausa_hasta, "debe haber activado la pausa humana (infraestructura existente)");
+});
+
+// ── Contexto después de intervención humana ──
+
+test("RECUPERACIÓN TRAS PAUSA HUMANA: una pregunta corta de ANTES de la pausa no se reutiliza al reanudar", async (t) => {
+    const mundo = mockMundoConversacional(t);
+    const antesDeLaPausa = new Date(Date.now() - 20 * 60000).toISOString(); // vigente por TTL (20 < 30 min)
+    const pausaMasReciente = new Date(Date.now() - 5 * 60000).toISOString(); // el operador escribió DESPUÉS de esa pregunta
+    mundo.customers.set("5511900010016", {
+        phone: "5511900010016", estado: "seleccionando_tarjeta",
+        tarjetas: ["1111222233334444", "5555666677778888"],
+        ultima_pregunta: "seleccion_tarjeta", ultimas_opciones: ["1111222233334444", "5555666677778888"],
+        contexto_actualizado_at: antesDeLaPausa,
+        pausa_hasta: pausaMasReciente
+    });
+    await procesarMensaje("5511900010016", "la primera", "Cliente");
+    const row = mundo.customers.get("5511900010016");
+    assert.equal(row.tarjeta_frecuente, undefined, "el contexto es de antes de la intervención humana -- no se reutiliza a ciegas");
+});
+
+test("RECUPERACIÓN TRAS PAUSA HUMANA: una pregunta hecha DESPUÉS de que terminó la pausa sí se puede usar", async (t) => {
+    const mundo = mockMundoConversacional(t);
+    const pausaVieja = new Date(Date.now() - 15 * 60000).toISOString();
+    const preguntaNueva = new Date(Date.now() - 2 * 60000).toISOString(); // el bot preguntó DESPUÉS de que terminó la pausa
+    mundo.customers.set("5511900010017", {
+        phone: "5511900010017", estado: "seleccionando_tarjeta",
+        tarjetas: ["1111222233334444", "5555666677778888"],
+        ultima_pregunta: "seleccion_tarjeta", ultimas_opciones: ["1111222233334444", "5555666677778888"],
+        contexto_actualizado_at: preguntaNueva,
+        pausa_hasta: pausaVieja
+    });
+    await procesarMensaje("5511900010017", "la primera", "Cliente");
+    const row = mundo.customers.get("5511900010017");
+    assert.equal(row.tarjeta_frecuente, "1111222233334444");
+});
+
+// ── Blocked number sigue con prioridad absoluta, incluso con las frases nuevas ──
+
+test("BLOQUEO: sigue teniendo prioridad absoluta -- ni una frase de corrección nueva lo saltea", async (t) => {
+    mockMundoConversacional(t, { bloqueados: ["5511900010018"] });
+    const { estaBloqueado } = require("../src/services/blocked-numbers");
+    // El corte real vive en index.js ANTES de llamar a procesarMensaje -- esto
+    // confirma que la función que hace ese corte sigue detectando al cliente
+    // sin importar qué tan natural sea la frase que mandaría después.
+    assert.equal(await estaBloqueado("5511900010018"), true);
+});

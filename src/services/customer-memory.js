@@ -173,6 +173,32 @@ async function limpiarContextoCorto(phone) {
     }
 }
 
+// Limpia SOLO la tarjeta guardada (frecuente + titular) más el contexto
+// corto -- se usa cuando el cliente RECHAZA explícitamente la tarjeta
+// sugerida ("esa tarjeta no"/"otra tarjeta", ver esRechazoTarjeta en
+// reglas-bot.js). A propósito NO usa guardarCliente(): sus UPDATE son
+// COALESCE (nunca pueden nullear), y aquí el objetivo es justamente
+// nullear solo la tarjeta -- sin tocar estado, monto ni comprobante, que
+// siguen siendo la misma operación en curso.
+async function limpiarTarjetaFrecuente(phone) {
+    if (!phone) return false;
+    try {
+        await pool.query(`
+            UPDATE customers SET
+                tarjeta_frecuente       = NULL,
+                titular_frecuente       = NULL,
+                ultima_pregunta         = NULL,
+                ultimas_opciones        = NULL,
+                contexto_actualizado_at = NULL
+            WHERE phone = $1
+        `, [phone]);
+        return true;
+    } catch (err) {
+        console.error("❌ limpiarTarjetaFrecuente:", err.message);
+        return false;
+    }
+}
+
 // ─────────────────────────────────────────
 // OBTENER CLIENTE
 // ─────────────────────────────────────────
@@ -224,6 +250,7 @@ module.exports = {
     guardarCliente,
     limpiarSesionDB,
     limpiarContextoCorto,
+    limpiarTarjetaFrecuente,
     obtenerCliente,
     obtenerTodos,
     eliminarCliente,

@@ -186,6 +186,27 @@ function contextoCortoVigente(cliente) {
     return edadMs >= 0 && edadMs < CONTEXTO_CORTO_TTL_MS;
 }
 
+// RECUPERACIÓN DESPUÉS DE INTERVENCIÓN HUMANA.
+//
+// El contexto corto puede seguir vigente por TTL (30 min) pero haber
+// quedado obsoleto porque el operador intervino manualmente en el medio
+// (ver activarPausaHumana en webhook-guard.js, que estampa
+// customers.pausa_hasta) -- esa conversación humana pudo resolver la
+// pregunta pendiente sin que el bot se enterara. Por eso, además del TTL,
+// se compara contra pausa_hasta: si la pregunta corta se guardó ANTES de
+// la última vez que se activó/extendió la pausa, se considera
+// potencialmente obsoleta y no se usa para interpretar una respuesta
+// ambigua -- sin tocar ningún estado financiero ni el TTL en sí.
+function contextoUtilizable(cliente) {
+    if (!contextoCortoVigente(cliente)) return false;
+    if (cliente?.pausa_hasta && cliente?.contexto_actualizado_at) {
+        const contextoTs = new Date(cliente.contexto_actualizado_at).getTime();
+        const pausaTs = new Date(cliente.pausa_hasta).getTime();
+        if (contextoTs < pausaTs) return false;
+    }
+    return true;
+}
+
 // Interpreta "la primera"/"la segunda"/"la tercera"/"la otra"/"esa" contra
 // las opciones mostradas en la última pregunta de selección de tarjeta.
 // Devuelve:
@@ -194,7 +215,7 @@ function contextoCortoVigente(cliente) {
 //                 saber a cuál sin adivinar -> el caller debe preguntar
 //   <valor>    -> la opción elegida sin ambigüedad
 function interpretarSeleccionOpcion(txt, cliente) {
-    if (!contextoCortoVigente(cliente)) return null;
+    if (!contextoUtilizable(cliente)) return null;
     if (cliente?.ultima_pregunta !== "seleccion_tarjeta") return null;
     const opciones = Array.isArray(cliente?.ultimas_opciones) ? cliente.ultimas_opciones : [];
     if (opciones.length === 0) return null;
@@ -230,9 +251,54 @@ function interpretarSeleccionOpcion(txt, cliente) {
 // no hay nada que reutilizar; nunca se adivina cuál si hubiera varias).
 function interpretarTarjetaPorPalabra(txt, cliente) {
     if (!/^tarjeta$/i.test(txt.trim())) return null;
-    if (!contextoCortoVigente(cliente)) return null;
+    if (!contextoUtilizable(cliente)) return null;
     if (cliente?.ultima_pregunta !== "tarjeta_pendiente") return null;
     return cliente?.tarjeta_frecuente || null;
+}
+
+// ─────────────────────────────────────────────────────────
+// SEGUNDO SALTO DE NATURALIDAD — correcciones, pausas, cierre natural,
+// confusión y exploración vs decisión. Todas puras (solo texto/cliente),
+// igual que el resto del archivo.
+// ─────────────────────────────────────────────────────────
+
+// "esa tarjeta no"/"otra tarjeta"/"cambia la tarjeta" -- corrige el DATO
+// tarjeta sin abandonar la operación completa (a diferencia de
+// esFraseDeAbandonoExplicito, que resetea todo). El caller decide qué
+// hacer (pedir una tarjeta nueva), esta función solo detecta la frase.
+function esRechazoTarjeta(txt) {
+    return /\besa tarjeta no\b|\bno es esa tarjeta\b|\bno era esa tarjeta\b|\botra tarjeta\b|\bcambia(r)?\s+(la\s+)?tarjeta\b|\bessa\s+n[aã]o\b|\boutro\s+cart[aã]o\b|\btroca\s+(o\s+)?cart[aã]o\b/.test(txt);
+}
+
+// Abandono TEMPORAL ("espera"/"todavía no"/"déjalo para mañana"/"después
+// te mando el comprobante"/"no tengo dinero ahora") -- a diferencia de
+// esFraseDeAbandonoExplicito, aquí el cliente NO pide cancelar ni empezar
+// de cero: solo pide una pausa. El caller responde brevemente y NO debe
+// tocar ni el estado financiero ni el contexto conversacional.
+function esPausaTemporal(txt) {
+    return /\bespera(te)?\b|\btodavia no\b|\bahora no\b|\bahorita no\b|\bmas tarde\b|\bdejalo para (mañana|manana|luego|despues)\b|\bdespues te (mando|paso|envio)\b|\bno tengo (el )?dinero( ahora)?\b|\bespera un (poco|momento)\b|\bagora nao\b|\bmais tarde\b|\bdepois eu (mando|envio)\b/.test(txt);
+}
+
+// Señales deterministas de confusión/frustración -- "no entendí", "no fue
+// eso", repetir la misma pregunta. El caller decide cuántas veces seguidas
+// hace falta verlo antes de ofrecer/hacer handoff humano.
+function esSenalConfusion(txt) {
+    return /\bno entendi\b|\bno entiendo\b|\bno fue eso\b|\beso no (fue|era) lo que (pregunte|pedi)\b|\bno es lo que pregunte\b|\bnao entendi\b|\bnao foi isso\b|\bnao era isso que perguntei\b/.test(txt);
+}
+
+// Cierre natural de la conversación ("gracias"/"listo"/"perfecto"/
+// "entendido"/"después te aviso") -- el caller responde breve o se queda
+// en silencio si el flujo ya estaba cerrado, nunca alarga la charla.
+function esCierreNatural(txt) {
+    return /^(gracias|ok gracias|listo|perfecto|entendido|vale|beleza|entendi|combinado|de acuerdo entonces)[\s!.]*$/.test(txt.trim()) ||
+        /\bdespues te aviso\b|\bdepois te aviso\b|\bya pague.{0,15}despues te aviso\b/.test(txt);
+}
+
+// Cliente EXPLORANDO (no decidido todavía): pregunta genérica sobre el
+// funcionamiento/las opciones, sin dar un monto. El caller debe explicar/
+// cotizar sin empujarlo a completar una operación.
+function esPreguntaExploratoria(txt) {
+    return /\bcomo funciona\b|\bque opciones tienen\b|\bcuales? son las opciones\b|\bcuanto seria\b|\bcomo es el proceso\b|\bque necesito para enviar\b|\bcomo funciona isso\b|\bcomo funciona o processo\b|\bquais (as )?opcoes\b|\bquanto seria\b/.test(txt);
 }
 
 module.exports = {
@@ -254,6 +320,12 @@ module.exports = {
     yaAvisoEntregaReciente,
     CONTEXTO_CORTO_TTL_MS,
     contextoCortoVigente,
+    contextoUtilizable,
     interpretarSeleccionOpcion,
-    interpretarTarjetaPorPalabra
+    interpretarTarjetaPorPalabra,
+    esRechazoTarjeta,
+    esPausaTemporal,
+    esSenalConfusion,
+    esCierreNatural,
+    esPreguntaExploratoria
 };

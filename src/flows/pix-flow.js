@@ -108,6 +108,27 @@ async function enviarPIX(phone, cliente, esEs) {
         return msg;
     }
 
+    // No preguntar lo que ya sabemos, pero tampoco reutilizar en silencio:
+    // con UNA sola tarjeta frecuente conocida (no es el caso de "elegir
+    // cuál" de arriba, ni el de un cliente que acaba de dar la tarjeta en
+    // este mismo mensaje -- esos casos van directo a _enviarPIXFinal desde
+    // otros lugares de openai.js), se confirma antes de reutilizarla. La
+    // respuesta ("sí"/"esa tarjeta no"/"otra tarjeta") se resuelve en
+    // openai.js. cliente?.ultima_pregunta ya marcada evita volver a
+    // preguntar si esta función se llama de nuevo tras la confirmación.
+    if (!esRecarga && tarjetas.length <= 1 && cliente?.tarjeta_frecuente &&
+        cliente?.ultima_pregunta !== "confirmar_tarjeta_frecuente") {
+        const ultimos4 = cliente.tarjeta_frecuente.slice(-4);
+        const msg = esEs
+            ? `¿Usamos nuevamente la tarjeta terminada en ${ultimos4}? 💳`
+            : `Usamos novamente o cartão terminado em ${ultimos4}? 💳`;
+        await guardarCliente({
+            phone, ultimaPregunta: "confirmar_tarjeta_frecuente", ultimasOpciones: [cliente.tarjeta_frecuente]
+        });
+        await enviarSeguro(phone, msg);
+        return msg;
+    }
+
     return await _enviarPIXFinal(phone, cliente, esEs);
 }
 

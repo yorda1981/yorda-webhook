@@ -34,8 +34,14 @@ const {
     yaAvisoEntregaReciente,
     CONTEXTO_CORTO_TTL_MS,
     contextoCortoVigente,
+    contextoUtilizable,
     interpretarSeleccionOpcion,
-    interpretarTarjetaPorPalabra
+    interpretarTarjetaPorPalabra,
+    esRechazoTarjeta,
+    esPausaTemporal,
+    esSenalConfusion,
+    esCierreNatural,
+    esPreguntaExploratoria
 } = require("../src/services/reglas-bot");
 const { gatilhos, palabrasNegocio } = require("../src/flows/shared");
 
@@ -427,4 +433,101 @@ test("esFraseDeAbandonoExplicito: reconoce las frases de abandono explícito", (
 test("esFraseDeAbandonoExplicito: un mensaje normal de negocio no dispara falsos positivos", () => {
     assert.equal(esFraseDeAbandonoExplicito("quiero enviar 800 reales"), false);
     assert.equal(esFraseDeAbandonoExplicito("cuanto es la tasa hoy"), false);
+});
+
+// ── SEGUNDO SALTO DE NATURALIDAD ──────────────────────────
+
+// esRechazoTarjeta
+
+test("esRechazoTarjeta: reconoce el rechazo explícito de la tarjeta sugerida", () => {
+    for (const frase of ["esa tarjeta no", "otra tarjeta", "cambia la tarjeta", "no es esa tarjeta", "no era esa tarjeta"]) {
+        assert.equal(esRechazoTarjeta(frase), true, `"${frase}" debería reconocerse como rechazo de tarjeta`);
+    }
+});
+
+test("esRechazoTarjeta: no dispara con mensajes normales de negocio", () => {
+    assert.equal(esRechazoTarjeta("quiero enviar 800 reales"), false);
+    assert.equal(esRechazoTarjeta("mandame la tarjeta"), false);
+});
+
+// esPausaTemporal (abandono temporal, sin tocar nada)
+
+test("esPausaTemporal: reconoce pausas temporales", () => {
+    for (const frase of ["espera", "todavia no", "dejalo para mañana", "no tengo dinero ahora", "despues te mando el comprobante", "mas tarde"]) {
+        assert.equal(esPausaTemporal(frase), true, `"${frase}" debería reconocerse como pausa temporal`);
+    }
+});
+
+test("esPausaTemporal: no confunde 'esperaba' (otra palabra) con 'espera'", () => {
+    assert.equal(esPausaTemporal("esperaba otra cosa"), false);
+});
+
+test("esPausaTemporal: un monto nuevo explícito no es una pausa", () => {
+    assert.equal(esPausaTemporal("quiero enviar 800 reales"), false);
+});
+
+// esSenalConfusion
+
+test("esSenalConfusion: reconoce señales de confusión", () => {
+    for (const frase of ["no entendi", "no entiendo", "no fue eso", "eso no fue lo que pregunte"]) {
+        assert.equal(esSenalConfusion(frase), true, `"${frase}" debería reconocerse como confusión`);
+    }
+});
+
+test("esSenalConfusion: un mensaje normal no dispara falsos positivos", () => {
+    assert.equal(esSenalConfusion("quiero enviar 800 reales"), false);
+});
+
+// esCierreNatural
+
+test("esCierreNatural: reconoce cierres cortos", () => {
+    for (const frase of ["gracias", "listo", "perfecto", "entendido", "despues te aviso"]) {
+        assert.equal(esCierreNatural(frase), true, `"${frase}" debería reconocerse como cierre natural`);
+    }
+});
+
+test("esCierreNatural: un monto nuevo no se confunde con un cierre", () => {
+    assert.equal(esCierreNatural("perfecto, quiero enviar 800 reales"), false);
+});
+
+// esPreguntaExploratoria
+
+test("esPreguntaExploratoria: reconoce preguntas de cliente explorando", () => {
+    for (const frase of ["como funciona", "que opciones tienen", "cuanto seria", "como es el proceso"]) {
+        assert.equal(esPreguntaExploratoria(frase), true, `"${frase}" debería reconocerse como exploratoria`);
+    }
+});
+
+test("esPreguntaExploratoria: un cliente decidido con monto no es exploratorio", () => {
+    assert.equal(esPreguntaExploratoria("quiero enviar 500 reales"), false);
+});
+
+// contextoUtilizable (TTL + recuperación tras intervención humana)
+
+function haceMinutosISO(m) { return new Date(Date.now() - m * 60000).toISOString(); }
+
+test("contextoUtilizable: sin pausa_hasta -> se comporta igual que contextoCortoVigente", () => {
+    const cliente = { contexto_actualizado_at: haceMinutosISO(1) };
+    assert.equal(contextoUtilizable(cliente), true);
+});
+
+test("contextoUtilizable: contexto vencido por TTL -> false aunque no haya pausa_hasta", () => {
+    const cliente = { contexto_actualizado_at: haceMinutosISO(31) };
+    assert.equal(contextoUtilizable(cliente), false);
+});
+
+test("contextoUtilizable: contexto anterior a la última pausa humana -> false (potencialmente obsoleto)", () => {
+    const cliente = {
+        contexto_actualizado_at: haceMinutosISO(20), // vigente por TTL (< 30 min)
+        pausa_hasta: haceMinutosISO(5)                // pero el operador intervino DESPUÉS de esa pregunta
+    };
+    assert.equal(contextoUtilizable(cliente), false, "el operador pudo haber resuelto la pregunta -- no se reutiliza a ciegas");
+});
+
+test("contextoUtilizable: contexto posterior a la pausa humana -> true (es una pregunta nueva del bot, después de que terminó la pausa)", () => {
+    const cliente = {
+        contexto_actualizado_at: haceMinutosISO(2), // la pregunta se hizo DESPUÉS de que terminó la pausa
+        pausa_hasta: haceMinutosISO(10)
+    };
+    assert.equal(contextoUtilizable(cliente), true);
 });
