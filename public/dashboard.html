@@ -64,12 +64,14 @@
             </div>
         </div>
 
+        <h3 style="margin-bottom:4px;">📊 Resumen General</h3>
+        <p style="color:#8b949e; font-size:12px; margin-top:0; margin-bottom:14px;">Incluye Transferencias, Entregas y Recargas</p>
         <div class="stats-grid">
             <div class="stat-card"><span>Clientes</span><h2 id="stat-clientes">—</h2></div>
             <div class="stat-card"><span>Ops. Confirmadas</span><h2 id="stat-ops">—</h2></div>
             <div class="stat-card"><span>Volumen Total</span><h2 id="stat-vol">—</h2></div>
-            <div class="stat-card"><span>Pendientes</span><h2 id="stat-pend" style="color: var(--yellow);">—</h2></div>
-            <div class="stat-card"><span>Completadas</span><h2 id="stat-completadas" style="color:#60a5fa;">—</h2></div>
+            <div class="stat-card"><span>Pendientes (todas)</span><h2 id="stat-pend" style="color: var(--yellow);">—</h2></div>
+            <div class="stat-card"><span>Completadas (todas)</span><h2 id="stat-completadas" style="color:#60a5fa;">—</h2></div>
             <div class="stat-card"><span>Cotizados Hoy</span><h2 id="stat-cotizados" style="color:#38bdf8;">—</h2></div>
             <div class="stat-card"><span>Cierres Hoy</span><h2 id="stat-cierres" style="color:var(--green);">—</h2></div>
             <div class="stat-card"><span>Conversión</span><h2 id="stat-conversion" style="color:#a78bfa;">—%</h2></div>
@@ -561,11 +563,19 @@
             document.getElementById("countRecargasOps").innerText = todas.length;
 
             const verTodas = !!window._verTodasRecargas;
-            const aMostrar = verTodas ? ordenadas : ordenadas.slice(0, 2);
+            // El resumen corto es EXCLUSIVAMENTE de activas (pendiente/confirmada)
+            // -- nunca se rellena con completadas para completar los 2 espacios.
+            // Con 0 activas, el resumen corto queda vacío (no con completadas).
+            const compacto = activas.slice(0, 2);
+            const aMostrar = verTodas ? ordenadas : compacto;
 
             const tbody = document.getElementById("tablaRecargasOps");
             if (todas.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#8b949e;padding:20px;">Sin operaciones de recarga todavía.</td></tr>';
+            } else if (aMostrar.length === 0) {
+                // Sin activas para el resumen corto, pero sí hay historial -- nunca
+                // se rellena con completadas; se indica cómo llegar a ellas.
+                tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:#8b949e;padding:20px;">Sin operaciones activas en este momento. Hay ${historial.length} en el historial -- usa "Ver todas" para verlas.</td></tr>`;
             } else {
                 tbody.innerHTML = aMostrar.map(op => {
                     const tipoRecarga = op.tipo.replace("recarga_", "");
@@ -596,7 +606,7 @@
             }
 
             const btn = document.getElementById("btnVerTodasRecargas");
-            if (todas.length > 2) {
+            if (todas.length > compacto.length) {
                 btn.style.display = "inline-block";
                 btn.innerText = verTodas ? "▲ Ver menos" : `Ver todas (${todas.length})`;
             } else {

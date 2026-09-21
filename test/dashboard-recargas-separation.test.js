@@ -235,3 +235,109 @@ test("utcToSaoPauloLocal: sin valor -> string vacío (el input queda sin fecha l
     const sandbox = cargarDashboardSandbox();
     assert.equal(sandbox.utcToSaoPauloLocal(null), "");
 });
+
+// ── Resumen General: sigue siendo global, ahora con título y etiquetas inequívocas ──
+// (ver también src/services/operations.js: obtenerEstadisticas() sigue sin
+// filtrar por tipo -- test/operation-messages.test.js y este archivo cubren
+// el lado de dashboard.html; el SQL en sí se audita en la propia lectura
+// del código, ya que es una sola línea sin filtro que agregar).
+
+test("Resumen General: tiene un título explícito y la aclaración de alcance ('incluye Transferencias, Entregas y Recargas')", () => {
+    const html = fs.readFileSync(path.join(__dirname, "..", "public", "dashboard.html"), "utf8");
+    assert.match(html, /📊 Resumen General/);
+    assert.match(html, /Incluye Transferencias, Entregas y Recargas/);
+});
+
+test("Resumen General: las etiquetas ambiguas ahora dicen '(todas)' -- nunca se leen igual que las secciones scoped de abajo", () => {
+    const html = fs.readFileSync(path.join(__dirname, "..", "public", "dashboard.html"), "utf8");
+    assert.match(html, /<span>Pendientes \(todas\)<\/span>/);
+    assert.match(html, /<span>Completadas \(todas\)<\/span>/);
+    // Las demás métricas del card no se tocan.
+    assert.match(html, /<span>Ops\. Confirmadas<\/span>/);
+    assert.match(html, /<span>Volumen Total<\/span>/);
+    assert.match(html, /<span>Clientes<\/span>/);
+});
+
+// ── Resumen corto de Recargas: EXCLUSIVAMENTE activas, nunca se rellena con completadas ──
+
+test("3 activas (sin completadas) -> el resumen corto muestra exactamente 2", () => {
+    const sandbox = cargarDashboardSandbox();
+    const a1 = { ...RECARGA_NACIONAL_PENDIENTE, id: 10, phone: "5511900070001" };
+    const a2 = { ...RECARGA_INTERNACIONAL_CONFIRMADA, id: 11, phone: "5511900070002" };
+    const a3 = { ...RECARGA_NACIONAL_PENDIENTE, id: 12, phone: "5511900070003" };
+    sandbox.renderRecargasOps([a1, a2, a3]);
+    const tbody = sandbox.document.getElementById("tablaRecargasOps");
+    const filas = (tbody.innerHTML.match(/<tr>/g) || []).length;
+    assert.equal(filas, 2);
+    assert.match(tbody.innerHTML, /5511900070001/);
+    assert.match(tbody.innerHTML, /5511900070002/);
+    assert.doesNotMatch(tbody.innerHTML, /5511900070003/, "la tercera activa no cabe en el resumen corto de 2, pero no debe reemplazarse por una completada porque no hay ninguna");
+});
+
+test("1 activa + varias completadas -> el resumen corto muestra SOLO la activa (nunca se rellena el segundo espacio con una completada)", () => {
+    const sandbox = cargarDashboardSandbox();
+    const unicaActiva = { ...RECARGA_NACIONAL_PENDIENTE, id: 20, phone: "5511900070010" };
+    const completada1 = { ...RECARGA_NACIONAL_COMPLETADA, id: 21, phone: "5511900070011" };
+    const completada2 = { ...RECARGA_NACIONAL_COMPLETADA, id: 22, phone: "5511900070012" };
+    sandbox.renderRecargasOps([unicaActiva, completada1, completada2]);
+    const tbody = sandbox.document.getElementById("tablaRecargasOps");
+    const filas = (tbody.innerHTML.match(/<tr>/g) || []).length;
+    assert.equal(filas, 1, "solo debe mostrarse la única operación activa, nunca completar el segundo espacio con una completada");
+    assert.match(tbody.innerHTML, /5511900070010/);
+    assert.doesNotMatch(tbody.innerHTML, /5511900070011/);
+    assert.doesNotMatch(tbody.innerHTML, /5511900070012/);
+
+    const btn = sandbox.document.getElementById("btnVerTodasRecargas");
+    assert.match(btn.innerText, /Ver todas \(3\)/, "el botón sigue dando acceso a las completadas ocultas, con el total correcto");
+});
+
+test("0 activas + completadas -> el resumen corto NO introduce completadas (queda vacío, con acceso al historial)", () => {
+    const sandbox = cargarDashboardSandbox();
+    const completada1 = { ...RECARGA_NACIONAL_COMPLETADA, id: 30, phone: "5511900070020" };
+    const completada2 = { ...RECARGA_INTERNACIONAL_CONFIRMADA, id: 31, status: "completada", phone: "5511900070021" };
+    sandbox.renderRecargasOps([completada1, completada2]);
+    const tbody = sandbox.document.getElementById("tablaRecargasOps");
+    assert.doesNotMatch(tbody.innerHTML, /5511900070020/);
+    assert.doesNotMatch(tbody.innerHTML, /5511900070021/);
+    assert.doesNotMatch(tbody.innerHTML, /onclick="completar/, "el resumen corto vacío no debe mostrar filas de completadas");
+
+    const btn = sandbox.document.getElementById("btnVerTodasRecargas");
+    assert.match(btn.innerText, /Ver todas \(2\)/, "el historial sigue accesible aunque el resumen corto esté vacío");
+
+    sandbox.window._ultimasOperaciones = [completada1, completada2];
+    sandbox.toggleVerTodasRecargas();
+    const tbodyExpandido = sandbox.document.getElementById("tablaRecargasOps");
+    assert.match(tbodyExpandido.innerHTML, /5511900070020/);
+    assert.match(tbodyExpandido.innerHTML, /5511900070021/);
+});
+
+test("0 activas y 0 completadas -> mensaje genérico de 'sin operaciones todavía', botón oculto", () => {
+    const sandbox = cargarDashboardSandbox();
+    sandbox.renderRecargasOps([]);
+    const tbody = sandbox.document.getElementById("tablaRecargasOps");
+    assert.match(tbody.innerHTML, /Sin operaciones de recarga todavía/);
+    const btn = sandbox.document.getElementById("btnVerTodasRecargas");
+    assert.equal(btn.style.display, "none");
+});
+
+test("'Ver todas (X)' con mezcla de activas + historial: X coincide exactamente con lo que se despliega (activas + historial)", () => {
+    const sandbox = cargarDashboardSandbox();
+    const a1 = { ...RECARGA_NACIONAL_PENDIENTE, id: 40, phone: "5511900070030" };
+    const a2 = { ...RECARGA_INTERNACIONAL_CONFIRMADA, id: 41, phone: "5511900070031" };
+    const c1 = { ...RECARGA_NACIONAL_COMPLETADA, id: 42, phone: "5511900070032" };
+    const c2 = { ...RECARGA_NACIONAL_COMPLETADA, id: 43, phone: "5511900070033" };
+    const operaciones = [a1, a2, c1, c2];
+    sandbox.window._ultimasOperaciones = operaciones;
+    sandbox.renderRecargasOps(operaciones);
+
+    const btn = sandbox.document.getElementById("btnVerTodasRecargas");
+    assert.match(btn.innerText, /Ver todas \(4\)/);
+
+    sandbox.toggleVerTodasRecargas();
+    const tbody = sandbox.document.getElementById("tablaRecargasOps");
+    const filas = (tbody.innerHTML.match(/<tr>/g) || []).length;
+    assert.equal(filas, 4, "debe desplegar exactamente activas + historial, ni más ni menos que lo que dice el botón");
+    for (const id of ["5511900070030", "5511900070031", "5511900070032", "5511900070033"]) {
+        assert.match(tbody.innerHTML, new RegExp(id));
+    }
+});

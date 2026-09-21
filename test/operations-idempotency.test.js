@@ -20,7 +20,8 @@ const {
     confirmarOperacion,
     completarOperacion,
     existeOperacionPendiente,
-    buscarPorRefWeb
+    buscarPorRefWeb,
+    obtenerEstadisticas
 } = require("../src/services/operations");
 
 test("confirmarOperacion: usa el guard WHERE status='pendiente' en el UPDATE", async (t) => {
@@ -132,4 +133,23 @@ test("agregarOperacion: siempre inserta con status='pendiente' (nunca confirmada
 test("agregarOperacion: error de DB -> null, nunca revienta", async (t) => {
     t.mock.method(pool, "query", async () => { throw new Error("DB caída"); });
     assert.equal(await agregarOperacion({ phone: "5511900000000", monto: 100 }), null);
+});
+
+// ── obtenerEstadisticas: el "Resumen General" del dashboard sigue siendo
+// global a propósito (incluye Transferencias, Entregas y Recargas) -- ver
+// public/dashboard.html ("📊 Resumen General" + "Incluye Transferencias,
+// Entregas y Recargas"). Este test es una guarda de regresión: si alguna vez
+// se le agrega un filtro por tipo aquí, debe ser una decisión explícita, no
+// un efecto colateral de otro cambio.
+
+test("obtenerEstadisticas: agrega TODA la tabla operations, sin filtrar por tipo (Resumen General es global a propósito)", async (t) => {
+    let sqlUsado = "";
+    t.mock.method(pool, "query", async (sql) => {
+        sqlUsado = sql;
+        return { rows: [{ total: 5, volumen: 745, pendientes: 2, completadas: 1 }] };
+    });
+    const stats = await obtenerEstadisticas();
+    assert.doesNotMatch(sqlUsado, /WHERE.*tipo/is, "no debe filtrar por tipo -- Recargas debe seguir contando en el Resumen General");
+    assert.equal(stats.totalOperaciones, 5);
+    assert.equal(stats.volumenTotal, 745);
 });
