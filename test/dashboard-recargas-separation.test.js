@@ -250,12 +250,14 @@ test("Resumen General: tiene un título explícito y la aclaración de alcance (
 
 test("Resumen General: las etiquetas ambiguas ahora dicen '(todas)' -- nunca se leen igual que las secciones scoped de abajo", () => {
     const html = fs.readFileSync(path.join(__dirname, "..", "public", "dashboard.html"), "utf8");
-    assert.match(html, /<span>Pendientes \(todas\)<\/span>/);
-    assert.match(html, /<span>Completadas \(todas\)<\/span>/);
+    // La etiqueta va dentro de un <span> (con o sin atributos, ej.
+    // class="label" del layout compacto) -- lo que importa es el texto.
+    assert.match(html, /<span[^>]*>Pendientes \(todas\)<\/span>/);
+    assert.match(html, /<span[^>]*>Completadas \(todas\)<\/span>/);
     // Las demás métricas del card no se tocan.
-    assert.match(html, /<span>Ops\. Confirmadas<\/span>/);
-    assert.match(html, /<span>Volumen Total<\/span>/);
-    assert.match(html, /<span>Clientes<\/span>/);
+    assert.match(html, /<span[^>]*>Ops\. Confirmadas<\/span>/);
+    assert.match(html, /<span[^>]*>Volumen Total<\/span>/);
+    assert.match(html, /<span[^>]*>Clientes<\/span>/);
 });
 
 // ── Resumen corto de Recargas: EXCLUSIVAMENTE activas, nunca se rellena con completadas ──

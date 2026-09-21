@@ -48,6 +48,12 @@
         .colapsable.abierto { display: block; }
         .btn-limpiar { background: #16a34a; color: white; border: none; padding: 8px 16px; border-radius: 8px; font-size: 12px; font-weight: 700; cursor: pointer; }
         .btn-limpiar:hover { opacity: 0.9; }
+        .layout-superior { display: grid; grid-template-columns: 2fr 1fr; gap: 20px; align-items: start; margin-bottom: 30px; }
+        @media (max-width: 900px) { .layout-superior { grid-template-columns: 1fr; } }
+        .resumen-compacto-item { display: flex; justify-content: space-between; align-items: baseline; padding: 10px 0; border-bottom: 1px solid #2d355a; gap: 10px; }
+        .resumen-compacto-item:last-child { border-bottom: none; }
+        .resumen-compacto-item .label { font-size: 11px; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; }
+        .resumen-compacto-item .value { font-weight: 700; color: var(--accent); font-size: 15px; text-align: right; overflow-wrap: anywhere; }
     </style>
 </head>
 <body>
@@ -64,56 +70,96 @@
             </div>
         </div>
 
-        <h3 style="margin-bottom:4px;">📊 Resumen General</h3>
-        <p style="color:#8b949e; font-size:12px; margin-top:0; margin-bottom:14px;">Incluye Transferencias, Entregas y Recargas</p>
-        <div class="stats-grid">
-            <div class="stat-card"><span>Clientes</span><h2 id="stat-clientes">—</h2></div>
-            <div class="stat-card"><span>Ops. Confirmadas</span><h2 id="stat-ops">—</h2></div>
-            <div class="stat-card"><span>Volumen Total</span><h2 id="stat-vol">—</h2></div>
-            <div class="stat-card"><span>Pendientes (todas)</span><h2 id="stat-pend" style="color: var(--yellow);">—</h2></div>
-            <div class="stat-card"><span>Completadas (todas)</span><h2 id="stat-completadas" style="color:#60a5fa;">—</h2></div>
-            <div class="stat-card"><span>Cotizados Hoy</span><h2 id="stat-cotizados" style="color:#38bdf8;">—</h2></div>
-            <div class="stat-card"><span>Cierres Hoy</span><h2 id="stat-cierres" style="color:var(--green);">—</h2></div>
-            <div class="stat-card"><span>Conversión</span><h2 id="stat-conversion" style="color:#a78bfa;">—%</h2></div>
-            <div class="stat-card"><span>Abandonos</span><h2 id="stat-abandonos" style="color:var(--red);">—</h2></div>
-        </div>
-
-        <div class="config-section" id="seccionTasas">
-            <h3>💱 Configuración de Tasas</h3>
-            <div id="tasasForm">
-            <div class="grid-inputs">
-                <div class="input-group"><label>Menos de 100 BRL</label><input type="number" id="brl_0" placeholder="Ej: 45"></div>
-                <div class="input-group"><label>100 - 499 BRL</label><input type="number" id="brl_100" placeholder="Ej: 50"></div>
-                <div class="input-group"><label>500 - 999 BRL</label><input type="number" id="brl_500" placeholder="Ej: 55"></div>
-                <div class="input-group"><label>1000+ BRL</label><input type="number" id="brl_1000" placeholder="Ej: 60"></div>
-                <div class="input-group"><label>USD Clásica (Tasa)</label><input type="number" step="0.01" id="usd1" placeholder="Ej: 5.6"></div>
-                <div class="input-group"><label>USD Prepago (Tasa)</label><input type="number" step="0.01" id="usd2" placeholder="Ej: 5.6"></div>
-                <div class="input-group"><label>MLC (Tasa CUP)</label><input type="number" step="0.01" id="mlc" placeholder="Ej: 270"></div>
-                <div class="input-group"><label>Efectivo (CUP por real)</label><input type="number" step="0.01" id="efectivo" placeholder="Ej: 115"></div>
-                <div class="input-group"><label>Tarifa de entrega (R$)</label><input type="number" step="0.01" id="tarifa_entrega" placeholder="Ej: 20"></div>
-            </div>
-
-            <h3 style="margin-top:24px; color:#facc15;">🌟 Programa VIP — por niveles</h3>
-            <p style="color:#8b949e; font-size:13px; margin-top:-10px; margin-bottom:14px;">
-                El nivel se recalcula sobre los últimos 365 días de operaciones — puede subir o bajar con el tiempo.
+        <div class="config-section" style="border-left: 5px solid #22c55e;">
+            <h3 style="color:#22c55e;">👷 Operadores de Transferencias <span class="badge-count" id="countOperadores">0</span></h3>
+            <p style="color:#8b949e; font-size:12px; margin-top:-10px; margin-bottom:14px;">
+                Exclusivo de Transferencias (CUP/USD/MLC) -- Recargas y Entregas de efectivo tienen sus propios módulos independientes.
             </p>
-            <div class="grid-inputs">
-                <div class="input-group"><label>⭐ Nivel 1 — Monto mínimo (R$/año)</label><input type="number" step="0.01" id="umbral_vip_1" placeholder="Ej: 10000"></div>
-                <div class="input-group"><label>⭐ Nivel 1 — Bono de tasa (CUP extra)</label><input type="number" step="0.01" id="bono_vip_1" placeholder="Ej: 1"></div>
-                <div class="input-group"><label>⭐ Nivel 1 — Descuento de entrega (%)</label><input type="number" step="1" id="descuento_entrega_1" placeholder="Ej: 50"></div>
-
-                <div class="input-group"><label>⭐⭐ Nivel 2 — Monto mínimo (R$/año)</label><input type="number" step="0.01" id="umbral_vip_2" placeholder="Ej: 25000"></div>
-                <div class="input-group"><label>⭐⭐ Nivel 2 — Bono de tasa (CUP extra)</label><input type="number" step="0.01" id="bono_vip_2" placeholder="Ej: 2"></div>
-                <div class="input-group"><label>⭐⭐ Nivel 2 — Descuento de entrega (%)</label><input type="number" step="1" id="descuento_entrega_2" placeholder="Ej: 75"></div>
-
-                <div class="input-group"><label>⭐⭐⭐ Nivel 3 — Monto mínimo (R$/año)</label><input type="number" step="0.01" id="umbral_vip_3" placeholder="Ej: 50000"></div>
-                <div class="input-group"><label>⭐⭐⭐ Nivel 3 — Bono de tasa (CUP extra)</label><input type="number" step="0.01" id="bono_vip_3" placeholder="Ej: 3"></div>
-                <div class="input-group"><label>⭐⭐⭐ Nivel 3 — Descuento de entrega (%)</label><input type="number" step="1" id="descuento_entrega_3" placeholder="Ej: 100"></div>
+            <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:16px; align-items:flex-end;">
+                <div class="input-group" style="flex:1; min-width:160px;"><label>Nombre</label><input type="text" id="op_nombre" style="background:#0b0e1a;border:1px solid #2d355a;padding:12px 14px;border-radius:10px;color:white;font-size:13px;outline:none;" placeholder="Ej: Juan Pérez"></div>
+                <div class="input-group" style="flex:1; min-width:160px;"><label>WhatsApp</label><input type="tel" id="op_telefono" style="background:#0b0e1a;border:1px solid #2d355a;padding:12px 14px;border-radius:10px;color:white;font-size:13px;outline:none;" placeholder="5511999999999"></div>
+                <div class="input-group" style="min-width:220px;">
+                    <label>Modalidades</label>
+                    <div style="display:flex; gap:12px; flex-wrap:wrap; padding:10px 0 2px;">
+                        <label style="display:flex;gap:5px;align-items:center;font-weight:400;font-size:13px;color:#e5e7eb;"><input type="checkbox" class="op-modalidad" value="cup"> CUP</label>
+                        <label style="display:flex;gap:5px;align-items:center;font-weight:400;font-size:13px;color:#e5e7eb;"><input type="checkbox" class="op-modalidad" value="usd"> USD</label>
+                        <label style="display:flex;gap:5px;align-items:center;font-weight:400;font-size:13px;color:#e5e7eb;"><input type="checkbox" class="op-modalidad" value="mlc"> MLC</label>
+                        <label style="display:flex;gap:5px;align-items:center;font-weight:400;font-size:13px;color:#e5e7eb;"><input type="checkbox" class="op-modalidad" value="todos"> Todos</label>
+                    </div>
+                </div>
+                <button class="btn-save" id="btnGuardarOperador" style="margin-top:0;width:auto;padding:14px 24px;white-space:nowrap;" onclick="guardarOperador()">Agregar</button>
+                <button class="page-btn" id="btnCancelarEdicionOperador" style="display:none;" onclick="cancelarEdicionOperador()">Cancelar</button>
             </div>
+            <div class="table-wrapper">
+                <table>
+                    <thead>
+                        <tr><th>Nombre</th><th>WhatsApp</th><th>Modalidades</th><th>Estado</th><th></th></tr>
+                    </thead>
+                    <tbody id="tablaOperadores">
+                        <tr><td colspan="5" style="text-align:center; padding:20px; color:#8b949e;">Conecta para ver datos</td></tr>
+                    </tbody>
+                </table>
             </div>
-            <button class="btn-save" id="btnSave" onclick="guardarTasas()">Guardar Cambios de Tasas</button>
         </div>
 
+        <div class="layout-superior">
+            <div class="config-section" id="seccionTasas" style="margin-bottom:0;">
+                <h3>💱 Configuración de Tasas</h3>
+                <div id="tasasForm">
+                <div class="grid-inputs">
+                    <div class="input-group"><label>Menos de 100 BRL</label><input type="number" id="brl_0" placeholder="Ej: 45"></div>
+                    <div class="input-group"><label>100 - 499 BRL</label><input type="number" id="brl_100" placeholder="Ej: 50"></div>
+                    <div class="input-group"><label>500 - 999 BRL</label><input type="number" id="brl_500" placeholder="Ej: 55"></div>
+                    <div class="input-group"><label>1000+ BRL</label><input type="number" id="brl_1000" placeholder="Ej: 60"></div>
+                    <div class="input-group"><label>USD Clásica (Tasa)</label><input type="number" step="0.01" id="usd1" placeholder="Ej: 5.6"></div>
+                    <div class="input-group"><label>USD Prepago (Tasa)</label><input type="number" step="0.01" id="usd2" placeholder="Ej: 5.6"></div>
+                    <div class="input-group"><label>MLC (Tasa CUP)</label><input type="number" step="0.01" id="mlc" placeholder="Ej: 270"></div>
+                    <div class="input-group"><label>Efectivo (CUP por real)</label><input type="number" step="0.01" id="efectivo" placeholder="Ej: 115"></div>
+                    <div class="input-group"><label>Tarifa de entrega (R$)</label><input type="number" step="0.01" id="tarifa_entrega" placeholder="Ej: 20"></div>
+                </div>
+
+                <h3 class="toggle-h3" id="hdrVip" style="margin-top:24px; color:#facc15; cursor:pointer;">
+                    <span>🌟 Programa VIP — por niveles <span class="badge-count" id="countVip">0</span></span>
+                    <span class="chev" id="chevVip">▾</span>
+                </h3>
+                <div class="colapsable" id="bodyVip">
+                    <p style="color:#8b949e; font-size:13px; margin-top:10px; margin-bottom:14px;">
+                        El nivel se recalcula sobre los últimos 365 días de operaciones — puede subir o bajar con el tiempo.
+                    </p>
+                    <div class="grid-inputs">
+                        <div class="input-group"><label>⭐ Nivel 1 — Monto mínimo (R$/año)</label><input type="number" step="0.01" id="umbral_vip_1" placeholder="Ej: 10000"></div>
+                        <div class="input-group"><label>⭐ Nivel 1 — Bono de tasa (CUP extra)</label><input type="number" step="0.01" id="bono_vip_1" placeholder="Ej: 1"></div>
+                        <div class="input-group"><label>⭐ Nivel 1 — Descuento de entrega (%)</label><input type="number" step="1" id="descuento_entrega_1" placeholder="Ej: 50"></div>
+
+                        <div class="input-group"><label>⭐⭐ Nivel 2 — Monto mínimo (R$/año)</label><input type="number" step="0.01" id="umbral_vip_2" placeholder="Ej: 25000"></div>
+                        <div class="input-group"><label>⭐⭐ Nivel 2 — Bono de tasa (CUP extra)</label><input type="number" step="0.01" id="bono_vip_2" placeholder="Ej: 2"></div>
+                        <div class="input-group"><label>⭐⭐ Nivel 2 — Descuento de entrega (%)</label><input type="number" step="1" id="descuento_entrega_2" placeholder="Ej: 75"></div>
+
+                        <div class="input-group"><label>⭐⭐⭐ Nivel 3 — Monto mínimo (R$/año)</label><input type="number" step="0.01" id="umbral_vip_3" placeholder="Ej: 50000"></div>
+                        <div class="input-group"><label>⭐⭐⭐ Nivel 3 — Bono de tasa (CUP extra)</label><input type="number" step="0.01" id="bono_vip_3" placeholder="Ej: 3"></div>
+                        <div class="input-group"><label>⭐⭐⭐ Nivel 3 — Descuento de entrega (%)</label><input type="number" step="1" id="descuento_entrega_3" placeholder="Ej: 100"></div>
+                    </div>
+                </div>
+                </div>
+                <button class="btn-save" id="btnSave" onclick="guardarTasas()">Guardar Cambios de Tasas</button>
+            </div>
+
+            <div class="config-section" style="margin-bottom:0;">
+                <h3 style="margin-bottom:4px;">📊 Resumen General</h3>
+                <p style="color:#8b949e; font-size:11px; margin-top:0; margin-bottom:10px;">Incluye Transferencias, Entregas y Recargas</p>
+                <div class="resumen-compacto">
+                    <div class="resumen-compacto-item"><span class="label">Clientes</span><span class="value" id="stat-clientes">—</span></div>
+                    <div class="resumen-compacto-item"><span class="label">Ops. Confirmadas</span><span class="value" id="stat-ops">—</span></div>
+                    <div class="resumen-compacto-item"><span class="label">Volumen Total</span><span class="value" id="stat-vol">—</span></div>
+                    <div class="resumen-compacto-item"><span class="label">Pendientes (todas)</span><span class="value" id="stat-pend" style="color: var(--yellow);">—</span></div>
+                    <div class="resumen-compacto-item"><span class="label">Completadas (todas)</span><span class="value" id="stat-completadas" style="color:#60a5fa;">—</span></div>
+                    <div class="resumen-compacto-item"><span class="label">Cotizados Hoy</span><span class="value" id="stat-cotizados" style="color:#38bdf8;">—</span></div>
+                    <div class="resumen-compacto-item"><span class="label">Cierres Hoy</span><span class="value" id="stat-cierres" style="color:var(--green);">—</span></div>
+                    <div class="resumen-compacto-item"><span class="label">Conversión</span><span class="value" id="stat-conversion" style="color:#a78bfa;">—%</span></div>
+                    <div class="resumen-compacto-item"><span class="label">Abandonos</span><span class="value" id="stat-abandonos" style="color:var(--red);">—</span></div>
+                </div>
+            </div>
+        </div>
 
         <div class="config-section" style="border-left: 5px solid var(--yellow);">
             <h3 class="toggle-h3" id="hdrPendientes" style="color: var(--yellow); cursor:pointer;">
@@ -769,6 +815,99 @@
             } catch(e) { alert("❌ Error de conexión"); }
         }
 
+        // ── Operadores de Transferencias ───────────
+        // window._operadorEditandoId: null = modo "Agregar"; con un id =
+        // modo "Guardar cambios" sobre ese operador -- el mismo formulario
+        // sirve para ambos, sin duplicar HTML.
+        async function cargarOperadores() {
+            if (!token) return;
+            try {
+                const r = await fetch("/admin/operadores", { headers: authH() });
+                const lista = await r.json();
+                renderOperadores(Array.isArray(lista) ? lista : []);
+            } catch(e) { console.error("Error cargando operadores:", e); }
+        }
+
+        function renderOperadores(lista) {
+            document.getElementById("countOperadores").innerText = lista.length;
+            const tbody = document.getElementById("tablaOperadores");
+            if (lista.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#8b949e;padding:20px;">Sin operadores registrados todavía.</td></tr>';
+                return;
+            }
+            const etiquetaModalidad = m => ({ cup: "CUP", usd: "USD", mlc: "MLC", todos: "Todos" }[m] || m);
+            tbody.innerHTML = lista.map(op => `
+                <tr>
+                    <td><strong>${escapeHtml(op.nombre)}</strong></td>
+                    <td><small>${escapeHtml(op.telefono)}</small></td>
+                    <td>${(op.modalidades || []).map(etiquetaModalidad).join(", ")}</td>
+                    <td>
+                        <button class="page-btn" style="border-color:${op.activo ? 'var(--green)' : '#8b949e'};color:${op.activo ? 'var(--green)' : '#8b949e'};" onclick="toggleActivoOperador(${op.id}, ${!op.activo})">
+                            ${op.activo ? "● ACTIVO" : "○ INACTIVO"}
+                        </button>
+                    </td>
+                    <td><button class="page-btn" onclick="editarOperadorForm(${op.id})">✏️ Editar</button></td>
+                </tr>
+            `).join("");
+        }
+
+        async function guardarOperador() {
+            const btn = document.getElementById("btnGuardarOperador");
+            const nombre = document.getElementById("op_nombre").value.trim();
+            const telefono = document.getElementById("op_telefono").value.trim();
+            const modalidades = [...document.querySelectorAll(".op-modalidad:checked")].map(cb => cb.value);
+            if (!nombre || !telefono) { alert("Ingresa nombre y WhatsApp"); return; }
+            if (modalidades.length === 0) { alert("Selecciona al menos una modalidad"); return; }
+
+            const editandoId = window._operadorEditandoId;
+            btn.disabled = true;
+            try {
+                const url = editandoId ? `/admin/operadores/${editandoId}` : "/admin/operadores";
+                const res = await fetch(url, { method: "POST", headers: authH(), body: JSON.stringify({ nombre, telefono, modalidades, activo: true }) });
+                const d = await res.json();
+                if (d.success) {
+                    cancelarEdicionOperador();
+                    cargarOperadores();
+                } else {
+                    alert("❌ Error: " + (d.error || "desconocido"));
+                }
+            } catch(e) { alert("❌ Error de conexión"); }
+            finally { btn.disabled = false; }
+        }
+
+        async function editarOperadorForm(id) {
+            try {
+                const r = await fetch("/admin/operadores", { headers: authH() });
+                const lista = await r.json();
+                const op = (Array.isArray(lista) ? lista : []).find(o => o.id === id);
+                if (!op) return;
+                window._operadorEditandoId = id;
+                document.getElementById("op_nombre").value = op.nombre;
+                document.getElementById("op_telefono").value = op.telefono;
+                document.querySelectorAll(".op-modalidad").forEach(cb => { cb.checked = (op.modalidades || []).includes(cb.value); });
+                document.getElementById("btnGuardarOperador").innerText = "Guardar cambios";
+                document.getElementById("btnCancelarEdicionOperador").style.display = "inline-block";
+            } catch(e) { alert("❌ Error de conexión"); }
+        }
+
+        function cancelarEdicionOperador() {
+            window._operadorEditandoId = null;
+            document.getElementById("op_nombre").value = "";
+            document.getElementById("op_telefono").value = "";
+            document.querySelectorAll(".op-modalidad").forEach(cb => { cb.checked = false; });
+            document.getElementById("btnGuardarOperador").innerText = "Agregar";
+            document.getElementById("btnCancelarEdicionOperador").style.display = "none";
+        }
+
+        async function toggleActivoOperador(id, nuevoValor) {
+            try {
+                const res = await fetch(`/admin/operadores/${id}/activo`, { method: "POST", headers: authH(), body: JSON.stringify({ activo: nuevoValor }) });
+                const d = await res.json();
+                if (d.success) cargarOperadores();
+                else alert("❌ Error: " + (d.error || "desconocido"));
+            } catch(e) { alert("❌ Error de conexión"); }
+        }
+
         function conectar() {
             token = document.getElementById("tokenField").value.trim();
             if (!token) return;
@@ -806,6 +945,7 @@
                 cargarOferta();
                 cargarRecargas();
                 cargarBloqueados();
+                cargarOperadores();
 
                 const tasas      = await resTasas.json();
                 const clientes   = await resClientes.json();
@@ -829,6 +969,13 @@
                 document.getElementById("stat-vol").innerText      = Number(stats.volumenTotal || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
                 document.getElementById("stat-pend").innerText     = stats.pendientes || 0;
                 document.getElementById("stat-completadas").innerText = stats.completadas || 0;
+
+                // Contador del encabezado colapsable de VIP -- reutiliza los
+                // clientes ya traídos (nivel_vip ya viene en SELECT *), sin
+                // pedir nada nuevo al backend ni cambiar cómo se calcula el
+                // nivel VIP en sí.
+                const countVipEl = document.getElementById("countVip");
+                if (countVipEl) countVipEl.innerText = listaClientes.filter(c => Number(c.nivel_vip) > 0).length;
 
                 // Las recargas tienen su propio módulo separado ("Operaciones de
                 // Recargas", más abajo) -- nunca se mezclan visualmente con la
@@ -975,6 +1122,27 @@
         document.getElementById("chevPendientes").classList.add("abierto");
         // CRM de Entregas también abierto por defecto
         document.getElementById("chevEntregas").classList.add("abierto");
+
+        // Programa VIP: colapsable, cerrado por defecto (no requiere
+        // atención diaria como Pendientes) -- sesión guardada en
+        // sessionStorage para que no se cierre solo al recargar la página
+        // dentro de la misma sesión del navegador (nunca cambia reglas/
+        // niveles/ofertas VIP, es solo presentación).
+        (function inicializarColapsableVip() {
+            let abierto = false;
+            try { abierto = sessionStorage.getItem("vipAbierto") === "1"; } catch (e) {}
+            if (abierto) {
+                document.getElementById("bodyVip").classList.add("abierto");
+                document.getElementById("chevVip").classList.add("abierto");
+            }
+            document.getElementById("hdrVip").addEventListener("click", () => {
+                const body = document.getElementById("bodyVip");
+                const nuevoEstado = !body.classList.contains("abierto");
+                body.classList.toggle("abierto");
+                document.getElementById("chevVip").classList.toggle("abierto");
+                try { sessionStorage.setItem("vipAbierto", nuevoEstado ? "1" : "0"); } catch (e) {}
+            });
+        })();
 
         // ── CRM DE ENTREGAS (efectivo) ────────────
         let entFiltroRapido = "TODAS";
@@ -1177,6 +1345,13 @@
                     acciones = "-";
                 }
                 acciones += `<br><button class="page-btn" style="margin-top:4px;font-size:11px;padding:4px 8px;" onclick="entregaVerHistorial(${e.id})">🕘 Historial</button>`;
+                // Avisos automáticos (mañana/tarde) solo tienen sentido
+                // mientras la entrega sigue PENDIENTE -- nunca cambia
+                // estado_entrega/estado_pago, solo si recibe recordatorios.
+                if (e.estado_entrega === "PENDIENTE") {
+                    const avisosOn = e.avisos_automaticos !== false;
+                    acciones += `<br><button class="page-btn" style="margin-top:4px;font-size:11px;padding:4px 8px;border-color:${avisosOn ? 'var(--green)' : '#8b949e'};color:${avisosOn ? 'var(--green)' : '#8b949e'};" onclick="entregaToggleAvisos(${e.id}, ${!avisosOn})">${avisosOn ? "🔔 Avisos ON" : "🔕 Avisos OFF"}</button>`;
+                }
 
                 const notaAtraso = e.estado_entrega === "PENDIENTE"
                     ? `<br><small style="color:var(--yellow);">${diasPendienteTexto(e.created_at)}</small>`
@@ -1214,6 +1389,17 @@
             if (!confirm("¿Confirmas cancelar esta entrega?")) return;
             try {
                 const res = await fetch(`/admin/entregas/${id}/cancelar`, { method: "POST", headers: authH(), body: JSON.stringify({ motivo }) });
+                const data = await res.json();
+                if (data.success) cargarEntregas();
+                else alert("❌ Error: " + (data.error || "desconocido"));
+            } catch (e) { alert("❌ Error de conexión"); }
+        }
+
+        // Control ON/OFF de avisos automáticos de esta entrega en particular
+        // (mañana/tarde) -- nunca cambia estado_entrega ni estado_pago.
+        async function entregaToggleAvisos(id, nuevoValor) {
+            try {
+                const res = await fetch(`/admin/entregas/${id}/avisos`, { method: "POST", headers: authH(), body: JSON.stringify({ activo: nuevoValor }) });
                 const data = await res.json();
                 if (data.success) cargarEntregas();
                 else alert("❌ Error: " + (data.error || "desconocido"));
