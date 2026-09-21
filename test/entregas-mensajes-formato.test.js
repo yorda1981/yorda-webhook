@@ -113,14 +113,15 @@ test("notificarNuevaEntrega: se envía tanto al admin como al contacto de entreg
     assert.equal(mensajesEnviados[0].msg, mensajesEnviados[1].msg);
 });
 
-test("notificarNuevaEntrega: destinatarios internos iguales -> un solo WhatsApp", async () => {
-    env.ENTREGA_CONTACT_PHONE = env.ADMIN_PHONE;
+test("notificarNuevaEntrega: destinatarios internos iguales con formatos distintos -> un solo WhatsApp", async () => {
+    env.ENTREGA_CONTACT_PHONE = "+55 (11) 90000-0999";
     await notificarNuevaEntrega(ENTREGA_COMPLETA);
     assert.equal(mensajesEnviados.length, 1);
     assert.equal(mensajesEnviados[0].phone, env.ADMIN_PHONE);
 });
 
-test("notificarNuevaEntrega: destinatarios distintos -> uno para cada destinatario", async () => {
+test("notificarNuevaEntrega: destinatarios con dígitos distintos -> uno para cada destinatario", async () => {
+    env.ENTREGA_CONTACT_PHONE = "+55 (11) 90000-0998";
     await notificarNuevaEntrega(ENTREGA_COMPLETA);
     assert.equal(mensajesEnviados.length, 2);
     assert.deepEqual(new Set(mensajesEnviados.map(m => m.phone)), new Set([env.ADMIN_PHONE, env.ENTREGA_CONTACT_PHONE]));

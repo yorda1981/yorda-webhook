@@ -133,7 +133,18 @@ async function notificarNuevaEntrega(entrega) {
         (entrega.observaciones ? `\nObservaciones: ${entrega.observaciones}` : "") +
         `\n\nEstado: PENDIENTE`;
 
-    const destinatarios = [...new Set([getAdminPhone(), getEntregaContactPhone()].filter(Boolean))];
+    // Z-API acepta números con distintos formatos, pero para deduplicar se
+    // comparan solo sus dígitos. Se conserva el primer formato configurado
+    // para el envío y nunca se colapsan números con dígitos diferentes.
+    const destinatarios = [];
+    const vistos = new Set();
+    for (const numero of [getAdminPhone(), getEntregaContactPhone()].filter(Boolean)) {
+        const normalizado = String(numero).replace(/\D/g, "");
+        const clave = normalizado || String(numero).trim();
+        if (vistos.has(clave)) continue;
+        vistos.add(clave);
+        destinatarios.push(numero);
+    }
     for (const numero of destinatarios) {
         try {
             await enviarSeguro(numero, msg);
