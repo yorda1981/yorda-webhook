@@ -92,16 +92,23 @@ const PREDICADO_CANDIDATO = `
     -- webhook-guard.js:enPausaHumana).
     AND (cu.pausa_hasta IS NULL OR cu.pausa_hasta < NOW())
     -- Exclusión 3: ya existe una operación real (confirmada o completada)
-    -- creada DESPUÉS de este intento -- el cliente sí terminó comprando
-    -- (por este canal o por otro), el intento viejo quedó obsoleto y no
-    -- debe generar un candidato. Una operación ANTERIOR al intento actual
-    -- NO excluye (fue un pedido distinto, ya cerrado, que no tiene que ver
-    -- con este).
+    -- que supera este intento. La creación posterior sigue siendo suficiente;
+    -- además, una confirmación posterior también resuelve el intento aunque
+    -- la fila se haya creado unos minutos antes. completed_at solo se usa
+    -- como respaldo cuando confirmed_at es NULL: un cierre administrativo
+    -- tardío no debe invalidar un intento nuevo si ya estaba confirmado antes.
     AND NOT EXISTS (
         SELECT 1 FROM operations o
         WHERE o.phone = cu.phone
           AND o.status IN ('confirmada','completada')
-          AND o.created_at > COALESCE(cu.fecha_estado, cu.fecha_cotizacion)
+          AND (
+              o.created_at > COALESCE(cu.fecha_estado, cu.fecha_cotizacion)
+              OR o.confirmed_at > COALESCE(cu.fecha_estado, cu.fecha_cotizacion)
+              OR (
+                  o.confirmed_at IS NULL
+                  AND o.completed_at > COALESCE(cu.fecha_estado, cu.fecha_cotizacion)
+              )
+          )
     )
     -- Cooldown independiente de los recordatorios automáticos: un envío
     -- manual exitoso oculta al cliente durante 24h, pero no borra historial.

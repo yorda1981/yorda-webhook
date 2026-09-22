@@ -20,7 +20,8 @@ const path = require("node:path");
 const pool = require("../db");
 const recuperacion = require("../src/services/recuperacion");
 const {
-    obtenerCandidatosRecuperacion, etiquetaServicio, prioridadDeEstado, antiguedadDe
+    obtenerCandidatosRecuperacion, obtenerCandidatoRecuperablePorTelefono,
+    etiquetaServicio, prioridadDeEstado, antiguedadDe
 } = recuperacion;
 
 async function capturarSQL(t, rows = []) {
@@ -59,14 +60,56 @@ test("la consulta excluye por NOT EXISTS cuando ya hay operación 'confirmada' o
 
 // ── 5. Operación ANTERIOR al intento no debe excluir (comparación forward-only) ──
 
-test("la exclusión por operación real compara created_at > fecha del intento (nunca <, nunca sin fecha) -- una operación anterior no excluye", async (t) => {
+test("la exclusión por operación real conserva created_at > fecha del intento y añade confirmación/cierre de respaldo", async (t) => {
     const sql = await capturarSQL(t);
     assert.match(sql, /o\.created_at\s*>\s*COALESCE\(cu\.fecha_estado,\s*cu\.fecha_cotizacion\)/);
+    assert.match(sql, /o\.confirmed_at\s*>\s*COALESCE\(cu\.fecha_estado,\s*cu\.fecha_cotizacion\)/);
+    assert.match(sql, /o\.confirmed_at\s+IS\s+NULL[\s\S]*?o\.completed_at\s*>\s*COALESCE\(cu\.fecha_estado,\s*cu\.fecha_cotizacion\)/);
     // Nunca debe compararse hacia atrás (<) en esta subconsulta -- eso
     // excluiría por una operación vieja ya cerrada, que no invalida el
     // intento actual.
     const bloqueOperations = sql.match(/NOT EXISTS[\s\S]*?FROM operations o[\s\S]*?\)\s*\)/)[0];
     assert.doesNotMatch(bloqueOperations, /created_at\s*</);
+});
+
+function superaIntento({ created_at, confirmed_at = null, completed_at = null }, fechaIntento) {
+    return created_at > fechaIntento ||
+        confirmed_at > fechaIntento ||
+        (confirmed_at === null && completed_at > fechaIntento);
+}
+
+test("regla explícita: created_at posterior excluye", () => {
+    assert.equal(superaIntento({ created_at: "2026-09-02", confirmed_at: "2026-09-03" }, "2026-09-01"), true);
+});
+
+test("regla explícita: confirmed_at posterior excluye aunque created_at sea anterior", () => {
+    assert.equal(superaIntento({ created_at: "2026-08-30", confirmed_at: "2026-09-02" }, "2026-09-01"), true);
+});
+
+test("regla explícita: confirmed_at anterior + completed_at posterior no excluye por completed_at", () => {
+    assert.equal(superaIntento({ created_at: "2026-08-30", confirmed_at: "2026-08-31", completed_at: "2026-09-02" }, "2026-09-01"), false);
+});
+
+test("regla explícita: confirmed_at NULL + completed_at posterior excluye", () => {
+    assert.equal(superaIntento({ created_at: "2026-08-30", confirmed_at: null, completed_at: "2026-09-02" }, "2026-09-01"), true);
+});
+
+test("regla explícita: operación completamente histórica anterior no excluye", () => {
+    assert.equal(superaIntento({ created_at: "2026-08-30", confirmed_at: "2026-08-31", completed_at: "2026-08-31" }, "2026-09-01"), false);
+});
+
+test("la revalidación usa exactamente el mismo bloque de exclusión que el listado", async (t) => {
+    const consultas = [];
+    t.mock.method(pool, "query", async (consulta) => {
+        consultas.push(consulta);
+        return { rows: [] };
+    });
+    await obtenerCandidatosRecuperacion();
+    await obtenerCandidatoRecuperablePorTelefono("5511900020001");
+
+    const extraerBloque = (sql) => sql.match(/NOT EXISTS \(\s*SELECT 1 FROM operations o[\s\S]*?\n    \)/)[0];
+    assert.equal(consultas.length, 2);
+    assert.equal(extraerBloque(consultas[0]), extraerBloque(consultas[1]));
 });
 
 // ── 6. Bloqueado -> excluido ──
