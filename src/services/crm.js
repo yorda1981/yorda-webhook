@@ -460,7 +460,7 @@ async function marcarRecordatorio(phone, tipo) {
 async function obtenerEstadisticasCRM(dias) {
     try {
         const diasNum = Number(dias);
-        const filtroFecha = (diasNum && diasNum > 0) ? `AND updated_at > NOW() - INTERVAL '${diasNum} days'` : "";
+        const ventana = (diasNum && diasNum > 0) ? `NOW() - INTERVAL '${diasNum} days'` : "'-infinity'::timestamptz";
         const r = await pool.query(`
             WITH limites_hoy AS (
                 SELECT
@@ -477,22 +477,80 @@ async function obtenerEstadisticasCRM(dias) {
             ),
             clientes AS (
             SELECT
-                COUNT(*) FILTER (WHERE estado_crm = 'nuevo_cliente' ${filtroFecha})           AS nuevos,
-                COUNT(*) FILTER (WHERE estado_crm = 'cotizado' ${filtroFecha})                AS cotizados,
                 -- Provisional y honesto: una fila por cliente, según la última
                 -- cotización registrada durante el día calendario de São Paulo.
                 COUNT(*) FILTER (
                     WHERE fecha_cotizacion >= limites_hoy.inicio_utc
                       AND fecha_cotizacion <  limites_hoy.fin_utc
                 )                                                               AS cotizados_hoy,
-                COUNT(*) FILTER (WHERE estado_crm = 'esperando_pix' ${filtroFecha})           AS esperando_pix,
-                COUNT(*) FILTER (WHERE estado_crm = 'esperando_comprobante' ${filtroFecha})   AS esperando_comprobante,
-                COUNT(*) FILTER (WHERE estado_crm = 'completado' ${filtroFecha})              AS completados,
-                COUNT(*) FILTER (WHERE estado_crm = 'abandono' ${filtroFecha})                AS abandonos,
                 COUNT(*) FILTER (WHERE cliente_frecuente = true)                AS frecuentes
             FROM customers
             CROSS JOIN limites_hoy
-            GROUP BY limites_hoy.inicio_utc, limites_hoy.fin_utc
+            ),
+            estados_operativos AS (
+                SELECT
+                    COUNT(*) FILTER (WHERE estado_crm = 'esperando_pix' AND updated_at > ${ventana}) AS esperando_pix,
+                    COUNT(*) FILTER (WHERE estado_crm = 'esperando_comprobante' AND updated_at > ${ventana}) AS esperando_comprobante,
+                    COUNT(*) FILTER (WHERE estado_crm = 'abandono' AND updated_at > ${ventana}) AS abandonos
+                FROM customers
+            ),
+            embudo AS (
+                -- La cohorte entra por customers.created_at. Cada hito exige
+                -- evidencia temporal no anterior al contacto y la progresión
+                -- previa; una operación manual sin cotización no salta etapas.
+                WITH cohorte AS (
+                    SELECT phone, created_at, fecha_cotizacion
+                    FROM customers
+                    WHERE created_at >= ${ventana}
+                ), hitos AS (
+                    SELECT c.phone,
+                        (c.fecha_cotizacion IS NOT NULL
+                         AND c.fecha_cotizacion >= c.created_at) AS cotizado,
+                        (c.fecha_cotizacion IS NOT NULL
+                         AND c.fecha_cotizacion >= c.created_at
+                         AND EXISTS (
+                             SELECT 1 FROM operations o
+                             WHERE o.phone = c.phone
+                               AND o.created_at >= c.created_at
+                         )) AS operacion,
+                        (c.fecha_cotizacion IS NOT NULL
+                         AND c.fecha_cotizacion >= c.created_at
+                         AND EXISTS (
+                             SELECT 1 FROM operations o
+                             WHERE o.phone = c.phone
+                               AND o.created_at >= c.created_at
+                               AND o.confirmed_at IS NOT NULL
+                               AND o.confirmed_at >= o.created_at
+                               AND o.status IN ('confirmada','completada')
+                         )) AS confirmado,
+                        (c.fecha_cotizacion IS NOT NULL
+                         AND c.fecha_cotizacion >= c.created_at
+                         AND EXISTS (
+                             SELECT 1 FROM operations o
+                             WHERE o.phone = c.phone
+                               AND o.created_at >= c.created_at
+                               AND o.confirmed_at IS NOT NULL
+                               AND o.confirmed_at >= o.created_at
+                               AND o.completed_at IS NOT NULL
+                               AND o.completed_at >= o.confirmed_at
+                               AND o.status = 'completada'
+                         )) AS completado
+                    FROM cohorte c
+                ), conteos AS (
+                SELECT
+                    COUNT(*) AS contactos_nuevos,
+                    COUNT(*) FILTER (WHERE cotizado) AS cotizados,
+                    COUNT(*) FILTER (WHERE cotizado AND operacion) AS operaciones_creadas,
+                    COUNT(*) FILTER (WHERE cotizado AND operacion AND confirmado) AS pagos_confirmados,
+                    COUNT(*) FILTER (WHERE cotizado AND operacion AND confirmado AND completado) AS completadas
+                FROM hitos
+                )
+                SELECT *,
+                    ROUND(100.0 * cotizados / NULLIF(contactos_nuevos, 0), 1) AS cotizados_pct,
+                    ROUND(100.0 * operaciones_creadas / NULLIF(cotizados, 0), 1) AS operaciones_creadas_pct,
+                    ROUND(100.0 * pagos_confirmados / NULLIF(operaciones_creadas, 0), 1) AS pagos_confirmados_pct,
+                    ROUND(100.0 * completadas / NULLIF(pagos_confirmados, 0), 1) AS completadas_pct
+                FROM conteos
             ),
             cierres AS (
                 -- operations es la única representación financiera. No se une
@@ -503,11 +561,26 @@ async function obtenerEstadisticasCRM(dias) {
                 WHERE completed_at >= limites_hoy.inicio_utc
                   AND completed_at <  limites_hoy.fin_utc
             )
-            SELECT clientes.*,
+            SELECT clientes.cotizados_hoy,
+                   clientes.frecuentes,
+                   estados_operativos.esperando_pix,
+                   estados_operativos.esperando_comprobante,
+                   estados_operativos.abandonos,
+                   embudo.contactos_nuevos,
+                   embudo.cotizados,
+                   embudo.operaciones_creadas,
+                   embudo.pagos_confirmados,
+                   embudo.completadas,
+                   embudo.cotizados_pct,
+                   embudo.operaciones_creadas_pct,
+                   embudo.pagos_confirmados_pct,
+                   embudo.completadas_pct,
                    cierres.cierres_hoy,
                    NULL::numeric AS conversion_hoy,
                    NULL::numeric AS conversion_pct
             FROM clientes
+            CROSS JOIN estados_operativos
+            CROSS JOIN embudo
             CROSS JOIN cierres
         `);
         return r.rows[0] || {};
