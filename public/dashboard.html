@@ -53,6 +53,23 @@
         .resumen-compacto-item { display: flex; justify-content: space-between; align-items: baseline; padding: 10px 0; border-bottom: 1px solid #2d355a; gap: 10px; }
         .resumen-compacto-item:last-child { border-bottom: none; }
         .resumen-compacto-item .label { font-size: 11px; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; }
+        .embudo-flow { display: flex; align-items: stretch; gap: 18px; width: 100%; }
+        .embudo-stage { position: relative; flex: 1 1 0; min-width: 0; background: #0b0e1a; border: 1px solid #2d355a; border-radius: 12px; padding: 14px; }
+        .embudo-stage:not(:last-child)::after { content: "→"; position: absolute; right: -16px; top: 50%; transform: translateY(-50%); color: #64748b; font-size: 20px; font-weight: 700; z-index: 1; }
+        .embudo-stage-name { min-height: 40px; color: #cbd5e1; font-size: 12px; font-weight: 700; line-height: 1.35; }
+        .embudo-stage-meta { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-top: 8px; }
+        .embudo-stage-count { font-size: 22px; font-weight: 700; }
+        .embudo-stage-pct { color: #94a3b8; font-size: 11px; white-space: nowrap; }
+        .embudo-stage-bar { height: 7px; margin-top: 10px; background: #161b33; border-radius: 99px; overflow: hidden; }
+        .embudo-stage-fill { height: 100%; border-radius: inherit; transition: width 0.6s ease; }
+        @media (max-width: 900px) {
+            .embudo-flow { flex-wrap: wrap; gap: 12px; }
+            .embudo-stage { flex: 1 1 calc(50% - 12px); }
+            .embudo-stage:not(:last-child)::after { display: none; }
+        }
+        @media (max-width: 520px) {
+            .embudo-stage { flex-basis: 100%; }
+        }
         .resumen-compacto-item .value { font-weight: 700; color: var(--accent); font-size: 15px; text-align: right; overflow-wrap: anywhere; }
     </style>
 </head>
@@ -577,7 +594,7 @@
         <div class="config-section" style="border-left: 5px solid #a78bfa; margin-bottom: 30px;">
             <h3 style="color:#a78bfa;">📊 Embudo de Conversión <small style="color:#8b949e;font-size:12px;font-weight:400;">· últimos 30 días</small></h3>
             <p style="color:#8b949e;font-size:11px;margin-top:-6px;">Clientes registrados en los últimos 30 días y su avance comercial; etapas acumulativas por cliente único.</p>
-            <div id="embudo" style="display:flex; flex-direction:column; gap:10px;"></div>
+            <div id="embudo" class="embudo-flow"></div>
             <div style="margin-top:20px; display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px;" id="crm-mini-stats">
                 <div style="background:#0b0e1a;border-radius:12px;padding:16px;border:1px solid #2d355a;">
                     <div style="font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:1px;">Frecuentes</div>
@@ -1931,14 +1948,13 @@
             embudo.innerHTML = etapas.map(e => {
                 const pct = Math.round((e.val / maxVal) * 100);
                 return `
-                <div style="display:flex;align-items:center;gap:12px;">
-                    <div style="width:200px;font-size:13px;color:#94a3b8;flex-shrink:0;">${e.label}</div>
-                    <div style="flex:1;background:#0b0e1a;border-radius:8px;overflow:hidden;height:28px;border:1px solid #2d355a;">
-                        <div style="width:${pct}%;background:${e.color};height:100%;border-radius:8px;transition:width 0.6s ease;display:flex;align-items:center;padding-left:10px;">
-                            <span style="font-size:12px;font-weight:700;color:#0b0e1a;white-space:nowrap;">${e.val > 0 ? e.val : ""}</span>
-                        </div>
+                <div class="embudo-stage">
+                    <div class="embudo-stage-name">${e.label}</div>
+                    <div class="embudo-stage-meta">
+                        <span class="embudo-stage-count" style="color:${e.color};">${e.val}</span>
+                        ${e.pct != null ? `<span class="embudo-stage-pct">${e.pct}%</span>` : ""}
                     </div>
-                    <div style="width:70px;text-align:right;font-size:13px;font-weight:700;color:${e.color};">${e.val}${e.pct != null ? ` <small style="font-weight:400;">(${e.pct}%)</small>` : ""}</div>
+                    <div class="embudo-stage-bar"><div class="embudo-stage-fill" style="width:${pct}%;background:${e.color};"></div></div>
                 </div>`;
             }).join("");
         }
