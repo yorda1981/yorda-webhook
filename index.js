@@ -12,6 +12,7 @@ const { obtenerTodos, obtenerCliente } = require("./src/services/customer-memory
 const { obtenerTodas, confirmarOperacion, completarOperacion, obtenerEstadisticas } = require("./src/services/operations");
 const crm = require("./src/services/crm");
 const recuperacionService = require("./src/services/recuperacion");
+const recuperacionMensajes = require("./src/services/recuperacion-mensajes");
 const entregasService = require("./src/services/entregas");
 const { leerTasas } = require("./src/flows/cotizacion-flow");
 const { esPedidoWeb, procesarPedidoWeb, crearEntregaManual } = require("./src/flows/pedido-web-flow");
@@ -414,6 +415,31 @@ app.get("/admin/crm/stats", adminReadLimiter, verificarToken, async (req, res) =
 app.get("/admin/recuperacion/candidatos", adminReadLimiter, verificarToken, async (req, res) => {
     try { res.json(await recuperacionService.obtenerCandidatosRecuperacion()); }
     catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Preview de mensaje de recuperación (motor de variantes, ver
+// src/services/recuperacion-mensajes.js) -- SOLO genera texto para mostrar
+// en el dashboard. Nunca envía WhatsApp, nunca escribe en la DB. Antes de
+// generar nada, re-valida contra el mismo predicado de "candidato
+// recuperable ahora mismo" (nunca confía en un candidato viejo/manipulado
+// que el frontend mande de vuelta -- ver
+// recuperacionService.obtenerCandidatoRecuperablePorTelefono).
+app.get("/admin/recuperacion/mensaje", adminReadLimiter, verificarToken, async (req, res) => {
+    try {
+        const phone = String(req.query.phone || "").trim();
+        if (!phone) return res.status(400).json({ error: "Falta el parámetro phone" });
+
+        const candidato = await recuperacionService.obtenerCandidatoRecuperablePorTelefono(phone);
+        if (!candidato) {
+            return res.status(404).json({ error: "Ese cliente ya no es un candidato recuperable (bloqueado, en pausa humana, ya tiene una operación posterior, o fuera del rango de antigüedad)." });
+        }
+
+        const excluir = (req.query.excluirFamilia && req.query.excluirIndice !== undefined)
+            ? { familia: String(req.query.excluirFamilia), indice: Number(req.query.excluirIndice) }
+            : null;
+
+        res.json(recuperacionMensajes.generarMensajePreview(candidato, { excluir }));
+    } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.get("/admin/bloqueados", adminReadLimiter, verificarToken, async (req, res) => {

@@ -23,7 +23,7 @@ function makeElement(id) {
     };
 }
 
-function cargarDashboardSandbox() {
+function cargarDashboardSandbox(fetchImpl) {
     const html = fs.readFileSync(path.join(__dirname, "..", "public", "dashboard.html"), "utf8");
     const m = html.match(/<script>([\s\S]*?)<\/script>/);
     const codigo = m[1];
@@ -37,7 +37,7 @@ function cargarDashboardSandbox() {
 
     const sandbox = {
         document: documentStub, window: {}, console,
-        fetch: async () => ({ ok: true, status: 200, json: async () => ([]) }),
+        fetch: fetchImpl || (async () => ({ ok: true, status: 200, json: async () => ([]) })),
         alert: (msg) => { sandbox.window._ultimoAlert = msg; },
         confirm: () => true, setInterval: () => 0, clearInterval: () => {},
         Intl, Date, JSON, Number
@@ -100,17 +100,18 @@ test("renderRecuperacion: la fila muestra cliente, WhatsApp, prioridad, servicio
     assert.match(html, /Esperando comprobante/);
 });
 
-test("renderRecuperacion: la ÚNICA acción por fila es 'Ver historial' -- ningún botón de enviar/recuperar/contactar", () => {
+test("renderRecuperacion: las únicas acciones por fila son 'Ver mensaje' y 'Ver historial' -- ningún botón de enviar/contactar/campaña", () => {
     const sandbox = cargarDashboardSandbox();
     sandbox.renderRecuperacion([CANDIDATO_ALTA, CANDIDATO_MEDIA_VIEJO]);
     const html = sandbox.document.getElementById("tablaRecuperacion").innerHTML;
     const botones = [...html.matchAll(/<button[^>]*>([^<]*)<\/button>/g)].map(m => m[1].trim());
-    assert.ok(botones.length > 0, "debe existir al menos el botón de historial");
+    assert.ok(botones.length > 0, "debe existir al menos un botón de acción");
     for (const texto of botones) {
-        assert.match(texto, /Ver historial/);
-        assert.doesNotMatch(texto, /[Ee]nviar/);
+        assert.match(texto, /Ver historial|Ver mensaje/);
+        assert.doesNotMatch(texto, /^Enviar|[Ee]nviar mensaje/);
         assert.doesNotMatch(texto, /[Cc]ontactar/);
         assert.doesNotMatch(texto, /[Cc]ampaña/);
+        assert.doesNotMatch(texto, /[Rr]ecuperar cliente/);
     }
 });
 
@@ -130,4 +131,61 @@ test("recuperacionVerHistorial: cliente sin operaciones -> avisa sin datos, nunc
     sandbox.window._ultimasOperaciones = [];
     sandbox.recuperacionVerHistorial("5511900030001");
     assert.match(sandbox.window._ultimoAlert, /Sin operaciones/);
+});
+
+// ── 👀 Ver mensaje / 🔄 Otra variante (FASE 2 -- solo preview) ──
+
+test("recuperacionVerMensaje: pide el preview al endpoint correcto y muestra el mensaje + metadatos discretos", async () => {
+    let urlPedida = null;
+    const sandbox = cargarDashboardSandbox(async (url) => {
+        urlPedida = url;
+        return { ok: true, status: 200, json: async () => ({ phone: "5511900030001", mensaje: "Lourdes 😊 ¿seguimos con aquellos MLC?", familia: "me_acorde", indice: 2, servicio: "MLC", antiguedadTono: "1-3d" }) };
+    });
+    await sandbox.recuperacionVerMensaje("5511900030001");
+    assert.match(String(urlPedida), /^\/admin\/recuperacion\/mensaje\?phone=5511900030001$/);
+    assert.equal(sandbox.document.getElementById("modalRecuperacionMensaje").style.display, "flex");
+    assert.equal(sandbox.document.getElementById("recMensajeTexto").innerText, "Lourdes 😊 ¿seguimos con aquellos MLC?");
+    const meta = sandbox.document.getElementById("recMensajeMeta").innerText;
+    assert.match(meta, /me_acorde/);
+    assert.match(meta, /MLC/);
+    assert.match(meta, /1-3d/);
+});
+
+test("recuperacionOtraVariante: vuelve a pedir el preview excluyendo la familia/índice ya mostrados", async () => {
+    const llamadas = [];
+    const sandbox = cargarDashboardSandbox(async (url) => {
+        llamadas.push(String(url));
+        return { ok: true, status: 200, json: async () => ({ phone: "5511900030001", mensaje: "Otra variante distinta", familia: "broma", indice: 1, servicio: "MLC", antiguedadTono: "1-3d" }) };
+    });
+    await sandbox.recuperacionVerMensaje("5511900030001");
+    await sandbox.recuperacionOtraVariante();
+    assert.equal(llamadas.length, 2);
+    assert.doesNotMatch(llamadas[0], /excluir/);
+    assert.match(llamadas[1], /excluirFamilia=broma&excluirIndice=1|excluirFamilia=me_acorde/); // excluye lo que quedó guardado tras la primera llamada
+});
+
+test("recuperacionVerMensaje: si el backend dice que ya no es candidato (404), avisa y cierra el modal sin mostrar nada inventado", async () => {
+    const sandbox = cargarDashboardSandbox(async () => ({ ok: false, status: 404, json: async () => ({ error: "Ese cliente ya no es un candidato recuperable." }) }));
+    await sandbox.recuperacionVerMensaje("5511900030001");
+    assert.equal(sandbox.document.getElementById("modalRecuperacionMensaje").style.display, "none");
+    assert.match(sandbox.window._ultimoAlert, /ya no es un candidato recuperable/);
+});
+
+test("recuperacionCerrarMensaje: oculta el modal y limpia el estado guardado", async () => {
+    const sandbox = cargarDashboardSandbox(async () => ({ ok: true, status: 200, json: async () => ({ phone: "5511900030001", mensaje: "x", familia: "broma", indice: 0, servicio: "MLC", antiguedadTono: "1-3d" }) }));
+    await sandbox.recuperacionVerMensaje("5511900030001");
+    sandbox.recuperacionCerrarMensaje();
+    assert.equal(sandbox.document.getElementById("modalRecuperacionMensaje").style.display, "none");
+    assert.equal(sandbox.window._recuperacionPreviewActual, null);
+});
+
+test("el preview NUNCA dispara un fetch a un endpoint de envío de WhatsApp", async () => {
+    const urls = [];
+    const sandbox = cargarDashboardSandbox(async (url) => {
+        urls.push(String(url));
+        return { ok: true, status: 200, json: async () => ({ phone: "5511900030001", mensaje: "x", familia: "broma", indice: 0, servicio: "MLC", antiguedadTono: "1-3d" }) };
+    });
+    await sandbox.recuperacionVerMensaje("5511900030001");
+    await sandbox.recuperacionOtraVariante();
+    for (const u of urls) assert.doesNotMatch(u, /enviar|mensaje\/enviar|whatsapp\/send/i);
 });

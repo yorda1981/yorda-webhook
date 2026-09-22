@@ -73,6 +73,63 @@ function antiguedadDe(fechaIntento, ahora = new Date()) {
     return "recuperacion"; // > 7 días
 }
 
+// Predicado único de "es candidato recuperable ahora mismo" -- compartido
+// entre el listado (obtenerCandidatosRecuperacion) y la re-validación de un
+// solo teléfono (obtenerCandidatoRecuperablePorTelefono, usada por el
+// endpoint de preview de mensaje para no confiar en un candidato viejo o
+// manipulado que el frontend mande de vuelta). Nunca se duplica esta
+// lógica -- un único WHERE, dos formas de llamarlo.
+const PREDICADO_CANDIDATO = `
+    cu.estado IN ('aguardando_comprovante', 'cotizacion_realizada')
+    AND COALESCE(cu.fecha_estado, cu.fecha_cotizacion) IS NOT NULL
+    -- Mínimo 2 horas de antigüedad -- mismo umbral que ya usa el flujo de
+    -- PIX (DOS_HORAS en shared.js) para no interrumpir una conversación
+    -- todavía en curso.
+    AND COALESCE(cu.fecha_estado, cu.fecha_cotizacion) < NOW() - INTERVAL '2 hours'
+    -- Exclusión 1: bloqueados.
+    AND NOT EXISTS (SELECT 1 FROM blocked_numbers b WHERE b.phone = cu.phone)
+    -- Exclusión 2: pausa humana activa (mismo campo que usa
+    -- webhook-guard.js:enPausaHumana).
+    AND (cu.pausa_hasta IS NULL OR cu.pausa_hasta < NOW())
+    -- Exclusión 3: ya existe una operación real (confirmada o completada)
+    -- creada DESPUÉS de este intento -- el cliente sí terminó comprando
+    -- (por este canal o por otro), el intento viejo quedó obsoleto y no
+    -- debe generar un candidato. Una operación ANTERIOR al intento actual
+    -- NO excluye (fue un pedido distinto, ya cerrado, que no tiene que ver
+    -- con este).
+    AND NOT EXISTS (
+        SELECT 1 FROM operations o
+        WHERE o.phone = cu.phone
+          AND o.status IN ('confirmada','completada')
+          AND o.created_at > COALESCE(cu.fecha_estado, cu.fecha_cotizacion)
+    )
+`;
+
+const SELECT_CANDIDATO = `
+    SELECT
+        cu.phone, cu.nombre, cu.estado, cu.tipo_favorito, cu.ultimo_monto,
+        COALESCE(cu.fecha_estado, cu.fecha_cotizacion) AS fecha_intento,
+        cu.estado_crm, cu.ultimo_recordatorio, cu.tipo_ultimo_recordatorio
+    FROM customers cu
+`;
+
+function mapearFilaCandidato(row) {
+    return {
+        phone:                  row.phone,
+        nombre:                 row.nombre,
+        estado:                 row.estado,
+        prioridad:              prioridadDeEstado(row.estado),
+        servicio:               etiquetaServicio(row.tipo_favorito),
+        tipoFavorito:           row.tipo_favorito,
+        ultimoMonto:            row.ultimo_monto !== null ? Number(row.ultimo_monto) : null,
+        fechaIntento:           row.fecha_intento,
+        antiguedad:             antiguedadDe(row.fecha_intento),
+        estadoCrm:              row.estado_crm,
+        ultimoRecordatorio:     row.ultimo_recordatorio,
+        tipoUltimoRecordatorio: row.tipo_ultimo_recordatorio
+    };
+}
+
 // Consulta única, con todos los filtros de exclusión aplicados en el propio
 // SQL -- el backend nunca devuelve un candidato que el frontend tenga que
 // terminar de filtrar (ver punto D del pedido: "no confiar en datos
@@ -80,61 +137,38 @@ function antiguedadDe(fechaIntento, ahora = new Date()) {
 async function obtenerCandidatosRecuperacion() {
     try {
         const r = await pool.query(`
-            SELECT
-                cu.phone, cu.nombre, cu.estado, cu.tipo_favorito, cu.ultimo_monto,
-                COALESCE(cu.fecha_estado, cu.fecha_cotizacion) AS fecha_intento,
-                cu.estado_crm, cu.ultimo_recordatorio, cu.tipo_ultimo_recordatorio
-            FROM customers cu
-            WHERE cu.estado IN ('aguardando_comprovante', 'cotizacion_realizada')
-              -- Mínimo 2 horas de antigüedad -- mismo umbral que ya usa el
-              -- flujo de PIX (DOS_HORAS en shared.js) para no interrumpir
-              -- una conversación todavía en curso.
-              AND COALESCE(cu.fecha_estado, cu.fecha_cotizacion) IS NOT NULL
-              AND COALESCE(cu.fecha_estado, cu.fecha_cotizacion) < NOW() - INTERVAL '2 hours'
-              -- Exclusión 1: bloqueados.
-              AND NOT EXISTS (SELECT 1 FROM blocked_numbers b WHERE b.phone = cu.phone)
-              -- Exclusión 2: pausa humana activa (mismo campo que usa
-              -- webhook-guard.js:enPausaHumana -- consultado inline porque
-              -- acá conviene resolverlo en la misma consulta SQL, no en un
-              -- loop por cliente).
-              AND (cu.pausa_hasta IS NULL OR cu.pausa_hasta < NOW())
-              -- Exclusión 3: ya existe una operación real (confirmada o
-              -- completada) creada DESPUÉS de este intento -- el cliente sí
-              -- terminó comprando (por este canal o por otro), el intento
-              -- viejo quedó obsoleto y no debe generar un candidato. Una
-              -- operación ANTERIOR al intento actual NO excluye (fue un
-              -- pedido distinto, ya cerrado, que no tiene que ver con este).
-              AND NOT EXISTS (
-                SELECT 1 FROM operations o
-                WHERE o.phone = cu.phone
-                  AND o.status IN ('confirmada','completada')
-                  AND o.created_at > COALESCE(cu.fecha_estado, cu.fecha_cotizacion)
-              )
+            ${SELECT_CANDIDATO}
+            WHERE ${PREDICADO_CANDIDATO}
             ORDER BY COALESCE(cu.fecha_estado, cu.fecha_cotizacion) ASC
         `);
-
-        return r.rows.map(row => ({
-            phone:                  row.phone,
-            nombre:                 row.nombre,
-            estado:                 row.estado,
-            prioridad:              prioridadDeEstado(row.estado),
-            servicio:               etiquetaServicio(row.tipo_favorito),
-            tipoFavorito:           row.tipo_favorito,
-            ultimoMonto:            row.ultimo_monto !== null ? Number(row.ultimo_monto) : null,
-            fechaIntento:           row.fecha_intento,
-            antiguedad:             antiguedadDe(row.fecha_intento),
-            estadoCrm:              row.estado_crm,
-            ultimoRecordatorio:     row.ultimo_recordatorio,
-            tipoUltimoRecordatorio: row.tipo_ultimo_recordatorio
-        }));
+        return r.rows.map(mapearFilaCandidato);
     } catch (e) {
         console.error("❌ Error obteniendo candidatos de recuperación:", e.message);
         return [];
     }
 }
 
+// Re-valida UN teléfono puntual contra el mismo predicado -- usada antes de
+// generar cualquier preview de mensaje. Un candidato que el frontend
+// recuerde de una carga vieja (ya operó, se bloqueó, entró en pausa, etc.)
+// nunca pasa esto, aunque el frontend lo siga mostrando en pantalla.
+async function obtenerCandidatoRecuperablePorTelefono(phone) {
+    if (!phone) return null;
+    try {
+        const r = await pool.query(`
+            ${SELECT_CANDIDATO}
+            WHERE cu.phone = $1 AND ${PREDICADO_CANDIDATO}
+        `, [phone]);
+        return r.rows[0] ? mapearFilaCandidato(r.rows[0]) : null;
+    } catch (e) {
+        console.error("❌ Error re-validando candidato de recuperación:", e.message);
+        return null;
+    }
+}
+
 module.exports = {
     obtenerCandidatosRecuperacion,
+    obtenerCandidatoRecuperablePorTelefono,
     etiquetaServicio,
     prioridadDeEstado,
     antiguedadDe

@@ -212,6 +212,20 @@
             </div>
         </div>
 
+        <!-- Preview de mensaje de recuperación -- solo lectura, nunca envía WhatsApp. -->
+        <div id="modalRecuperacionMensaje" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:1000; align-items:center; justify-content:center;">
+            <div style="background:#141a2e; border:1px solid #2d355a; border-radius:16px; padding:24px; max-width:440px; width:90%;">
+                <h3 style="margin-top:0;">👀 Vista previa del mensaje</h3>
+                <p style="color:#8b949e; font-size:11px; margin-top:-8px;">Solo revisión -- este mensaje NO se envía desde aquí.</p>
+                <div id="recMensajeTexto" style="background:#0b0e1a; border-radius:10px; padding:16px; font-size:14px; line-height:1.5; white-space:pre-wrap; margin-bottom:10px;">—</div>
+                <div id="recMensajeMeta" style="font-size:11px; color:#8b949e; margin-bottom:18px;">—</div>
+                <div style="display:flex; gap:10px; justify-content:flex-end;">
+                    <button class="page-btn" onclick="recuperacionOtraVariante()">🔄 Otra variante</button>
+                    <button class="page-btn" onclick="recuperacionCerrarMensaje()">Cerrar</button>
+                </div>
+            </div>
+        </div>
+
         <div class="config-section" style="border-left: 5px solid var(--yellow);">
             <h3 class="toggle-h3" id="hdrPendientes" style="color: var(--yellow); cursor:pointer;">
                 <span>⏳ Operaciones Pendientes <span class="badge-count" id="countPendientes">0</span></span>
@@ -998,9 +1012,62 @@
                     <td>${ETIQUETA_ANTIGUEDAD[c.antiguedad] || "-"}</td>
                     <td><small>${ETIQUETA_ESTADO_INTENTO[c.estado] || escapeHtml(c.estado || "-")}</small></td>
                     <td><small>${c.tipoUltimoRecordatorio ? escapeHtml(c.tipoUltimoRecordatorio) + " · " + new Date(c.ultimoRecordatorio).toLocaleDateString("pt-BR") : "—"}</small></td>
-                    <td><button class="page-btn" onclick="recuperacionVerHistorial('${c.phone}')">🕘 Ver historial</button></td>
+                    <td>
+                        <button class="page-btn" onclick="recuperacionVerMensaje('${c.phone}')">👀 Ver mensaje</button>
+                        <button class="page-btn" onclick="recuperacionVerHistorial('${c.phone}')">🕘 Ver historial</button>
+                    </td>
                 </tr>
             `).join("");
+        }
+
+        // ── 👀 Ver mensaje -- preview del motor de recuperación (FASE 2) ──
+        // Solo genera texto para revisar. NUNCA envía WhatsApp, NUNCA
+        // escribe en la DB -- el backend (GET /admin/recuperacion/mensaje)
+        // es puro cálculo de lectura. "Otra variante" vuelve a pedir al
+        // mismo endpoint indicando qué (familia, índice) NO debe repetir.
+        window._recuperacionPreviewActual = null;
+
+        async function recuperacionVerMensaje(phone) {
+            await recuperacionCargarMensaje(phone, null);
+        }
+
+        async function recuperacionOtraVariante() {
+            const actual = window._recuperacionPreviewActual;
+            if (!actual) return;
+            await recuperacionCargarMensaje(actual.phone, { familia: actual.familia, indice: actual.indice });
+        }
+
+        async function recuperacionCargarMensaje(phone, excluir) {
+            const modal = document.getElementById("modalRecuperacionMensaje");
+            const textoEl = document.getElementById("recMensajeTexto");
+            const metaEl = document.getElementById("recMensajeMeta");
+            modal.style.display = "flex";
+            textoEl.innerText = "Generando...";
+            metaEl.innerText = "";
+            try {
+                let url = `/admin/recuperacion/mensaje?phone=${encodeURIComponent(phone)}`;
+                if (excluir) url += `&excluirFamilia=${encodeURIComponent(excluir.familia)}&excluirIndice=${excluir.indice}`;
+                const r = await fetch(url, { headers: authH() });
+                const d = await r.json();
+                if (!r.ok) {
+                    recuperacionCerrarMensaje();
+                    alert("❌ " + (d.error || "No se pudo generar el mensaje."));
+                    return;
+                }
+                window._recuperacionPreviewActual = { phone: d.phone, familia: d.familia, indice: d.indice };
+                textoEl.innerText = d.mensaje;
+                // Información interna del dashboard -- nunca forma parte del
+                // mensaje que vería el cliente.
+                metaEl.innerText = `Familia: ${d.familia} · Servicio: ${d.servicio} · Antigüedad: ${d.antiguedadTono}`;
+            } catch (e) {
+                recuperacionCerrarMensaje();
+                alert("❌ Error de conexión al generar el mensaje.");
+            }
+        }
+
+        function recuperacionCerrarMensaje() {
+            document.getElementById("modalRecuperacionMensaje").style.display = "none";
+            window._recuperacionPreviewActual = null;
         }
 
         // Reutiliza las operaciones YA cargadas por refreshData() (window.
