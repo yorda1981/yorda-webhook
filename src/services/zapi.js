@@ -97,7 +97,7 @@ async function enviarConDelay(phone, message, delayOverrideMs = null) {
     if (!phone || !message) return;
     const delay = delayOverrideMs ?? calcularDelay(String(message));
     await mostrarEscribiendo(phone, delay);
-    await enviarMensaje(phone, message);
+    return await enviarMensaje(phone, message);
 }
 
 module.exports = {

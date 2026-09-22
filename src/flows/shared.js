@@ -27,17 +27,21 @@ function getPIXAliases() {
 // envío; nunca se colapsan números con dígitos realmente diferentes. Único punto
 // de esta lógica -- reusado tanto por el aviso de entrega nueva
 // (pedido-web-flow.js) como por el aviso de entrega ENTREGADO (entregas-coordinator.js).
-function destinatariosInternosEntregas() {
+function destinatariosInternosEntregasDetallados() {
     const destinatarios = [];
     const vistos = new Set();
-    for (const numero of [getAdminPhone(), getEntregaContactPhone()].filter(Boolean)) {
+    for (const [rol, numero] of [["ADMIN", getAdminPhone()], ["ENTREGA_CONTACT", getEntregaContactPhone()]].filter(([, numero]) => numero)) {
         const normalizado = String(numero).replace(/\D/g, "");
         const clave = normalizado || String(numero).trim();
         if (vistos.has(clave)) continue;
         vistos.add(clave);
-        destinatarios.push(numero);
+        destinatarios.push({ phone: numero, rol });
     }
     return destinatarios;
+}
+
+function destinatariosInternosEntregas() {
+    return destinatariosInternosEntregasDetallados().map(({ phone }) => phone);
 }
 
 // ─────────────────────────────────────────
@@ -197,10 +201,10 @@ function parseTarjetas(raw) {
     return [];
 }
 
-async function enviarSeguro(phone, msg, delay = null, jitter = true) {
+async function enviarSeguro(phone, msg, delay = null, jitter = true, transport = enviarConDelay) {
     if (!msg || !phone) return;
     if (jitter) await new Promise(r => setTimeout(r, Math.random() * 400));
-    await enviarConDelay(phone, msg, delay);
+    return await transport(phone, msg, delay);
 }
 
 async function limpiarSesion(phone) { await limpiarSesionDB(phone); }
@@ -208,7 +212,7 @@ async function limpiarSesion(phone) { await limpiarSesionDB(phone); }
 module.exports = {
     DOS_HORAS,
     getPIXKey, getPIXHolder, getPIXBank, getPIXImage, getAdminPhone, getEntregaContactPhone, getPIXAliases,
-    destinatariosInternosEntregas,
+    destinatariosInternosEntregas, destinatariosInternosEntregasDetallados,
     gatilhos, palabrasNegocio, triggersCubaBrasil, confirmaOperacion,
     CIERRES_COT, CIERRES_COT_PT,
     CONFIRMA_TARJETA_SIN_MONTO, CONFIRMA_TARJETA_SIN_MONTO_PT,

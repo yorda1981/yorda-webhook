@@ -7,6 +7,8 @@ const operations = require("../src/services/operations");
 const entregas = require("../src/services/entregas");
 const { finalizarEntrega } = require("../src/services/entregas-coordinator");
 const { mensajeCompletarOperacion } = require("../src/services/operation-messages");
+const env = require("../src/config/env");
+const { destinatariosInternosEntregas } = require("../src/flows/shared");
 
 test("Transferencia conserva su transición general y su mensaje normal", async (t) => {
     t.mock.method(pool, "query", async () => ({ rows: [{ id: 1, tipo: "brl_cup", status: "completada" }] }));
@@ -121,6 +123,37 @@ test("fallo al notificar UN destinatario interno no duplica el otro ni afecta el
     assert.equal(mensajes.filter(m => m.phone === "5511999").length, 1);
     assert.equal(mensajes.filter(m => m.phone === "5491179017718").length, 1, "el otro destinatario interno igual recibe su aviso");
     assert.equal(mensajes.filter(m => m.phone === "5533111").length, 0);
+});
+
+test("fallo del admin no impide el aviso al contacto y deja ambos resultados auditables sin teléfono completo", async () => {
+    const lineas = [];
+    const errores = [];
+    const original = console.log;
+    const originalError = console.error;
+    console.log = linea => lineas.push(linea);
+    console.error = linea => errores.push(String(linea));
+    try {
+        const deps = {
+            marcarEntregado: async () => ENTREGA_BASE,
+            enviarSeguro: async (phone) => phone === "5533111" ? false : true,
+            destinatariosInternosEntregas: () => ["5533111", "5491179017718"]
+        };
+        await finalizarEntrega(10, "Panel", deps);
+    } finally { console.log = original; console.error = originalError; }
+    const avisos = lineas.map(x => { try { return JSON.parse(x); } catch { return null; } })
+        .filter(x => x?.evento === "DELIVERY_INTERNAL_NOTIFICATION");
+    assert.deepEqual(avisos.map(x => [x.rol, x.resultado]), [["ADMIN", "FALLO"], ["ENTREGA_CONTACT", "EXITO"]]);
+    assert.ok(avisos.every(x => !x.phone.includes("5533111") && !x.phone.includes("5491179017718")));
+    assert.ok(errores.every(x => !x.includes("5533111") && !x.includes("5491179017718")));
+});
+
+test("sin ENTREGA_CONTACT_PHONE no usa fallback y solo conserva al admin", () => {
+    const anterior = env.ENTREGA_CONTACT_PHONE;
+    try {
+        env.ADMIN_PHONE = "5533111";
+        env.ENTREGA_CONTACT_PHONE = null;
+        assert.deepEqual(destinatariosInternosEntregas(), ["5533111"]);
+    } finally { env.ENTREGA_CONTACT_PHONE = anterior; }
 });
 
 test("CANCELADO sincroniza la operation como rechazada y queda fuera de avisos pendientes", async (t) => {

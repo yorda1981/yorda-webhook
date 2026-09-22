@@ -15,6 +15,11 @@ module.exports = {
     // Contacto en Cuba encargado de realizar las entregas en efectivo —
     // recibe la misma notificación/ID que el admin cuando se crea una
     // entrega nueva (CRM de Entregas). Configurable por variable de
-    // entorno; si no está seteada, usa el número confirmado por Yordanys.
-    ENTREGA_CONTACT_PHONE: process.env.ENTREGA_CONTACT_PHONE || "5491179017718"
+    // Entorno: no hay fallback seguro para este destinatario. Si falta,
+    // el CRM avisará únicamente al admin y dejará la ausencia visible.
+    ENTREGA_CONTACT_PHONE: process.env.ENTREGA_CONTACT_PHONE || null
 };
+
+if (!module.exports.ENTREGA_CONTACT_PHONE) {
+    console.warn("⚠️ ENTREGA_CONTACT_PHONE no configurado: no se enviarán avisos al contacto de Entregas");
+}
