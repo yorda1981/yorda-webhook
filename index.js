@@ -121,6 +121,9 @@ const mapaLidATelefono   = new Map();
                 codigo           VARCHAR(20) UNIQUE NOT NULL,
                 cantidad_enviada NUMERIC,
                 moneda_pago      VARCHAR(20),
+                frete_usdt       NUMERIC NOT NULL DEFAULT 0 CHECK (frete_usdt >= 0),
+                subtotal_usdt    NUMERIC CHECK (subtotal_usdt IS NULL OR subtotal_usdt >= 0),
+                total_usdt       NUMERIC CHECK (total_usdt IS NULL OR total_usdt >= 0),
                 fecha            DATE,
                 txid             VARCHAR(150),
                 observacion      TEXT,
@@ -674,28 +677,18 @@ app.post("/admin/entregas/:id/cancelar", adminWriteLimiter, verificarTokenEntreg
 });
 
 // Pago al contacto en Cuba — individual o agrupado (varias entregas a la vez).
-// Puramente histórico: NO calcula ni convierte monedas, solo guarda lo que
-// se le pasa. Solo afecta entregas que realmente están PENDIENTE_DE_PAGO.
+// Registra el pago agrupado y, tras el COMMIT exitoso, envía un comprobante
+// interno construido desde los valores recalculados/persistidos por backend.
 app.post("/admin/entregas/pago", adminWriteLimiter, verificarTokenEntregas, async (req, res) => {
     try {
-        const { entregaIds, cantidadEnviada, monedaPago, fecha, txid, observacion } = req.body;
+        const { entregaIds, cantidadEnviada, monedaPago, freteUsdt, fecha, txid, observacion } = req.body;
         if (!Array.isArray(entregaIds) || entregaIds.length === 0) {
             return res.status(400).json({ success: false, error: "Debes indicar al menos una entrega (entregaIds)" });
         }
-        const resultado = await entregasService.registrarPago(entregaIds, { cantidadEnviada, monedaPago, fecha, txid, observacion });
+        const resultado = await entregasService.registrarPago(entregaIds, { cantidadEnviada, monedaPago, freteUsdt, fecha, txid, observacion });
         if (!resultado) return res.status(500).json({ success: false, error: "No se pudo registrar el pago" });
 
-        // Aviso a tu número — mismo motivo que en "entregado": que te enteres
-        // aunque el registro lo haga tu compañera.
-        try {
-            const codigos = resultado.entregas.map(e => e.codigo).join(", ") || "—";
-            await enviarSeguro(getAdminPhone(),
-                `💵 Pago ${resultado.pago.codigo} registrado.\n\n` +
-                `Entregas incluidas: ${codigos}\n` +
-                (resultado.pago.cantidad_enviada ? `Cantidad enviada: ${resultado.pago.cantidad_enviada} ${resultado.pago.moneda_pago || ""}\n` : "") +
-                `Estado: PAGADO`
-            );
-        } catch (e) { console.error("⚠️ No se pudo notificar pago registrado:", e.message); }
+        await entregasCoordinator.notificarComprobantePago(resultado);
 
         res.json({ success: true, ...resultado });
     } catch (e) { res.status(500).json({ success: false, error: e.message }); }

@@ -351,8 +351,14 @@
                         <input type="number" id="entTasaUsdtUsd" step="any" style="display:block;background:#161b2e;border:1px solid #2d355a;padding:8px 10px;border-radius:8px;color:white;font-size:13px;outline:none;width:130px;margin-top:4px;">
                     </label>
                     <button class="page-btn" style="align-self:flex-end;" onclick="guardarTasaUsdt()">💾 Guardar tasa</button>
-                    <small id="entTasaUsdtInfo" style="color:#8b949e;"></small>
-                </div>
+                <small id="entTasaUsdtInfo" style="color:#8b949e;"></small>
+            </div>
+            <div style="background:#0b0e1a;border-radius:12px;padding:14px 16px;border:1px solid #2d355a;margin-bottom:14px;display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;">
+                <label style="font-size:12px;color:#8b949e;">Frete (USDT)
+                    <input type="number" id="entFreteUsdt" min="0" step="any" value="0" oninput="actualizarResumenPago()" style="display:block;background:#161b2e;border:1px solid #2d355a;padding:8px 10px;border-radius:8px;color:white;font-size:13px;outline:none;width:130px;margin-top:4px;">
+                </label>
+                <div id="entResumenPago" style="font-size:13px;color:#dbeafe;line-height:1.6;">Entregas: 0 USDT + Frete: 0 USDT = <strong>Total a pagar: 0 USDT</strong></div>
+            </div>
 
                 <div style="margin-bottom:14px;">
                     <button class="btn-limpiar" style="background:#8b5cf6;" onclick="toggleEntregaManual()">➕ Nueva entrega manual</button>
@@ -433,9 +439,11 @@
                 </div>
 
                 <div style="display:flex; gap:10px; align-items:center; margin-bottom:14px;">
-                    <input type="text" id="entPagoCodigo" placeholder="Reabrir pago agrupado (ej: P-003)" style="background:#0b0e1a;border:1px solid #2d355a;padding:10px 14px;border-radius:10px;color:white;font-size:13px;outline:none; max-width:260px;">
-                    <button class="page-btn" onclick="verPagoAgrupado()">🔍 Ver pago</button>
-                </div>
+                <input type="text" id="entPagoCodigo" placeholder="Reabrir pago agrupado (ej: P-003)" style="background:#0b0e1a;border:1px solid #2d355a;padding:10px 14px;border-radius:10px;color:white;font-size:13px;outline:none; max-width:260px;">
+                <button class="page-btn" onclick="verPagoAgrupado()">🔍 Ver pago</button>
+                <button class="page-btn" id="btnCopiarComprobante" onclick="copiarComprobantePago()" disabled>📋 Copiar comprobante</button>
+                <small id="entPagoFeedback" style="color:#4ade80;"></small>
+            </div>
 
                 <div class="table-wrapper">
                     <table>
@@ -1554,6 +1562,7 @@
                 const data = await res.json();
                 info.innerText = data.success ? "✅ Guardada" : "❌ " + (data.error || "Error");
             } catch (e) { info.innerText = "❌ Error de conexión"; }
+            actualizarResumenPago();
             setTimeout(() => { info.innerText = ""; }, 3000);
         }
 
@@ -1597,6 +1606,7 @@
                 entregasActuales = Array.isArray(lista) ? lista : [];
                 renderEntregasStats(stats);
                 renderTablaEntregas(entregasActuales);
+                actualizarResumenPago();
             } catch (e) { console.error("❌ Error cargando entregas:", e); }
         }
 
@@ -1682,6 +1692,8 @@
                     <td>${acciones}</td>
                 </tr>`;
             }).join("");
+            tbody.querySelectorAll(".entregaCheckbox").forEach(cb => cb.addEventListener("change", actualizarResumenPago));
+            actualizarResumenPago();
         }
 
         async function entregaMarcarEntregado(id, btn) {
@@ -1720,6 +1732,28 @@
 
         // Registro de pago al contacto — puramente histórico. No calcula ni
         // convierte nada, solo guarda lo que se ingresa.
+        function calcularSubtotalPagoSeleccionado(ids) {
+            const seleccionadas = entregasActuales.filter(e => ids.includes(e.id) && e.estado_pago === "PENDIENTE_DE_PAGO" && e.estado_entrega === "ENTREGADO");
+            const tasaCup = Number(document.getElementById("entTasaUsdtCup")?.value || 0);
+            const tasaUsd = Number(document.getElementById("entTasaUsdtUsd")?.value || 0);
+            let subtotal = 0;
+            for (const e of seleccionadas) {
+                const tasa = e.moneda === "CUP" ? tasaCup : e.moneda === "USD" ? tasaUsd : 0;
+                if (tasa > 0) subtotal += Number(e.cantidad) / tasa;
+            }
+            return Number(subtotal.toFixed(2));
+        }
+
+        function actualizarResumenPago() {
+            const ids = [...document.querySelectorAll(".entregaCheckbox:checked")].map(cb => Number(cb.dataset.id));
+            const subtotal = calcularSubtotalPagoSeleccionado(ids);
+            const frete = Number(document.getElementById("entFreteUsdt")?.value || 0);
+            const freteValido = Number.isFinite(frete) && frete >= 0;
+            const total = freteValido ? Number((subtotal + frete).toFixed(2)) : subtotal;
+            const el = document.getElementById("entResumenPago");
+            if (el) el.innerHTML = `Entregas: ${subtotal.toLocaleString("es-ES", { maximumFractionDigits: 2 })} USDT + Frete: ${freteValido ? frete.toLocaleString("es-ES", { maximumFractionDigits: 2 }) : "—"} USDT = <strong>Total a pagar: ${total.toLocaleString("es-ES", { maximumFractionDigits: 2 })} USDT</strong>`;
+        }
+
         async function promptYRegistrarPago(ids) {
             if (!ids || ids.length === 0) {
                 alert("Selecciona al menos una entrega en estado PENDIENTE DE PAGO (o usa el botón PAGAR de una fila).");
@@ -1729,31 +1763,11 @@
             // Suma lo que hay que pagar (por moneda) de las entregas seleccionadas
             // y sugiere el equivalente en USDT con la tasa configurada arriba —
             // es solo una sugerencia, se puede editar antes de confirmar.
-            const seleccionadas = entregasActuales.filter(e => ids.includes(e.id));
-            const totalCup = seleccionadas.filter(e => e.moneda === "CUP").reduce((s, e) => s + Number(e.cantidad), 0);
-            const totalUsd = seleccionadas.filter(e => e.moneda === "USD").reduce((s, e) => s + Number(e.cantidad), 0);
-            const tasaCup  = Number(document.getElementById("entTasaUsdtCup")?.value || 0);
-            const tasaUsd  = Number(document.getElementById("entTasaUsdtUsd")?.value || 0);
-
-            let sugeridoUsdt = 0;
-            if (totalCup > 0 && tasaCup > 0) sugeridoUsdt += totalCup / tasaCup;
-            if (totalUsd > 0 && tasaUsd > 0) sugeridoUsdt += totalUsd / tasaUsd;
-            sugeridoUsdt = sugeridoUsdt ? Number(sugeridoUsdt.toFixed(2)) : "";
-
-            const partes = [];
-            if (totalCup) partes.push("CUP " + totalCup.toLocaleString("es-ES"));
-            if (totalUsd) partes.push("USD " + totalUsd.toLocaleString("es-ES"));
-            const resumen = partes.length ? `Total a pagar: ${partes.join(" + ")}` : "";
-
-            const cantidadEnviada = prompt(
-                `Registrar pago para ${ids.length} entrega(s).` +
-                (resumen ? `\n${resumen}` : "") +
-                (sugeridoUsdt ? `\nSugerido: ${sugeridoUsdt} USDT (según la tasa configurada arriba — puedes cambiarlo)` : "") +
-                `\n\nCantidad enviada:`,
-                sugeridoUsdt || ""
-            );
-            if (cantidadEnviada === null) return; // canceló
-            const monedaPago  = prompt("Moneda del pago (ej: USDT, USD, CUP) — opcional:", sugeridoUsdt ? "USDT" : "") || "";
+            const subtotal = calcularSubtotalPagoSeleccionado(ids);
+            const freteUsdt = Number(document.getElementById("entFreteUsdt")?.value || 0);
+            if (!Number.isFinite(freteUsdt) || freteUsdt < 0) { alert("❌ El frete debe ser un número mayor o igual a 0"); return; }
+            const totalUsdt = Number((subtotal + freteUsdt).toFixed(2));
+            if (!confirm(`Entregas: ${subtotal} USDT\nFrete: ${freteUsdt} USDT\nTOTAL A PAGAR: ${totalUsdt} USDT\n\n¿Registrar este pago?`)) return;
             const fecha       = prompt("Fecha del pago (AAAA-MM-DD) — opcional, por defecto hoy:") || null;
             const txid        = prompt("TxID / referencia (opcional):") || "";
             const observacion = prompt("Observación (opcional):") || "";
@@ -1764,14 +1778,16 @@
                     headers: authH(),
                     body: JSON.stringify({
                         entregaIds: ids,
-                        cantidadEnviada: cantidadEnviada ? Number(cantidadEnviada) : null,
-                        monedaPago, fecha, txid, observacion
+                        cantidadEnviada: totalUsdt,
+                        monedaPago: "USDT", freteUsdt, fecha, txid, observacion
                     })
                 });
                 const data = await res.json();
                 if (data.success) {
                     alert(`✅ Pago ${data.pago.codigo} registrado — ${data.entregas.length} entrega(s) marcada(s) como PAGADO.`);
                     cargarEntregas();
+                    document.getElementById("entFreteUsdt").value = "0";
+                    actualizarResumenPago();
                 } else {
                     alert("❌ Error registrando el pago: " + (data.error || "desconocido"));
                 }
@@ -1790,6 +1806,34 @@
         }
 
         // Reabrir un pago (P-008) y ver exactamente qué entregas incluyó (sección 7 del CRM).
+        let pagoVisualizado = null;
+
+        function comprobanteTextoParaCopiar(pago) {
+            if (!pago || pago.subtotal_usdt == null || pago.total_usdt == null) return "";
+            const fecha = pago.fecha ? new Date(`${pago.fecha}T00:00:00`).toLocaleDateString("es-ES") : "—";
+            const entregas = (pago.entregas || []).map(e => e.codigo).join(", ") || "—";
+            return `COMPROBANTE DE PAGO — ENTREGAS\n\n` +
+                `Pago: ${pago.codigo}\nFecha: ${fecha}\nEntregas: ${entregas}\nCantidad: ${(pago.entregas || []).length}\n\n` +
+                `Subtotal entregas: ${Number(pago.subtotal_usdt).toFixed(2)} USDT\n` +
+                `Frete: ${Number(pago.frete_usdt || 0).toFixed(2)} USDT\n` +
+                `TOTAL PAGADO: ${Number(pago.total_usdt).toFixed(2)} USDT\n\nEstado: PAGADO`;
+        }
+
+        async function copiarComprobantePago() {
+            const texto = comprobanteTextoParaCopiar(pagoVisualizado);
+            if (!texto) return;
+            const feedback = document.getElementById("entPagoFeedback");
+            try {
+                await navigator.clipboard.writeText(texto);
+                feedback.innerText = "Comprobante copiado";
+                setTimeout(() => { feedback.innerText = ""; }, 2500);
+            } catch (e) {
+                feedback.style.color = "var(--red)";
+                feedback.innerText = "No se pudo copiar";
+                setTimeout(() => { feedback.innerText = ""; feedback.style.color = "var(--green)"; }, 3000);
+            }
+        }
+
         async function verPagoAgrupado() {
             const codigo = document.getElementById("entPagoCodigo").value.trim();
             if (!codigo) { alert("Escribe el código del pago (ej: P-003)"); return; }
@@ -1797,10 +1841,17 @@
                 const res = await fetch(`/admin/entregas/pago/${encodeURIComponent(codigo)}`, { headers: authH() });
                 if (res.status === 404) { alert(`No se encontró el pago ${codigo}`); return; }
                 const pago = await res.json();
+                pagoVisualizado = pago;
+                const desgloseDisponible = pago.subtotal_usdt != null && pago.total_usdt != null;
+                document.getElementById("btnCopiarComprobante").disabled = !desgloseDisponible;
+                document.getElementById("entPagoFeedback").innerText = desgloseDisponible ? "Comprobante listo para copiar" : "Desglose no disponible";
                 const detalle = pago.entregas.map(e => `• ${e.codigo} — ${Number(e.cantidad).toLocaleString("es-ES")} ${e.moneda}`).join("\n");
                 alert(
                     `💵 Pago ${pago.codigo}\n` +
                     (pago.cantidad_enviada ? `Cantidad enviada: ${pago.cantidad_enviada} ${pago.moneda_pago || ""}\n` : "") +
+                    (pago.subtotal_usdt != null && pago.total_usdt != null
+                        ? `Subtotal entregas: ${pago.subtotal_usdt} USDT\nFrete: ${pago.frete_usdt} USDT\nTotal pagado: ${pago.total_usdt} USDT\n`
+                        : "Desglose de frete no disponible para este pago histórico.\n") +
                     (pago.fecha ? `Fecha: ${new Date(pago.fecha).toLocaleDateString("pt-BR")}\n` : "") +
                     (pago.txid ? `TxID: ${pago.txid}\n` : "") +
                     (pago.observacion ? `Observación: ${pago.observacion}\n` : "") +

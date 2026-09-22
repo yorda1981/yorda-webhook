@@ -4,6 +4,53 @@ const entregas = require("./entregas");
 const { enviarSeguro, destinatariosInternosEntregas, destinatariosInternosEntregasDetallados } = require("../flows/shared");
 const { log, enmascararTelefono } = require("../utils/structured-logger");
 
+function mensajeComprobantePago(resultado) {
+    const pago = resultado?.pago || {};
+    const entregasPagadas = Array.isArray(resultado?.entregas) ? resultado.entregas : [];
+    const codigos = entregasPagadas.map(e => e.codigo).join(", ") || "—";
+    return `💵 *COMPROBANTE DE PAGO ${pago.codigo || "—"}*\n\n` +
+        `📅 *Fecha:* ${pago.fecha || "—"}\n` +
+        `📦 *Entregas:* ${codigos}\n` +
+        `🔢 *Cantidad:* ${entregasPagadas.length}\n` +
+        `📊 *Subtotal entregas:* ${pago.subtotal_usdt} USDT\n` +
+        `🚚 *Frete:* ${pago.frete_usdt} USDT\n` +
+        `💰 *TOTAL PAGADO:* ${pago.total_usdt} USDT\n\n` +
+        `Estado: PAGADO`;
+}
+
+async function notificarComprobantePago(resultado, deps = {}) {
+    const enviar = deps.enviarSeguro || enviarSeguro;
+    const detallados = deps.destinatariosInternosEntregasDetallados || destinatariosInternosEntregasDetallados;
+    if (resultado?.pago?.subtotal_usdt == null || resultado?.pago?.total_usdt == null) {
+        console.warn(`⚠️ No se envía comprobante desglosado para pago histórico ${resultado?.pago?.codigo || "—"}`);
+        return;
+    }
+    const mensaje = mensajeComprobantePago(resultado);
+    for (const { phone, rol } of detallados()) {
+        try {
+            const ok = await enviar(phone, mensaje);
+            if (ok === false) throw new Error("Z-API devolvió fallo");
+            log("DELIVERY_PAYMENT_RECEIPT", {
+                pagoId: resultado?.pago?.id,
+                codigo: resultado?.pago?.codigo,
+                rol,
+                phone,
+                resultado: "EXITO"
+            });
+        } catch (e) {
+            log("DELIVERY_PAYMENT_RECEIPT", {
+                pagoId: resultado?.pago?.id,
+                codigo: resultado?.pago?.codigo,
+                rol,
+                phone,
+                resultado: "FALLO",
+                error: e.message
+            });
+            console.error(`⚠️ No se pudo enviar comprobante de pago ${resultado?.pago?.codigo || "—"} a ${enmascararTelefono(phone)}:`, e.message);
+        }
+    }
+}
+
 // Único punto de finalización de una entrega de efectivo. La transición
 // transaccional ocurre primero; si un retry/doble clic llega después,
 // marcarEntregado devuelve null y no se emite ningún WhatsApp (ni al
@@ -60,4 +107,4 @@ async function finalizarEntrega(id, usuario, deps = {}) {
     return { entrega, notificado };
 }
 
-module.exports = { finalizarEntrega };
+module.exports = { finalizarEntrega, mensajeComprobantePago, notificarComprobantePago };

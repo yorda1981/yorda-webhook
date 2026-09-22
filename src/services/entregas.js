@@ -13,9 +13,8 @@
 //     de PostgreSQL — nunca se recalcula ni se reutiliza.
 //   - La fecha de creación nunca se modifica.
 //   - Estado de entrega y estado de pago son independientes entre sí.
-//   - NUNCA se calcula automáticamente cuánto pagar al contacto, ni se
-//     convierte CUP/USD a USDT, ni se fija una tasa. El pago es
-//     puramente un registro histórico que el usuario llena a mano.
+//   - Los pagos nuevos calculan CUP/USD a USDT con las tasas guardadas y
+//     suman el frete ingresado; los pagos históricos sin desglose se conservan.
 //   - El envejecimiento (días pendiente) nunca cambia el estado solo.
 // ─────────────────────────────────────────────────────────
 
@@ -325,12 +324,9 @@ async function marcarCancelado(id, motivo) {
 // =====================
 // PAGO AL CONTACTO (individual o agrupado)
 // =====================
-// IMPORTANTE: esto es un registro histórico puro. Nunca valida ni
-// calcula si "cantidadEnviada" corresponde a las cantidades entregadas,
-// nunca convierte moneda, nunca fija una tasa. Solo entregas que están
-// realmente en PENDIENTE_DE_PAGO se marcan como PAGADO — un ID que no
-// califica (ya pagado, cancelado o aún no entregado) se ignora en
-// silencio en vez de forzarlo.
+// El flujo nuevo (freteUsdt presente) calcula y persiste el desglose dentro
+// de la misma transacción. Se conserva la ruta legacy para compatibilidad
+// con llamadas antiguas que no envían freteUsdt.
 async function registrarPago(entregaIds, datos = {}) {
     if (!Array.isArray(entregaIds) || entregaIds.length === 0) return null;
     const client = await pool.connect();
@@ -340,17 +336,61 @@ async function registrarPago(entregaIds, datos = {}) {
         const seq = await client.query("SELECT nextval('entregas_pago_codigo_seq') AS n");
         const codigo = `P-${String(seq.rows[0].n).padStart(3, "0")}`;
 
+        const flujoConDesglose = Object.prototype.hasOwnProperty.call(datos, "freteUsdt");
+        let subtotalUsdt = null;
+        let freteUsdt = null;
+        let totalUsdt = null;
+        let cantidadEnviada = datos.cantidadEnviada != null ? Number(datos.cantidadEnviada) : null;
+        let monedaPago = datos.monedaPago || null;
+
+        if (flujoConDesglose) {
+            const freteEntradaValida = (typeof datos.freteUsdt === "number" || typeof datos.freteUsdt === "string") && String(datos.freteUsdt).trim() !== "";
+            freteUsdt = Number(datos.freteUsdt);
+            if (!freteEntradaValida || !Number.isFinite(freteUsdt) || freteUsdt < 0) {
+                await client.query("ROLLBACK");
+                return null;
+            }
+            const entregasResult = await client.query(`
+                SELECT id, cantidad, moneda
+                FROM entregas
+                WHERE id = ANY($1::int[]) AND estado_pago = 'PENDIENTE_DE_PAGO'
+                FOR UPDATE
+            `, [entregaIds]);
+            if (entregasResult.rows.length === 0) {
+                await client.query("ROLLBACK");
+                return null;
+            }
+            const tasasResult = await client.query("SELECT tasa_usdt_cup, tasa_usdt_usd FROM entregas_tasas WHERE id = 1");
+            const tasas = tasasResult.rows[0] || {};
+            const tasaCup = Number(tasas.tasa_usdt_cup || 0);
+            const tasaUsd = Number(tasas.tasa_usdt_usd || 0);
+            let subtotal = 0;
+            for (const entrega of entregasResult.rows) {
+                const cantidad = Number(entrega.cantidad);
+                const tasa = entrega.moneda === "CUP" ? tasaCup : entrega.moneda === "USD" ? tasaUsd : 0;
+                if (!Number.isFinite(cantidad) || cantidad < 0 || !Number.isFinite(tasa) || tasa <= 0) {
+                    await client.query("ROLLBACK");
+                    return null;
+                }
+                subtotal += cantidad / tasa;
+            }
+            subtotalUsdt = Number(subtotal.toFixed(2));
+            totalUsdt = Number((subtotalUsdt + freteUsdt).toFixed(2));
+            cantidadEnviada = totalUsdt;
+            monedaPago = "USDT";
+        }
+
         const pagoResult = await client.query(`
-            INSERT INTO entregas_pagos (codigo, cantidad_enviada, moneda_pago, fecha, txid, observacion)
-            VALUES ($1,$2,$3,$4,$5,$6)
+            INSERT INTO entregas_pagos (
+                codigo, cantidad_enviada, moneda_pago, frete_usdt, subtotal_usdt, total_usdt,
+                fecha, txid, observacion
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
             RETURNING *
         `, [
-            codigo,
-            datos.cantidadEnviada != null ? Number(datos.cantidadEnviada) : null,
-            datos.monedaPago   || null,
-            datos.fecha        || new Date(),
-            datos.txid         || null,
-            datos.observacion  || null
+            codigo, cantidadEnviada, monedaPago,
+            flujoConDesglose ? freteUsdt : 0,
+            subtotalUsdt, totalUsdt,
+            datos.fecha || new Date(), datos.txid || null, datos.observacion || null
         ]);
         const pago = pagoResult.rows[0];
 
@@ -538,10 +578,8 @@ async function marcarAvisoAtrasoEnviado(ids) {
 // TASA USDT (sección 6 del CRM — ayuda de cálculo)
 // =====================
 // Tasa que Yordanys o su compañera configuran ellos mismos (cuánto CUP y
-// cuánto USD equivalen a 1 USDT), SOLO para sugerir el monto en USDT al
-// registrar un pago — nunca se aplica sola ni se guarda como definitiva:
-// el campo de "cantidad enviada" en registrarPago sigue siendo editable
-// a mano, tal como pide la regla dura de "registro histórico puro".
+// cuánto USD equivalen a 1 USDT), para calcular el subtotal de entregas al
+// registrar pagos nuevos. Las tasas no se modifican durante el registro.
 async function obtenerTasasUsdt() {
     try {
         const result = await pool.query("SELECT * FROM entregas_tasas WHERE id = 1");

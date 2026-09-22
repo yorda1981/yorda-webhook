@@ -123,3 +123,64 @@ test("registrarPago: error de DB -> ROLLBACK y null, nunca deja el pago a medias
     assert.equal(resultado, null);
     assert.equal(seHizoRollback, true);
 });
+
+function mockPagoConDesglose(t, { entregas = [{ id: 1, cantidad: 15000, moneda: "CUP" }], tasas = { tasa_usdt_cup: 100, tasa_usdt_usd: 1 }, fallaInsert = false } = {}) {
+    const sqls = [];
+    const client = {
+        query: async (sql, params = []) => {
+            sqls.push({ sql, params });
+            if (sql === "BEGIN" || sql === "COMMIT" || sql === "ROLLBACK") return { rows: [] };
+            if (/nextval/.test(sql)) return { rows: [{ n: 8 }] };
+            if (/SELECT id, cantidad, moneda/.test(sql)) return { rows: entregas };
+            if (/SELECT tasa_usdt_cup/.test(sql)) return { rows: [tasas] };
+            if (/INSERT INTO entregas_pagos/.test(sql)) {
+                if (fallaInsert) throw new Error("insert caído");
+                return { rows: [{ id: 88, codigo: "P-008", cantidad_enviada: params[1], moneda_pago: params[2], frete_usdt: params[3], subtotal_usdt: params[4], total_usdt: params[5] }] };
+            }
+            if (/UPDATE entregas/.test(sql)) return { rows: entregas };
+            return { rows: [] };
+        },
+        release: () => {}
+    };
+    t.mock.method(pool, "connect", async () => client);
+    t.mock.method(pool, "query", async () => ({ rows: [] }));
+    return sqls;
+}
+
+test("registrarPago nuevo: CUP + frete entero persiste subtotal, frete y total calculados por backend", async (t) => {
+    const sqls = mockPagoConDesglose(t, { entregas: [{ id: 1, cantidad: 15000, moneda: "CUP" }], tasas: { tasa_usdt_cup: 100, tasa_usdt_usd: 1 } });
+    const r = await registrarPago([1], { freteUsdt: 5, cantidadEnviada: 9999, monedaPago: "USD" });
+    assert.equal(r.pago.subtotal_usdt, 150);
+    assert.equal(r.pago.frete_usdt, 5);
+    assert.equal(r.pago.total_usdt, 155);
+    assert.equal(r.pago.cantidad_enviada, 155);
+    assert.equal(r.pago.moneda_pago, "USDT");
+    const insert = sqls.find(x => /INSERT INTO entregas_pagos/.test(x.sql));
+    assert.deepEqual(insert.params.slice(3, 6), [5, 150, 155]);
+});
+
+test("registrarPago nuevo: USD y combinación CUP+USD usan sus tasas y solo filas elegibles", async (t) => {
+    mockPagoConDesglose(t, {
+        entregas: [{ id: 1, cantidad: 300, moneda: "USD" }, { id: 2, cantidad: 10000, moneda: "CUP" }],
+        tasas: { tasa_usdt_cup: 100, tasa_usdt_usd: 2 }
+    });
+    const r = await registrarPago([1, 2, 99], { freteUsdt: 0.25 });
+    assert.equal(r.pago.subtotal_usdt, 250);
+    assert.equal(r.pago.total_usdt, 250.25);
+    assert.equal(r.entregas.length, 2);
+});
+
+test("registrarPago nuevo: frete negativo, texto, NaN e infinito se rechazan sin actualizar entregas", async (t) => {
+    for (const frete of [-1, "texto", "NaN", "Infinity"]) {
+        const sqls = mockPagoConDesglose(t);
+        assert.equal(await registrarPago([1], { freteUsdt: frete }), null, `frete inválido: ${frete}`);
+        assert.equal(sqls.some(x => /UPDATE entregas/.test(x.sql)), false);
+    }
+});
+
+test("registrarPago nuevo: fallo de persistencia hace rollback y no cambia estados", async (t) => {
+    const sqls = mockPagoConDesglose(t, { fallaInsert: true });
+    assert.equal(await registrarPago([1], { freteUsdt: 5 }), null);
+    assert.equal(sqls.some(x => /UPDATE entregas/.test(x.sql)), false);
+    assert.ok(sqls.some(x => x.sql === "ROLLBACK"));
+});
