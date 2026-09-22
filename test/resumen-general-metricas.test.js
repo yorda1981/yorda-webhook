@@ -147,7 +147,8 @@ test("Los bloques del dashboard comparten colapsado visual persistente", () => {
     assert.match(html, /aria-controls/);
     assert.match(html, /dashboard-section-collapsed/);
     assert.match(html, /let cerrado = false;/);
-    assert.match(html, /localStorage\.getItem\(key\) === "1"/);
+    assert.match(html, /const visual = localStorage\.getItem\(key\)/);
+    assert.match(html, /visual === "1"/);
 });
 
 test("las etiquetas de teléfonos distinguen cliente/pagador y receptor sin cambiar ids", () => {

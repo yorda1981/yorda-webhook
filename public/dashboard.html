@@ -1467,7 +1467,7 @@
                 };
                 control.addEventListener("click", event => { event.stopPropagation(); alternar(); });
                 encabezado.addEventListener("click", event => {
-                    if (event.target.closest("button, a, input, select, textarea")) return;
+                    if (event?.target?.closest?.("button, a, input, select, textarea")) return;
                     alternar();
                 });
                 actualizar();
@@ -1485,10 +1485,21 @@
                 vipControl.setAttribute("aria-label", "Contraer o expandir Programa VIP");
                 vipHeader.appendChild(vipControl);
                 const key = "dashboard.collapsed.programa-vip";
-                let cerrado = false;
-                try { cerrado = localStorage.getItem(key) === "1"; } catch (e) {}
+                const vipChevron = document.getElementById("chevVip");
+                let cerrado = true;
+                try {
+                    const visual = localStorage.getItem(key);
+                    cerrado = visual === null
+                        ? sessionStorage.getItem("vipAbierto") !== "1"
+                        : visual === "1";
+                } catch (e) {}
                 const actualizarVip = () => {
-                    vipBody.classList.toggle("abierto", !cerrado);
+                    if (cerrado) vipBody.classList.remove("abierto");
+                    else vipBody.classList.add("abierto");
+                    if (vipChevron) {
+                        if (cerrado) vipChevron.classList.remove("abierto");
+                        else vipChevron.classList.add("abierto");
+                    }
                     vipHeader.setAttribute("aria-expanded", String(!cerrado));
                     vipControl.setAttribute("aria-expanded", String(!cerrado));
                     vipControl.textContent = cerrado ? "▸" : "▾";
@@ -1496,11 +1507,12 @@
                 const alternarVip = () => {
                     cerrado = !cerrado;
                     try { localStorage.setItem(key, cerrado ? "1" : "0"); } catch (e) {}
+                    try { sessionStorage.setItem("vipAbierto", cerrado ? "0" : "1"); } catch (e) {}
                     actualizarVip();
                 };
                 vipControl.addEventListener("click", event => { event.stopPropagation(); alternarVip(); });
                 vipHeader.addEventListener("click", event => {
-                    if (event.target.closest("button, a, input, select, textarea")) return;
+                    if (event?.target?.closest?.("button, a, input, select, textarea")) return;
                     alternarVip();
                 });
                 actualizarVip();

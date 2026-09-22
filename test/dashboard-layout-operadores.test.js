@@ -34,6 +34,7 @@ function makeElement(id) {
             toggle(c) { this._set.has(c) ? this._set.delete(c) : this._set.add(c); },
             contains(c) { return this._set.has(c); }
         },
+        setAttribute() {},
         addEventListener(evt, fn) { this._listeners = this._listeners || {}; this._listeners[evt] = fn; },
         click() { if (this._listeners?.click) this._listeners.click(); },
         appendChild() {},

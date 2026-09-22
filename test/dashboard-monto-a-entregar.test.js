@@ -26,7 +26,7 @@ function makeElement(id) {
     return {
         id, value: "", innerText: "", innerHTML: "", checked: false, disabled: false, style: {},
         classList: { _set: new Set(), add(c) { this._set.add(c); }, remove(c) { this._set.delete(c); }, toggle() {}, contains() { return false; } },
-        addEventListener() {}, appendChild() {}, querySelectorAll: () => []
+        setAttribute() {}, addEventListener() {}, appendChild() {}, querySelectorAll: () => []
     };
 }
 
@@ -38,6 +38,7 @@ function cargarDashboardSandbox() {
     const elements = new Map();
     const documentStub = {
         getElementById(id) { if (!elements.has(id)) elements.set(id, makeElement(id)); return elements.get(id); },
+        querySelectorAll() { return []; },
         addEventListener() {},
         createElement: () => makeElement("tmp")
     };

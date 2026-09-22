@@ -37,6 +37,7 @@ function makeElement(id) {
             toggle(c) { this._set.has(c) ? this._set.delete(c) : this._set.add(c); },
             contains(c) { return this._set.has(c); }
         },
+        setAttribute() {},
         options: [], // simula <select>.options.length usado por poblarProvinciasManual()
         appendChild(opt) { this.options.push(opt); this.innerHTML += `<option value="${opt.value}">${opt.textContent}</option>`; },
         addEventListener() {},
@@ -62,6 +63,7 @@ function cargarDashboardSandbox(fetchImpl, { token } = {}) {
             if (!elements.has(id)) elements.set(id, makeElement(id));
             return elements.get(id);
         },
+        querySelectorAll() { return []; },
         addEventListener() {},
         createElement: () => makeElement("tmp")
     };
