@@ -155,7 +155,7 @@ test("preview B: enviar reconstruye y registra exactamente familia+índice aprob
     const db = fakeDb(); let textoEnviado = null;
     const d = deps(db, { sendFn: async (_phone, texto) => { textoEnviado = texto; return true; } });
     const r = await enviarRecuperacionManual({ phone: "5511900000001", familia: "servicio_especifico", indice: 3, idempotencyKey: "k-preview-b" }, d);
-    assert.equal(r.ok, true); assert.equal(textoEnviado, r.texto); assert.equal(db.rows[0].texto, r.texto); assert.match(r.texto, /lo de aquel envío a CUP/);
+    assert.equal(r.ok, true); assert.equal(textoEnviado, r.texto); assert.equal(db.rows[0].texto, r.texto); assert.match(r.texto, /mandamos CUP\?/i);
 });
 
 test("cooldown menor de 24h bloquea, y después de 24h permite otro intento conservando historial", async () => {

@@ -31,26 +31,37 @@
 const { primerNombreConfiable } = require("./reglas-bot");
 
 // ── Frase de servicio -- mapeo cerrado, nunca inventa ──────────────────
-// Un tipo_favorito desconocido cae al genérico "aquel envío pa' Cuba" --
+// Un tipo_favorito desconocido cae al genérico "un envío" --
 // nunca se inventa un servicio que no está confirmado en el dato real.
 // Nota deliberada: efectivo dice explícitamente "entrega en efectivo" (no
 // "envío"/"transferencia") y recarga dice explícitamente "recarga" -- así
 // ninguna variante puede mezclar los conceptos aunque el texto genérico de
 // la familia hable de "envío".
 const FRASES_SERVICIO = {
-    brl_cup:               "aquel envío a CUP",
-    usd_clasica:            "aquellos USD",
-    usd_prepago:            "aquellos USD",
-    usd_pendiente_tipo:     "aquellos USD",
-    mlc:                    "aquellos MLC",
-    cup_efectivo:           "aquella entrega en efectivo (CUP)",
-    usd_efectivo:           "aquella entrega en efectivo (USD)",
-    recarga_nacional:       "aquella recarga",
-    recarga_internacional:  "aquella recarga"
+    brl_cup:               "un envío a CUP",
+    usd_clasica:           "un envío en USD",
+    usd_prepago:           "un envío en USD",
+    usd_pendiente_tipo:    "un envío en USD",
+    mlc:                   "un envío en MLC",
+    cup_efectivo:          "una entrega en efectivo (CUP)",
+    usd_efectivo:          "una entrega en efectivo (USD)",
+    recarga_nacional:      "una recarga",
+    recarga_internacional: "una recarga"
 };
 
 function fraseServicio(tipoFavorito) {
-    return FRASES_SERVICIO[tipoFavorito] || "aquel envío pa' Cuba";
+    return FRASES_SERVICIO[tipoFavorito] || "un envío";
+}
+
+// La familia servicio_especifico usa una forma hablada del dato ya resuelto;
+// no cambia el servicio, solo quita la redacción de ficha técnica.
+function fraseServicioConversacional(frase) {
+    const texto = String(frase || "un envío");
+    const efectivo = texto.match(/^una entrega en efectivo \((CUP|USD)\)$/);
+    if (efectivo) return `${efectivo[1]} en efectivo`;
+    const transferencia = texto.match(/^un envío (?:a|en) (CUP|USD|MLC)$/);
+    if (transferencia) return transferencia[1];
+    return texto;
 }
 
 // ── Tono por antigüedad -- más fino que el antiguedadDe() de
@@ -93,94 +104,84 @@ function antiguedadTono(fechaIntento, ahora = new Date()) {
 const FAMILIAS = {
     me_acorde: {
         variantes: [
-            (ctx) => `${ctx.nombre ? ctx.nombre + ", estaba" : "Estaba"} hablando con un colega aquí y me acordé de ti 😂\n¿qué pasó al final con ${ctx.servicio}?`,
-            (ctx) => `Se me vino a la mente lo de Cuba de la nada 😄`,
-            (ctx) => `¿Qué fue de ${ctx.servicio}?${ctx.nombre ? " " + ctx.nombre : ""} 😊`,
-            (ctx) => `Hoy alguien mencionó Cuba y pensé en lo de ${ctx.servicio}, que quedó pendiente.`,
-            (ctx) => `${ctx.nombre ? ctx.nombre + ", " : ""}me acordé de ti hoy 😄 ¿le damos a ${ctx.servicio}?`,
-            (ctx) => `Pasaba por aquí y me acordé de una cosita pendiente 😅\n¿la resolvemos?`,
-            (ctx) => ctx.nombre
-                ? `Justo hoy me acordé de ti, ${ctx.nombre} 😄 ¿le echamos otro vistazo a ${ctx.servicio}?`
-                : `Justo hoy me acordé de ti 😄 ¿le echamos otro vistazo a ${ctx.servicio}?`,
-            (ctx) => `Me acordé de lo de Cuba y dije: déjame escribir antes que se me olvide otra vez 😂`,
-            (ctx) => `${ctx.nombre ? ctx.nombre + ", " : ""}quedó pendiente lo de ${ctx.servicio} y se me quedó dando vueltas. ¿Cómo vamos con eso?`,
-            (ctx) => `Me acordé de ti 😊 ¿aquello de Cuba sigue en pie?`
+            (ctx) => `${ctx.nombre ? ctx.nombre + ", m" : "M"}e acordé de ti y pasé por aquí 😄`,
+            () => `Se me ocurrió saludarte hoy 😊`,
+            (ctx) => `${ctx.nombre ? ctx.nombre + ", ¿q" : "¿Q"}ué vuelta?`,
+            () => `Pasé por aquí y dije: voy a saludar.`,
+            (ctx) => `${ctx.nombre ? ctx.nombre + ", ¿" : "¿"}cómo va todo?`,
+            () => `Me acordé de ti esta mañana.`,
+            (ctx) => `${ctx.nombre ? ctx.nombre + ", ¿" : "¿"}todo bien por ahí?`,
+            () => `Hoy me acordé de ti 😂`,
+            () => `Te mando un saludo por aquí 😊`,
+            (ctx) => `${ctx.nombre ? ctx.nombre + ", ¿" : "¿"}hacemos un envío?`
         ]
     },
     dia_de_envio: {
         variantes: [
-            (ctx) => `${ctx.nombre ? ctx.nombre + ", ¿" : "¿"}tú sabes qué día es hoy? 😂\nDía de resolver ${ctx.servicio} 🇨🇺`,
-            (ctx) => `Hoy amaneció con cara de envío pa' Cuba 😂🇨🇺`,
-            (ctx) => `👀 ¿y ${ctx.servicio}?${ctx.nombre ? " " + ctx.nombre : ""} 😂`,
-            (ctx) => `Hoy tiene pinta de día de envío pa' Cuba 👀`,
-            (ctx) => `${ctx.nombre ? ctx.nombre + ", C" : "C"}uba está llamando 📞🇨🇺 ¿la atendemos hoy?`,
-            (ctx) => `Se me ocurrió justo hoy 😄\n¿lo hacemos de una vez?`,
-            (ctx) => `¿Qué vuelta${ctx.nombre ? ", " + ctx.nombre : ""}? 😄 ¿Resolvemos hoy lo de Cuba?`,
-            (ctx) => `Hoy pensé: día de resolver ${ctx.servicio} 😄`,
-            (ctx) => `${ctx.nombre ? ctx.nombre + ", " : ""}hoy tiene toda la pinta de ser el día ideal para ${ctx.servicio}, ¿tú qué dices?`
+            (ctx) => `${ctx.nombre ? ctx.nombre + ", b" : "B"}uenos días 😊 ¿cómo estás?`,
+            () => `Buen día 🌞 ¿cómo amaneciste?`,
+            (ctx) => `${ctx.nombre ? ctx.nombre + ", h" : "H"}oy podemos mandar algo.`,
+            () => `Buenos días. ¿Cómo está la cosa?`,
+            (ctx) => `Buen día${ctx.nombre ? " " + ctx.nombre : ""} ¿todo bien?`,
+            () => `Hoy está bonito el día 😄`,
+            (ctx) => `${ctx.nombre ? ctx.nombre + ", ¿" : "¿"}mandamos algo hoy?`,
+            (ctx) => `Buen día${ctx.nombre ? ", " + ctx.nombre : ""}, pasando a saludarte.`,
+            (ctx) => `¿Qué vuelta${ctx.nombre ? ", " + ctx.nombre : ""}? Hoy podemos hacer un envío.`
         ]
     },
-    // Deliberadamente SIN ninguna cifra de tasa NI ninguna valoración
-    // ("está buena"/"conviene aprovechar"/"anda interesante") -- el motor
-    // no recibe una tasa real del backend en esta fase, así que no hay
-    // nada que valorar honestamente. Solo curiosidad/gancho, nunca una
-    // afirmación financiera.
+    // El nombre histórico de esta familia se conserva por compatibilidad,
+    // pero sus variantes normales ya no afirman nada sobre tasas.
     tasa_curiosidad: {
         variantes: [
-            (ctx) => `${ctx.nombre ? ctx.nombre + ", " : ""}👀 ¿viste cómo está la tasa hoy?`,
-            (ctx) => `¿Ya miraste la tasa de hoy? 😄`,
-            (ctx) => `Estaba mirando la tasa y me acordé de ti${ctx.nombre ? ", " + ctx.nombre : ""} 😂`,
-            (ctx) => `${ctx.nombre ? ctx.nombre + " 👀 ¿l" : "¿L"}e echaste un vistazo a la tasa hoy?`,
-            (ctx) => ctx.nombre
-                ? `Hoy me dio por mirar la tasa y dije: déjame escribirle a ${ctx.nombre} 😂`
-                : `Hoy me dio por mirar la tasa y dije: déjame escribirte 😂`,
-            (ctx) => `Vi la tasa de hoy y me acordé de ${ctx.servicio}${ctx.nombre ? ", " + ctx.nombre : ""}.`,
-            (ctx) => `Che${ctx.nombre ? ", " + ctx.nombre : ""} 👀 ¿chequeaste la tasa hoy?`,
-            (ctx) => `${ctx.nombre ? ctx.nombre + ", m" : "M"}e dio curiosidad la tasa de hoy 😄 ¿la viste?`
+            (ctx) => `${ctx.nombre ? ctx.nombre + ", ¿v" : "¿V"}iste qué rápido se fue la mañana?`,
+            () => `Buen día 😊 ¿cómo va todo?`,
+            () => `Pasando por aquí a saludarte.`,
+            (ctx) => `${ctx.nombre ? ctx.nombre + " 👀 ¿c" : "¿C"}ómo amaneciste?`,
+            () => `Me acordé de ti y vine a decir hola.`,
+            () => `Hoy me dio por escribirte 😄`,
+            () => `¿Todo bien por ahí?`,
+            (ctx) => `${ctx.nombre ? ctx.nombre + ", ¿" : "¿"}hacemos un envío hoy?`
         ]
     },
     broma: {
         variantes: [
-            (ctx) => `Ese envío todavía anda por aquí buscándote 😂${ctx.nombre ? " " + ctx.nombre : ""}`,
-            (ctx) => `Yo dije: seguro ${ctx.nombre || "te"} ${ctx.nombre ? "se olvidó" : "olvidaste"} de nosotros 😂 ¿le damos hoy a ${ctx.servicio}?`,
-            (ctx) => `¿Lo hacemos hoy o seguimos dándole vueltas? 👀${ctx.nombre ? " " + ctx.nombre : ""}`,
-            (ctx) => `${ctx.nombre ? ctx.nombre + ", hace" : "Hace"} rato quería escribirte por ${ctx.servicio} 😅`,
-            (ctx) => `${ctx.nombre ? ctx.nombre + ", t" : "T"}e extraño por aquí 😂 ¿le damos a ${ctx.servicio}?`,
-            (ctx) => `Me acordé de lo de Cuba y dije: déjame escribirle antes que se me vuelva a olvidar 😂${ctx.nombre ? " " + ctx.nombre : ""}`,
-            // Broma coloquial/gancho -- NUNCA una confirmación financiera:
-            // sin fecha, sin monto, sin afirmar que el cliente cobró nada
-            // personalmente. Aparece 1 de 10 en esta familia, a propósito.
-            (ctx) => `${ctx.nombre ? ctx.nombre + ", ya" : "Ya"} la prefeitura está pagando la ayuda de costo 😂 ¿hacemos ${ctx.servicio}?`,
-            (ctx) => `¿Seguimos con ${ctx.servicio}? 😂${ctx.nombre ? " " + ctx.nombre : ""}`,
-            (ctx) => `${ctx.nombre ? ctx.nombre + " 😄 e" : "E"}sto ya se está poniendo largo... ¿le damos hoy?`,
-            (ctx) => `${ctx.nombre ? ctx.nombre + ", y" : "Y"}o lo dejo caer por aquí 😂 ¿qué hacemos con ${ctx.servicio}?`
+            (ctx) => `${ctx.nombre ? ctx.nombre + ", ¿q" : "¿Q"}ué vuelta? 😄`,
+            () => `Yo dije: voy a pasar a saludar 😂`,
+            () => `¿Ya se despertó el día por ahí? 👀`,
+            (ctx) => `${ctx.nombre ? ctx.nombre + ", ¿" : "¿"}todo bien o qué?`,
+            () => `Pasé por aquí antes de que se me olvidara saludarte 😂`,
+            (ctx) => `${ctx.nombre ? ctx.nombre + ", ¿" : "¿"}mandamos algo hoy?`,
+            () => `Me acordé de ti y vine a saludar 😂`,
+            (ctx) => `¿Qué vuelta${ctx.nombre ? ", " + ctx.nombre : ""}? ¿Cómo está la cosa?`,
+            (ctx) => `${ctx.nombre ? ctx.nombre + ", ¿" : "¿"}hacemos un envíito? 😄`,
+            () => `Buen día, no podía pasar sin saludarte 😂`
         ]
     },
     recordatorio_normal: {
         variantes: [
-            (ctx) => `Hola${ctx.nombre ? " " + ctx.nombre : ""} 😊 quedó pendiente lo de ${ctx.servicio}. Si todavía lo necesitas, aquí estoy.`,
-            (ctx) => `${ctx.nombre ? ctx.nombre + ", s" : "S"}igue pendiente lo de ${ctx.servicio}. Tú me dices 😄`,
-            (ctx) => `Hola${ctx.nombre ? " " + ctx.nombre : ""}, ¿sigues interesado en ${ctx.servicio}?`,
-            (ctx) => `${ctx.nombre ? ctx.nombre + " 😊 " : "Hola 😊 "}sigo disponible para ${ctx.servicio} cuando gustes.`,
-            (ctx) => `Hola${ctx.nombre ? " " + ctx.nombre : ""}, quedó pendiente lo que habíamos hablado. Aquí estoy.`,
-            (ctx) => `${ctx.nombre ? ctx.nombre + ", p" : "P"}or aquí sigo, disponible para ${ctx.servicio}.`,
-            (ctx) => `Hola${ctx.nombre ? " " + ctx.nombre : ""} 😊 ¿qué hacemos con esto?`,
-            (ctx) => `${ctx.nombre ? ctx.nombre + ", c" : "C"}ualquier novedad sobre ${ctx.servicio}, tú me dices.`
+            (ctx) => `Hola${ctx.nombre ? " " + ctx.nombre : ""} 😊 ¿cómo estás?`,
+            (ctx) => `${ctx.nombre ? ctx.nombre + ", ¿" : "¿"}cómo va todo?`,
+            (ctx) => `Buen día${ctx.nombre ? " " + ctx.nombre : ""} ¿todo bien?`,
+            (ctx) => `${ctx.nombre ? ctx.nombre + ", p" : "P"}asando a saludarte.`,
+            (ctx) => `¿Cómo amaneciste${ctx.nombre ? ", " + ctx.nombre : ""}?`,
+            () => `Hola 😊 ¿qué tal el día?`,
+            (ctx) => `${ctx.nombre ? ctx.nombre + ", ¿" : "¿"}hacemos un envío hoy?`,
+            (ctx) => `Buenos días${ctx.nombre ? ", " + ctx.nombre : ""}. Me acordé de ti.`
         ]
     },
     // Solo se agrega al pool cuando SÍ hay un tipo_favorito real conocido
     // (ver familiasElegibles) -- nunca se usa para inventar un servicio.
     servicio_especifico: {
         variantes: [
-            (ctx) => `${ctx.nombre ? ctx.nombre + " 👀 ¿q" : "¿Q"}ué hacemos con ${ctx.servicio}?`,
-            (ctx) => `${ctx.nombre ? ctx.nombre + ", ¿l" : "¿L"}e damos a ${ctx.servicio} o cambiaste de idea?`,
-            (ctx) => `Oye${ctx.nombre ? " " + ctx.nombre : ""}, lo de ${ctx.servicio} sigue ahí. ¿Resolvemos hoy?`,
-            (ctx) => `${ctx.nombre ? ctx.nombre + " 😊 ¿t" : "¿T"}odavía te interesa lo de ${ctx.servicio}?`,
-            (ctx) => `${ctx.nombre ? ctx.nombre + ", q" : "Q"}uedó pendiente lo de ${ctx.servicio}. Tú me dices 😄`,
-            (ctx) => `${ctx.nombre ? ctx.nombre + ", ¿e" : "¿E"}n qué quedamos con ${ctx.servicio}?`,
-            (ctx) => `No me olvidé de ${ctx.servicio}${ctx.nombre ? ", " + ctx.nombre : ""}. Aquí estoy.`,
-            (ctx) => `${ctx.nombre ? ctx.nombre + " 👀 s" : "S"}e me quedó dando vueltas en la cabeza lo de ${ctx.servicio}.`,
-            (ctx) => `Che${ctx.nombre ? ", " + ctx.nombre : ""}, ¿cerramos lo de ${ctx.servicio}?`
+            (ctx) => `${ctx.nombre ? ctx.nombre + ", ¿" : "¿"}mandamos ${ctx.servicioConversacional} hoy?`,
+            (ctx) => `Buen día${ctx.nombre ? ", " + ctx.nombre : ""} 😊 ¿mandamos algo hoy?`,
+            (ctx) => `${ctx.nombre ? ctx.nombre + ", ¿" : "¿"}hacemos ${ctx.servicioConversacional} hoy?`,
+            (ctx) => `${ctx.nombre ? ctx.nombre + " 👀 ¿m" : "¿M"}andamos ${ctx.servicioConversacional}?`,
+            (ctx) => `Pasando a saludarte${ctx.nombre ? ", " + ctx.nombre : ""} 😄`,
+            (ctx) => `${ctx.nombre ? ctx.nombre + ", " : ""}${ctx.servicioConversacional === "una recarga" ? "¿hacemos una recarga hoy?" : "¿hacemos un envío hoy?"}`,
+            (ctx) => `Buenos días${ctx.nombre ? ", " + ctx.nombre : ""}. ¿Cómo estás?`,
+            (ctx) => `${ctx.nombre ? ctx.nombre + ", h" : "H"}oy podemos mandar ${ctx.servicioConversacional}.`,
+            (ctx) => `¿Qué vuelta${ctx.nombre ? ", " + ctx.nombre : ""}?`
         ]
     }
 };
@@ -247,7 +248,8 @@ function elegirFamiliaVariante(candidato, { rng = Math.random, excluir = null } 
 function renderizarMensaje(candidato, { familia, indice }) {
     const ctx = {
         nombre: primerNombreConfiable(candidato.nombre),
-        servicio: fraseServicio(candidato.tipoFavorito)
+        servicio: fraseServicio(candidato.tipoFavorito),
+        servicioConversacional: fraseServicioConversacional(fraseServicio(candidato.tipoFavorito))
     };
     return FAMILIAS[familia].variantes[indice](ctx);
 }

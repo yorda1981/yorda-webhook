@@ -83,14 +83,14 @@ test("preview con nombre=email -> mensaje natural, SIN el nombre/email filtrado"
 // ── Compatibilidad de servicio: MLC / USD / CUP / efectivo / recarga ──
 
 test("fraseServicio: mapeo exacto para cada tipo_favorito", () => {
-    assert.equal(fraseServicio("mlc"), "aquellos MLC");
-    assert.equal(fraseServicio("usd_clasica"), "aquellos USD");
-    assert.equal(fraseServicio("usd_prepago"), "aquellos USD");
-    assert.equal(fraseServicio("brl_cup"), "aquel envío a CUP");
-    assert.equal(fraseServicio("cup_efectivo"), "aquella entrega en efectivo (CUP)");
-    assert.equal(fraseServicio("usd_efectivo"), "aquella entrega en efectivo (USD)");
-    assert.equal(fraseServicio("recarga_nacional"), "aquella recarga");
-    assert.equal(fraseServicio("recarga_internacional"), "aquella recarga");
+    assert.equal(fraseServicio("mlc"), "un envío en MLC");
+    assert.equal(fraseServicio("usd_clasica"), "un envío en USD");
+    assert.equal(fraseServicio("usd_prepago"), "un envío en USD");
+    assert.equal(fraseServicio("brl_cup"), "un envío a CUP");
+    assert.equal(fraseServicio("cup_efectivo"), "una entrega en efectivo (CUP)");
+    assert.equal(fraseServicio("usd_efectivo"), "una entrega en efectivo (USD)");
+    assert.equal(fraseServicio("recarga_nacional"), "una recarga");
+    assert.equal(fraseServicio("recarga_internacional"), "una recarga");
 });
 
 function todosLosMensajesPara(candidato) {
@@ -133,12 +133,44 @@ test("CUP (transferencia, brl_cup): cuando el servicio se menciona, es CUP -- nu
     assert.ok(mensajes.some(m => /CUP/.test(m)));
 });
 
-test("efectivo (cup_efectivo/usd_efectivo) NUNCA se convierte accidentalmente en 'transferencia' -- cuando se menciona, dice 'entrega en efectivo'", () => {
+test("efectivo (cup_efectivo/usd_efectivo) conserva el contexto y se expresa de forma conversacional", () => {
     for (const tipo of ["cup_efectivo", "usd_efectivo"]) {
         const c = { ...CANDIDATO_BASE, tipoFavorito: tipo };
         const mensajes = todosLosMensajesPara(c);
         for (const msg of mensajes) assert.doesNotMatch(msg, /transferencia/i);
-        assert.ok(mensajes.some(m => /entrega en efectivo/.test(m)));
+        const moneda = tipo === "cup_efectivo" ? "CUP" : "USD";
+        assert.ok(mensajes.some(m => new RegExp(`${moneda} en efectivo`).test(m)));
+    }
+});
+
+test("servicio_especifico: integra el contexto en lenguaje hablado, sin paréntesis técnicos", () => {
+    const casos = [
+        ["brl_cup", /CUP/],
+        ["usd_clasica", /USD/],
+        ["mlc", /MLC/],
+        ["cup_efectivo", /CUP en efectivo/],
+        ["usd_efectivo", /USD en efectivo/],
+        ["recarga_nacional", /una recarga/]
+    ];
+    for (const [tipo, esperado] of casos) {
+        const c = { ...CANDIDATO_BASE, tipoFavorito: tipo };
+        const mensajes = FAMILIAS.servicio_especifico.variantes
+            .map((_, indice) => renderizarMensaje(c, { familia: "servicio_especifico", indice }));
+        for (const msg of mensajes) {
+            assert.doesNotMatch(msg, /\([^)]*\)/, `no debe haber ficha técnica: ${msg}`);
+            assert.doesNotMatch(msg, /servicio|modalidad/i, `no debe haber lenguaje administrativo: ${msg}`);
+        }
+        assert.ok(mensajes.some(m => esperado.test(m)), `debe aparecer el contexto real para ${tipo}`);
+    }
+});
+
+test("servicio_especifico: una recarga nunca se llama 'envío' cuando se menciona la acción", () => {
+    for (const tipo of ["recarga_nacional", "recarga_internacional"]) {
+        const c = { ...CANDIDATO_BASE, nombre: "María", tipoFavorito: tipo };
+        const mensajes = FAMILIAS.servicio_especifico.variantes
+            .map((_, indice) => renderizarMensaje(c, { familia: "servicio_especifico", indice }));
+        for (const msg of mensajes) assert.doesNotMatch(msg, /envío/i, `no debe llamar envío a una recarga: ${msg}`);
+        assert.ok(mensajes.some(m => /recarga/i.test(m)), "debe existir una propuesta explícita de recarga");
     }
 });
 
@@ -155,7 +187,19 @@ test("sin tipo_favorito conocido -> nunca inventa un servicio específico (ni ML
     const c = { ...CANDIDATO_BASE, tipoFavorito: null };
     const mensajes = todosLosMensajesPara(c);
     for (const msg of mensajes) assert.doesNotMatch(msg, /\bMLC\b|\bCUP\b|\bUSD\b|recarga|entrega en efectivo/i);
-    assert.ok(mensajes.some(m => /pa' Cuba/.test(m)));
+    assert.ok(mensajes.some(m => /un envío/.test(m)));
+});
+
+test("el pool no recupera expresiones CRM o cierres rechazados", () => {
+    const c = { ...CANDIDATO_BASE, tipoFavorito: "brl_cup" };
+    const mensajes = todosLosMensajesPara(c).join("\n").toLowerCase();
+    for (const frase of [
+        "hacemos lo de cuba", "cuba queda por aquí cuando quieras", "si te pinta",
+        "si te provoca", "¿resolvemos?", "¿le damos?", "aquí estoy",
+        "¿cambiaste de idea?", "aquella", "aquellos", "aquel envío"
+    ]) {
+        assert.doesNotMatch(mensajes, new RegExp(frase.replace(/[?]/g, "\\$&")));
+    }
 });
 
 // ── Nunca inventa cantidades ni tasas ──
