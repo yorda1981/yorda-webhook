@@ -202,10 +202,31 @@ test("construirSaludo: registrado CON nombre confiable -- usa el nombre, coheren
     assert.doesNotMatch(noche, /días/i);
 });
 
-test("construirSaludo: registrado SIN nombre confiable -- nunca interpola 'undefined'/'null', sigue siendo el saludo de registrado", () => {
-    const s = construirSaludo({ lang: "es", esRegistrado: true, frecuente: false, nombre: null, franja: "tarde" });
-    assert.doesNotMatch(s, /undefined|null/i);
-    assert.match(s, /enviar/i, "un registrado sigue recibiendo el cierre orientado a enviar, aunque no tengamos su nombre");
+test("construirSaludo: registrado SIN nombre confiable -- nunca interpola 'undefined'/'null', sigue siendo el saludo de registrado (las 3 variantes reales, determinista)", (t) => {
+    // ANTES: fallaba ~1/3 de las veces porque asumía que TODA variante de
+    // "registrado, tarde" contiene la palabra "enviar" -- dos de las 3 sí,
+    // la tercera ("¿Qué necesitas?") es igual de válida y no la contiene.
+    // Eso era un defecto del TEST, no de producción (ver pedido: "no
+    // cambies la selección aleatoria productiva solo para satisfacer el
+    // test"). pick() (shared.js) no tiene rng inyectable -- se controla
+    // acá con un mock puntual de Math.random (se restaura solo al
+    // terminar el test) para recorrer las 3 variantes reales de forma
+    // determinista, en vez de exigir una palabra que no todas contienen.
+    const secuencia = [0.01, 0.4, 0.99]; // -> índices 0, 1, 2 de un array de 3
+    let i = 0;
+    t.mock.method(Math, "random", () => secuencia[i++ % secuencia.length]);
+
+    const vistos = new Set();
+    for (let k = 0; k < 3; k++) {
+        const s = construirSaludo({ lang: "es", esRegistrado: true, frecuente: false, nombre: null, franja: "tarde" });
+        assert.doesNotMatch(s, /undefined|null/i);
+        // Sigue siendo el saludo de "registrado" (nunca el texto de
+        // "cliente nuevo") y coherente con la franja "tarde".
+        assert.doesNotMatch(s, /Bienvenido|Gracias por escribirnos/i);
+        assert.doesNotMatch(s, /noches|días/i);
+        vistos.add(s);
+    }
+    assert.equal(vistos.size, 3, "las 3 variantes reales de 'registrado, tarde' deben ser alcanzables y distintas entre sí");
 });
 
 test("construirSaludo: cliente NUEVO -- nunca asume intención de enviar, nunca inventa nombre, en las 3 franjas", () => {

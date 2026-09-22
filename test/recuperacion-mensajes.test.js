@@ -65,6 +65,21 @@ test("sin nombre en absoluto (null) -> nunca inventa un nombre", () => {
     }
 });
 
+// BUG REAL (producción): un candidato tenía un email guardado como
+// "nombre" -- con el filtro anterior, el preview lo interpolaba tal cual
+// ("livanperezma@gmail.com, ..."). Ahora primerNombreConfiable() lo
+// rechaza (ver reglas-bot.js) y el mensaje sale natural, sin el email.
+test("preview con nombre=email -> mensaje natural, SIN el nombre/email filtrado", () => {
+    const c = { ...CANDIDATO_BASE, nombre: "livanperezma@gmail.com", tipoFavorito: "brl_cup" };
+    for (const familia of Object.keys(FAMILIAS)) {
+        for (let indice = 0; indice < FAMILIAS[familia].variantes.length; indice++) {
+            const msg = renderizarMensaje(c, { familia, indice });
+            assert.doesNotMatch(msg, /@/, `familia=${familia} indice=${indice} no debe filtrar el email`);
+            assert.doesNotMatch(msg, /livanperezma/i);
+        }
+    }
+});
+
 // ── Compatibilidad de servicio: MLC / USD / CUP / efectivo / recarga ──
 
 test("fraseServicio: mapeo exacto para cada tipo_favorito", () => {

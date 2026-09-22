@@ -427,15 +427,67 @@ function franjaSaludoExplicita(txt) {
     return null;
 }
 
-// Nombre de pila "confiable" para usar en el saludo -- nunca se inventa:
-// descarta vacíos y el placeholder genérico "Cliente" que usan varios
-// flujos (ej. agregarOperacion) cuando no se conoce el nombre real. Si no
-// hay nada confiable, devuelve null (el caller debe entonces saludar sin
-// nombre, nunca con un valor inventado).
+// Placeholders conocidos -- nunca son un nombre real, sin importar
+// mayúsculas/minúsculas. Se guardan así en varios flujos (ej.
+// agregarOperacion usa "Cliente" quando no se conoce el nombre real) o
+// llegan de integraciones/datos sucios.
+const PLACEHOLDERS_NOMBRE = new Set([
+    "cliente", "fulano", "fulana", "desconocido", "unknown",
+    "n/a", "na", "null", "undefined"
+]);
+
+// Un componente de nombre humano real: empieza con una letra (con
+// acentos/ñ) y de ahí en más solo letras, apóstrofos o guiones --
+// O'Connor, Jean-Pierre, María, "De" (de "De la Caridad"). Ningún dígito
+// ni símbolo técnico (@, /, :, _, etc.) puede colarse -- eso ya basta para
+// descartar teléfonos ("+5351234567", "5351234567") e IDs/códigos, sin
+// necesidad de una lista aparte de "cosas que parecen teléfono".
+const PATRON_COMPONENTE_NOMBRE = /^[A-Za-zÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ'-]*$/;
+
+// Emoji/banderas decorativos en el borde del nombre -- los pushName reales
+// de WhatsApp suelen llevarlos ("Ania🍃", "👨 Miguel Ángel"). Se recortan
+// SOLO en los bordes (nunca en medio, para no pegar dos palabras) antes de
+// evaluar si el resto parece un nombre. Deliberadamente NO incluye
+// dígitos, "@" ni "/" -- esos deben seguir tumbando el valor completo
+// (teléfonos, emails, IDs), nunca "recortarse" para colar algo inválido.
+const EMOJI_BORDE_INICIO = /^[\p{Extended_Pictographic}\p{Regional_Indicator}\u{FE0F}\u{200D}\s]+/u;
+const EMOJI_BORDE_FINAL  = /[\p{Extended_Pictographic}\p{Regional_Indicator}\u{FE0F}\u{200D}\s]+$/u;
+
+// Nombre de pila "confiable" para usar en el saludo y en los mensajes de
+// recuperación -- nunca se inventa: descarta vacíos, placeholders,
+// emails, URLs, teléfonos/IDs y cualquier otro valor sin apariencia
+// razonable de nombre humano. Si no hay nada confiable, devuelve null (el
+// caller debe entonces saludar/redactar sin nombre, nunca con un valor
+// inventado ni con datos técnicos filtrados hacia el cliente).
+//
+// BUG REAL (producción): un customer tenía guardado un email
+// ("livanperezma@gmail.com") como nombre -- el filtro anterior solo
+// descartaba vacío y el placeholder "Cliente" exacto, así que ese email
+// se colaba tal cual en el saludo/mensaje de recuperación.
+//
+// Con nombres compuestos (más de una palabra) sigue devolviendo el primer
+// componente, igual que antes -- solo si ese primer componente en sí
+// mismo es confiable.
 function primerNombreConfiable(nombre) {
     const limpio = String(nombre || "").trim();
-    if (!limpio || limpio.toLowerCase() === "cliente") return null;
-    return limpio.split(" ")[0];
+    if (!limpio) return null;
+
+    // Emails y URLs -- nunca son un nombre, en ningún lugar de la cadena
+    // y sin importar mayúsculas/minúsculas.
+    if (limpio.includes("@")) return null;
+    if (/^https?:\/\//i.test(limpio)) return null;
+
+    if (PLACEHOLDERS_NOMBRE.has(limpio.toLowerCase())) return null;
+
+    const sinEmojiDeBorde = limpio.replace(EMOJI_BORDE_INICIO, "").replace(EMOJI_BORDE_FINAL, "");
+    if (!sinEmojiDeBorde) return null;
+
+    const primerComponente = sinEmojiDeBorde.split(/\s+/)[0];
+    if (primerComponente.length < 2) return null;
+    if (PLACEHOLDERS_NOMBRE.has(primerComponente.toLowerCase())) return null;
+    if (!PATRON_COMPONENTE_NOMBRE.test(primerComponente)) return null;
+
+    return primerComponente;
 }
 
 module.exports = {

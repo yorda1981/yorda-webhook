@@ -41,7 +41,8 @@ const {
     esPausaTemporal,
     esSenalConfusion,
     esCierreNatural,
-    esPreguntaExploratoria
+    esPreguntaExploratoria,
+    primerNombreConfiable
 } = require("../src/services/reglas-bot");
 const { gatilhos, palabrasNegocio } = require("../src/flows/shared");
 
@@ -530,4 +531,107 @@ test("contextoUtilizable: contexto posterior a la pausa humana -> true (es una p
         pausa_hasta: haceMinutosISO(10)
     };
     assert.equal(contextoUtilizable(cliente), true);
+});
+
+// ─────────────────────────────────────────────────────────
+// primerNombreConfiable — filtro central de nombre confiable
+//
+// BUG REAL (producción): un customer tenía guardado un email
+// ("livanperezma@gmail.com") en customers.nombre -- el filtro anterior
+// solo descartaba vacío y "Cliente" exacto, así que ese email se colaba
+// tal cual en saludos y en mensajes de recuperación.
+// ─────────────────────────────────────────────────────────
+
+test("primerNombreConfiable: rechaza un email", () => {
+    assert.equal(primerNombreConfiable("livanperezma@gmail.com"), null);
+});
+
+test("primerNombreConfiable: rechaza un email con mayúsculas", () => {
+    assert.equal(primerNombreConfiable("USUARIO@GMAIL.COM"), null);
+});
+
+test("primerNombreConfiable: rechaza un teléfono (solo dígitos)", () => {
+    assert.equal(primerNombreConfiable("5351234567"), null);
+});
+
+test("primerNombreConfiable: rechaza un teléfono con '+' (código de país)", () => {
+    assert.equal(primerNombreConfiable("+5351234567"), null);
+});
+
+test("primerNombreConfiable: rechaza una URL", () => {
+    assert.equal(primerNombreConfiable("https://ejemplo.com"), null);
+    assert.equal(primerNombreConfiable("http://ejemplo.com/foo"), null);
+});
+
+test("primerNombreConfiable: rechaza el placeholder 'Cliente'", () => {
+    assert.equal(primerNombreConfiable("Cliente"), null);
+    assert.equal(primerNombreConfiable("cliente"), null);
+});
+
+test("primerNombreConfiable: rechaza 'Fulano'/'Fulana'", () => {
+    assert.equal(primerNombreConfiable("Fulano"), null);
+    assert.equal(primerNombreConfiable("Fulana"), null);
+});
+
+test("primerNombreConfiable: rechaza 'unknown'/'desconocido'/'N/A'", () => {
+    assert.equal(primerNombreConfiable("unknown"), null);
+    assert.equal(primerNombreConfiable("desconocido"), null);
+    assert.equal(primerNombreConfiable("N/A"), null);
+    assert.equal(primerNombreConfiable("n/a"), null);
+});
+
+test("primerNombreConfiable: rechaza 'null'/'undefined' como texto literal", () => {
+    assert.equal(primerNombreConfiable("null"), null);
+    assert.equal(primerNombreConfiable("undefined"), null);
+});
+
+test("primerNombreConfiable: rechaza vacío/solo espacios", () => {
+    assert.equal(primerNombreConfiable(""), null);
+    assert.equal(primerNombreConfiable("   "), null);
+    assert.equal(primerNombreConfiable(null), null);
+    assert.equal(primerNombreConfiable(undefined), null);
+});
+
+test("primerNombreConfiable: 'José' -> 'José'", () => {
+    assert.equal(primerNombreConfiable("José"), "José");
+});
+
+test("primerNombreConfiable: 'María' -> 'María'", () => {
+    assert.equal(primerNombreConfiable("María"), "María");
+});
+
+test("primerNombreConfiable: nombres compuestos -- devuelve el primer componente (comportamiento actual, sin regresión)", () => {
+    assert.equal(primerNombreConfiable("Ana María"), "Ana");
+    assert.equal(primerNombreConfiable("José Luis"), "José");
+    assert.equal(primerNombreConfiable("María del Carmen"), "María");
+    assert.equal(primerNombreConfiable("De la Caridad"), "De");
+});
+
+test("primerNombreConfiable: acepta apóstrofos y guiones en nombres reales (O'Connor, D'Angelo, Jean-Pierre)", () => {
+    assert.equal(primerNombreConfiable("O'Connor"), "O'Connor");
+    assert.equal(primerNombreConfiable("D'Angelo"), "D'Angelo");
+    assert.equal(primerNombreConfiable("Jean-Pierre"), "Jean-Pierre");
+});
+
+test("primerNombreConfiable: sigue aceptando nombres cubanos/latinos comunes", () => {
+    for (const n of ["Yudelquis", "Dayron", "Yordanys", "Yusleidy", "Lourdes"]) {
+        assert.equal(primerNombreConfiable(n), n);
+    }
+});
+
+// Hallazgo real al auditar producción con el nuevo filtro: varios pushName
+// reales de WhatsApp llevan emoji decorativo pegado al nombre ("Ania🍃",
+// "👨Miguel") -- rechazarlos enteros habría sido la validación "demasiado
+// agresiva" que se pidió evitar. Se recorta SOLO el borde, nunca el medio.
+test("primerNombreConfiable: recorta emoji/bandera decorativos en el borde, sin rechazar el nombre real", () => {
+    assert.equal(primerNombreConfiable("Ania🍃"), "Ania");
+    assert.equal(primerNombreConfiable("👨Miguel"), "Miguel");
+    assert.equal(primerNombreConfiable("👨 Miguel Ángel"), "Miguel");
+    assert.equal(primerNombreConfiable("🙉Yaneisy"), "Yaneisy");
+    assert.equal(primerNombreConfiable("Yordanys 🇨🇺"), "Yordanys");
+});
+
+test("primerNombreConfiable: recortar emoji NUNCA cuela un ID técnico o un teléfono con guion", () => {
+    assert.equal(primerNombreConfiable("USR-00234"), null);
+    assert.equal(primerNombreConfiable("53-1234567"), null);
 });

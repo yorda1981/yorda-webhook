@@ -96,14 +96,14 @@ const FAMILIAS = {
             (ctx) => `${ctx.nombre ? ctx.nombre + ", estaba" : "Estaba"} hablando con un colega aquí y me acordé de ti 😂\n¿qué pasó al final con ${ctx.servicio}?`,
             (ctx) => `Se me vino a la mente lo de Cuba de la nada 😄`,
             (ctx) => `¿Qué fue de ${ctx.servicio}?${ctx.nombre ? " " + ctx.nombre : ""} 😊`,
-            (ctx) => `Hoy alguien mencionó Cuba y pensé en ${ctx.servicio} que quedó pendiente.`,
+            (ctx) => `Hoy alguien mencionó Cuba y pensé en lo de ${ctx.servicio}, que quedó pendiente.`,
             (ctx) => `${ctx.nombre ? ctx.nombre + ", " : ""}me acordé de ti hoy 😄 ¿le damos a ${ctx.servicio}?`,
             (ctx) => `Pasaba por aquí y me acordé de una cosita pendiente 😅\n¿la resolvemos?`,
             (ctx) => ctx.nombre
                 ? `Justo hoy me acordé de ti, ${ctx.nombre} 😄 ¿le echamos otro vistazo a ${ctx.servicio}?`
                 : `Justo hoy me acordé de ti 😄 ¿le echamos otro vistazo a ${ctx.servicio}?`,
             (ctx) => `Me acordé de lo de Cuba y dije: déjame escribir antes que se me olvide otra vez 😂`,
-            (ctx) => `${ctx.nombre ? ctx.nombre + ", " : ""}quedó pendiente ${ctx.servicio} y se me quedó dando vueltas. ¿Cómo vamos con eso?`,
+            (ctx) => `${ctx.nombre ? ctx.nombre + ", " : ""}quedó pendiente lo de ${ctx.servicio} y se me quedó dando vueltas. ¿Cómo vamos con eso?`,
             (ctx) => `Me acordé de ti 😊 ¿aquello de Cuba sigue en pie?`
         ]
     },
@@ -158,8 +158,8 @@ const FAMILIAS = {
     },
     recordatorio_normal: {
         variantes: [
-            (ctx) => `Hola${ctx.nombre ? " " + ctx.nombre : ""} 😊 quedó pendiente ${ctx.servicio}. Si todavía lo necesitas, aquí estoy.`,
-            (ctx) => `${ctx.nombre ? ctx.nombre + ", s" : "S"}igue pendiente ${ctx.servicio}. Tú me dices 😄`,
+            (ctx) => `Hola${ctx.nombre ? " " + ctx.nombre : ""} 😊 quedó pendiente lo de ${ctx.servicio}. Si todavía lo necesitas, aquí estoy.`,
+            (ctx) => `${ctx.nombre ? ctx.nombre + ", s" : "S"}igue pendiente lo de ${ctx.servicio}. Tú me dices 😄`,
             (ctx) => `Hola${ctx.nombre ? " " + ctx.nombre : ""}, ¿sigues interesado en ${ctx.servicio}?`,
             (ctx) => `${ctx.nombre ? ctx.nombre + " 😊 " : "Hola 😊 "}sigo disponible para ${ctx.servicio} cuando gustes.`,
             (ctx) => `Hola${ctx.nombre ? " " + ctx.nombre : ""}, quedó pendiente lo que habíamos hablado. Aquí estoy.`,
@@ -175,11 +175,11 @@ const FAMILIAS = {
             (ctx) => `${ctx.nombre ? ctx.nombre + " 👀 ¿q" : "¿Q"}ué hacemos con ${ctx.servicio}?`,
             (ctx) => `${ctx.nombre ? ctx.nombre + ", ¿l" : "¿L"}e damos a ${ctx.servicio} o cambiaste de idea?`,
             (ctx) => `Oye${ctx.nombre ? " " + ctx.nombre : ""}, lo de ${ctx.servicio} sigue ahí. ¿Resolvemos hoy?`,
-            (ctx) => `${ctx.nombre ? ctx.nombre + " 😊 ¿t" : "¿T"}odavía te interesa ${ctx.servicio}?`,
+            (ctx) => `${ctx.nombre ? ctx.nombre + " 😊 ¿t" : "¿T"}odavía te interesa lo de ${ctx.servicio}?`,
             (ctx) => `${ctx.nombre ? ctx.nombre + ", q" : "Q"}uedó pendiente lo de ${ctx.servicio}. Tú me dices 😄`,
             (ctx) => `${ctx.nombre ? ctx.nombre + ", ¿e" : "¿E"}n qué quedamos con ${ctx.servicio}?`,
             (ctx) => `No me olvidé de ${ctx.servicio}${ctx.nombre ? ", " + ctx.nombre : ""}. Aquí estoy.`,
-            (ctx) => `${ctx.nombre ? ctx.nombre + " 👀 s" : "S"}e me quedó dando vueltas en la cabeza ${ctx.servicio}.`,
+            (ctx) => `${ctx.nombre ? ctx.nombre + " 👀 s" : "S"}e me quedó dando vueltas en la cabeza lo de ${ctx.servicio}.`,
             (ctx) => `Che${ctx.nombre ? ", " + ctx.nombre : ""}, ¿cerramos lo de ${ctx.servicio}?`
         ]
     }
