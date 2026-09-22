@@ -139,6 +139,17 @@ test("El mini-indicador Nuevos Hoy duplicado fue retirado", () => {
     assert.doesNotMatch(html, /stat-nuevos-hoy/);
 });
 
+test("Los bloques del dashboard comparten colapsado visual persistente", () => {
+    const html = fs.readFileSync(path.join(__dirname, "..", "public", "dashboard.html"), "utf8");
+    assert.match(html, /dashboard\.collapsed\./);
+    assert.match(html, /localStorage\.getItem\(storageKey\)/);
+    assert.match(html, /dashboard-section-toggle/);
+    assert.match(html, /aria-controls/);
+    assert.match(html, /dashboard-section-collapsed/);
+    assert.match(html, /let cerrado = false;/);
+    assert.match(html, /localStorage\.getItem\(key\) === "1"/);
+});
+
 test("las etiquetas de teléfonos distinguen cliente/pagador y receptor sin cambiar ids", () => {
     const dashboard = fs.readFileSync(path.join(__dirname, "..", "public", "dashboard.html"), "utf8");
     const calculadora = fs.readFileSync(path.join(__dirname, "..", "public", "calculadora.html"), "utf8");

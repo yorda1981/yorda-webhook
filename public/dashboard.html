@@ -62,6 +62,12 @@
         .embudo-stage-pct { color: #94a3b8; font-size: 11px; white-space: nowrap; }
         .embudo-stage-bar { height: 7px; margin-top: 10px; background: #161b33; border-radius: 99px; overflow: hidden; }
         .embudo-stage-fill { height: 100%; border-radius: inherit; transition: width 0.6s ease; }
+        .dashboard-section-header { cursor: pointer; }
+        .dashboard-section-header > .chev { display: none; }
+        .dashboard-section-toggle { margin-left: auto; flex: 0 0 auto; background: transparent; border: 1px solid #2d355a; color: #cbd5e1; border-radius: 7px; width: 30px; height: 28px; cursor: pointer; font-size: 16px; line-height: 1; }
+        .dashboard-section-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+        .dashboard-section-body { display: block; }
+        .config-section.dashboard-section-collapsed > .dashboard-section-body { display: none; }
         @media (max-width: 900px) {
             .embudo-flow { flex-wrap: wrap; gap: 12px; }
             .embudo-stage { flex: 1 1 calc(50% - 12px); }
@@ -1411,43 +1417,94 @@
         }
 
         // ── Paneles plegables ──────────────────────
-        function toggleColapsable(hdrId, bodyId, chevId) {
-            document.getElementById(hdrId).addEventListener("click", () => {
-                const body = document.getElementById(bodyId);
-                const chev = document.getElementById(chevId);
-                body.classList.toggle("abierto");
-                chev.classList.toggle("abierto");
-            });
-        }
-        toggleColapsable("hdrPendientes", "bodyPendientes", "chevPendientes");
-        toggleColapsable("hdrEnProceso", "bodyEnProceso", "chevEnProceso");
-        toggleColapsable("hdrEntregas", "bodyEntregas", "chevEntregas");
-        toggleColapsable("hdrRecuperacion", "bodyRecuperacion", "chevRecuperacion");
-        // Pendientes abierto por defecto (requiere atención inmediata); En Proceso plegado (solo seguimiento)
-        document.getElementById("bodyPendientes").classList.add("abierto");
-        document.getElementById("chevPendientes").classList.add("abierto");
-        // CRM de Entregas también abierto por defecto
-        document.getElementById("chevEntregas").classList.add("abierto");
+        // Implementación puramente visual y compartida por todos los bloques.
+        (function inicializarSeccionesColapsables() {
+            const secciones = document.querySelectorAll(".config-section");
+            const slug = texto => texto.toLowerCase()
+                .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+                .replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "seccion";
 
-        // Programa VIP: colapsable, cerrado por defecto (no requiere
-        // atención diaria como Pendientes) -- sesión guardada en
-        // sessionStorage para que no se cierre solo al recargar la página
-        // dentro de la misma sesión del navegador (nunca cambia reglas/
-        // niveles/ofertas VIP, es solo presentación).
-        (function inicializarColapsableVip() {
-            let abierto = false;
-            try { abierto = sessionStorage.getItem("vipAbierto") === "1"; } catch (e) {}
-            if (abierto) {
-                document.getElementById("bodyVip").classList.add("abierto");
-                document.getElementById("chevVip").classList.add("abierto");
-            }
-            document.getElementById("hdrVip").addEventListener("click", () => {
-                const body = document.getElementById("bodyVip");
-                const nuevoEstado = !body.classList.contains("abierto");
-                body.classList.toggle("abierto");
-                document.getElementById("chevVip").classList.toggle("abierto");
-                try { sessionStorage.setItem("vipAbierto", nuevoEstado ? "1" : "0"); } catch (e) {}
+            secciones.forEach((seccion, indice) => {
+                const encabezado = Array.from(seccion.children).find(el => el.tagName === "H3");
+                if (!encabezado) return;
+                const titulo = encabezado.cloneNode(true);
+                titulo.querySelectorAll(".badge-count").forEach(el => el.remove());
+                const clave = seccion.dataset.collapseId || slug(titulo.textContent) || `seccion-${indice}`;
+                const bodyId = `dashboard-section-body-${indice}`;
+                const body = document.createElement("div");
+                body.className = "dashboard-section-body";
+                body.id = bodyId;
+                Array.from(seccion.children).forEach(el => {
+                    if (el !== encabezado) body.appendChild(el);
+                });
+                body.querySelectorAll(":scope > .colapsable").forEach(el => {
+                    if (el.id !== "bodyVip") el.classList.add("abierto");
+                });
+                seccion.appendChild(body);
+
+                encabezado.classList.add("dashboard-section-header");
+                encabezado.setAttribute("aria-controls", bodyId);
+                const control = document.createElement("button");
+                control.type = "button";
+                control.className = "dashboard-section-toggle";
+                control.setAttribute("aria-controls", bodyId);
+                control.setAttribute("aria-label", "Contraer o expandir sección");
+                encabezado.appendChild(control);
+
+                const storageKey = `dashboard.collapsed.${clave}`;
+                let cerrado = false;
+                try { cerrado = localStorage.getItem(storageKey) === "1"; } catch (e) {}
+                const actualizar = () => {
+                    seccion.classList.toggle("dashboard-section-collapsed", cerrado);
+                    encabezado.setAttribute("aria-expanded", String(!cerrado));
+                    control.textContent = cerrado ? "▸" : "▾";
+                    control.setAttribute("aria-expanded", String(!cerrado));
+                };
+                const alternar = () => {
+                    cerrado = !cerrado;
+                    try { localStorage.setItem(storageKey, cerrado ? "1" : "0"); } catch (e) {}
+                    actualizar();
+                };
+                control.addEventListener("click", event => { event.stopPropagation(); alternar(); });
+                encabezado.addEventListener("click", event => {
+                    if (event.target.closest("button, a, input, select, textarea")) return;
+                    alternar();
+                });
+                actualizar();
             });
+
+            // VIP está dentro de Configuración de Tasas y no es un bloque
+            // principal, pero conserva el mismo control y persistencia.
+            const vipHeader = document.getElementById("hdrVip");
+            const vipBody = document.getElementById("bodyVip");
+            if (vipHeader && vipBody) {
+                const vipControl = document.createElement("button");
+                vipControl.type = "button";
+                vipControl.className = "dashboard-section-toggle";
+                vipControl.setAttribute("aria-controls", "bodyVip");
+                vipControl.setAttribute("aria-label", "Contraer o expandir Programa VIP");
+                vipHeader.appendChild(vipControl);
+                const key = "dashboard.collapsed.programa-vip";
+                let cerrado = false;
+                try { cerrado = localStorage.getItem(key) === "1"; } catch (e) {}
+                const actualizarVip = () => {
+                    vipBody.classList.toggle("abierto", !cerrado);
+                    vipHeader.setAttribute("aria-expanded", String(!cerrado));
+                    vipControl.setAttribute("aria-expanded", String(!cerrado));
+                    vipControl.textContent = cerrado ? "▸" : "▾";
+                };
+                const alternarVip = () => {
+                    cerrado = !cerrado;
+                    try { localStorage.setItem(key, cerrado ? "1" : "0"); } catch (e) {}
+                    actualizarVip();
+                };
+                vipControl.addEventListener("click", event => { event.stopPropagation(); alternarVip(); });
+                vipHeader.addEventListener("click", event => {
+                    if (event.target.closest("button, a, input, select, textarea")) return;
+                    alternarVip();
+                });
+                actualizarVip();
+            }
         })();
 
         // ── CRM DE ENTREGAS (efectivo) ────────────
