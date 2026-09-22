@@ -161,6 +161,57 @@
             </div>
         </div>
 
+        <div class="config-section" style="border-left: 5px solid #a78bfa;">
+            <h3 class="toggle-h3" id="hdrRecuperacion" style="color:#a78bfa; cursor:pointer;">
+                <span>🎯 Clientes por recuperar <span class="badge-count" id="recTotal">0</span></span>
+                <span class="chev" id="chevRecuperacion">▾</span>
+            </h3>
+            <div class="colapsable" id="bodyRecuperacion">
+                <p style="color:#8b949e; font-size:12px; margin-top:-6px; margin-bottom:16px;">
+                    Clientes que cotizaron o llegaron hasta el PIX pero no completaron ninguna operación real todavía (mínimo 2h de antigüedad). Fase 1: solo consulta -- no envía nada.
+                </p>
+                <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin-bottom:20px;">
+                    <div style="background:#0b0e1a;border-radius:12px;padding:16px;border:1px solid #2d355a;">
+                        <div style="font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:1px;">Total recuperables</div>
+                        <div style="font-size:22px;font-weight:700;color:#a78bfa;margin-top:6px;" id="recTotalCard">—</div>
+                    </div>
+                    <div style="background:#0b0e1a;border-radius:12px;padding:16px;border:1px solid #2d355a;">
+                        <div style="font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:1px;">Alta prioridad</div>
+                        <div style="font-size:22px;font-weight:700;color:#ef4444;margin-top:6px;" id="recAlta">—</div>
+                    </div>
+                    <div style="background:#0b0e1a;border-radius:12px;padding:16px;border:1px solid #2d355a;">
+                        <div style="font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:1px;">Media prioridad</div>
+                        <div style="font-size:22px;font-weight:700;color:var(--yellow);margin-top:6px;" id="recMedia">—</div>
+                    </div>
+                    <div style="background:#0b0e1a;border-radius:12px;padding:16px;border:1px solid #2d355a;">
+                        <div style="font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:1px;">Más de 7 días</div>
+                        <div style="font-size:22px;font-weight:700;color:#8b949e;margin-top:6px;" id="recMas7d">—</div>
+                    </div>
+                </div>
+                <div class="table-wrapper">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Cliente</th>
+                                <th>WhatsApp</th>
+                                <th>Prioridad</th>
+                                <th>Servicio</th>
+                                <th>Último monto</th>
+                                <th>Último intento</th>
+                                <th>Antigüedad</th>
+                                <th>Estado del intento</th>
+                                <th>Último recordatorio CRM</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody id="tablaRecuperacion">
+                            <tr><td colspan="10" style="text-align:center; padding:20px; color:#8b949e;">Conecta para ver datos</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
         <div class="config-section" style="border-left: 5px solid var(--yellow);">
             <h3 class="toggle-h3" id="hdrPendientes" style="color: var(--yellow); cursor:pointer;">
                 <span>⏳ Operaciones Pendientes <span class="badge-count" id="countPendientes">0</span></span>
@@ -902,6 +953,69 @@
             `).join("");
         }
 
+        // ── 🎯 Clientes por recuperar (FASE 1 -- exclusivamente lectura) ──
+        // El backend (GET /admin/recuperacion/candidatos) ya aplica todos los
+        // filtros de exclusión -- este bloque solo pinta lo que llega, nunca
+        // recalcula ni descarta candidatos en el frontend.
+        const ETIQUETA_PRIORIDAD = { alta: "🔴 Alta", media: "🟡 Media" };
+        const ETIQUETA_ANTIGUEDAD = { reciente: "Reciente (<24h)", "1-7 dias": "1–7 días", recuperacion: "Recuperación (>7 días)" };
+        const ETIQUETA_ESTADO_INTENTO = { aguardando_comprovante: "Esperando comprobante", cotizacion_realizada: "Cotizó, sin avanzar" };
+
+        async function cargarRecuperacion() {
+            if (!token) return;
+            try {
+                const r = await fetch("/admin/recuperacion/candidatos", { headers: authH() });
+                const lista = await r.json();
+                window._ultimosCandidatosRecuperacion = Array.isArray(lista) ? lista : [];
+                renderRecuperacion(window._ultimosCandidatosRecuperacion);
+            } catch (e) { console.error("Error cargando clientes por recuperar:", e); }
+        }
+
+        function renderRecuperacion(lista) {
+            const total = lista.length;
+            const alta = lista.filter(c => c.prioridad === "alta").length;
+            const media = lista.filter(c => c.prioridad === "media").length;
+            const mas7d = lista.filter(c => c.antiguedad === "recuperacion").length;
+            document.getElementById("recTotal").innerText = total;
+            document.getElementById("recTotalCard").innerText = total;
+            document.getElementById("recAlta").innerText = alta;
+            document.getElementById("recMedia").innerText = media;
+            document.getElementById("recMas7d").innerText = mas7d;
+
+            const tbody = document.getElementById("tablaRecuperacion");
+            if (total === 0) {
+                tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#8b949e;padding:20px;">Sin clientes por recuperar en este momento.</td></tr>';
+                return;
+            }
+            tbody.innerHTML = lista.map(c => `
+                <tr>
+                    <td><strong>${escapeHtml(c.nombre || "Cliente")}</strong></td>
+                    <td><small>${escapeHtml(c.phone || "-")}</small></td>
+                    <td>${ETIQUETA_PRIORIDAD[c.prioridad] || "-"}</td>
+                    <td>${escapeHtml(c.servicio || "-")}</td>
+                    <td>${c.ultimoMonto != null ? "R$" + c.ultimoMonto : "-"}</td>
+                    <td>${c.fechaIntento ? new Date(c.fechaIntento).toLocaleDateString("pt-BR") : "-"}</td>
+                    <td>${ETIQUETA_ANTIGUEDAD[c.antiguedad] || "-"}</td>
+                    <td><small>${ETIQUETA_ESTADO_INTENTO[c.estado] || escapeHtml(c.estado || "-")}</small></td>
+                    <td><small>${c.tipoUltimoRecordatorio ? escapeHtml(c.tipoUltimoRecordatorio) + " · " + new Date(c.ultimoRecordatorio).toLocaleDateString("pt-BR") : "—"}</small></td>
+                    <td><button class="page-btn" onclick="recuperacionVerHistorial('${c.phone}')">🕘 Ver historial</button></td>
+                </tr>
+            `).join("");
+        }
+
+        // Reutiliza las operaciones YA cargadas por refreshData() (window.
+        // _ultimasOperaciones) -- ningún fetch nuevo, ningún dato adicional
+        // expuesto. Mismo criterio de presentación (alert) que
+        // entregaVerHistorial() para el historial de una entrega individual.
+        function recuperacionVerHistorial(phone) {
+            const todas = (window._ultimasOperaciones || []).filter(o => o.phone === phone);
+            if (todas.length === 0) { alert("Sin operaciones registradas para este cliente."); return; }
+            const texto = todas.map(o =>
+                `#${o.id} — ${o.tipo} — R$${o.monto} — ${o.status} — ${new Date(o.created_at).toLocaleDateString("pt-BR")}`
+            ).join("\n");
+            alert(`🕘 Historial de operaciones:\n\n${texto}`);
+        }
+
         async function guardarOperador() {
             const btn = document.getElementById("btnGuardarOperador");
             const nombre = document.getElementById("op_nombre").value.trim();
@@ -997,6 +1111,7 @@
                 cargarRecargas();
                 cargarBloqueados();
                 cargarOperadores();
+                cargarRecuperacion();
 
                 const tasas      = await resTasas.json();
                 const clientes   = await resClientes.json();
@@ -1172,6 +1287,7 @@
         toggleColapsable("hdrPendientes", "bodyPendientes", "chevPendientes");
         toggleColapsable("hdrEnProceso", "bodyEnProceso", "chevEnProceso");
         toggleColapsable("hdrEntregas", "bodyEntregas", "chevEntregas");
+        toggleColapsable("hdrRecuperacion", "bodyRecuperacion", "chevRecuperacion");
         // Pendientes abierto por defecto (requiere atención inmediata); En Proceso plegado (solo seguimiento)
         document.getElementById("bodyPendientes").classList.add("abierto");
         document.getElementById("chevPendientes").classList.add("abierto");

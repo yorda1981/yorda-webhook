@@ -11,6 +11,7 @@ const openaiService = require("./src/services/openai");
 const { obtenerTodos, obtenerCliente } = require("./src/services/customer-memory");
 const { obtenerTodas, confirmarOperacion, completarOperacion, obtenerEstadisticas } = require("./src/services/operations");
 const crm = require("./src/services/crm");
+const recuperacionService = require("./src/services/recuperacion");
 const entregasService = require("./src/services/entregas");
 const { leerTasas } = require("./src/flows/cotizacion-flow");
 const { esPedidoWeb, procesarPedidoWeb, crearEntregaManual } = require("./src/flows/pedido-web-flow");
@@ -406,6 +407,13 @@ app.get("/admin/crm/stats", adminReadLimiter, verificarToken, async (req, res) =
         const dias = req.query.dias ? Number(req.query.dias) : 30;
         res.json(await crm.obtenerEstadisticasCRM(dias));
     } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// CRM de Recuperación — FASE 1, exclusivamente lectura (ver
+// src/services/recuperacion.js). Nunca envía WhatsApp ni escribe en la DB.
+app.get("/admin/recuperacion/candidatos", adminReadLimiter, verificarToken, async (req, res) => {
+    try { res.json(await recuperacionService.obtenerCandidatosRecuperacion()); }
+    catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.get("/admin/bloqueados", adminReadLimiter, verificarToken, async (req, res) => {

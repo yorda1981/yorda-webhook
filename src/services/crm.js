@@ -21,6 +21,7 @@
 const pool          = require("../../db");
 const { enviarMensaje } = require("./zapi");
 const { filtrarNoBloqueados } = require("./blocked-numbers");
+const { enPausaHumana } = require("./webhook-guard");
 
 // ─────────────────────────────────────────
 // DETECCIÓN DE IDIOMA
@@ -365,6 +366,13 @@ async function onda30min() {
 
     for (const c of await filtrarNoBloqueados(r.rows)) {
         try {
+            // Si un operador humano está atendiendo esta conversación ahora
+            // mismo (pausa_hasta activa), el recordatorio automático no debe
+            // interrumpir -- mismo mecanismo que entregas-avisos.js
+            // (customers.pausa_hasta / webhook-guard.js:enPausaHumana). Se
+            // reintentará solo cuando este job vuelva a correr y la pausa ya
+            // haya vencido.
+            if (await enPausaHumana(c.phone)) continue;
             const lang   = c.idioma === "pt" ? "pt" : "es";
             const nombre = c.nombre ? c.nombre.split(" ")[0] : null;
             await enviarMensaje(c.phone, msg("recuperar_30m", lang, nombre, c.ultimo_monto));
@@ -390,6 +398,7 @@ async function onda24h() {
 
     for (const c of await filtrarNoBloqueados(r.rows)) {
         try {
+            if (await enPausaHumana(c.phone)) continue;
             const lang   = c.idioma === "pt" ? "pt" : "es";
             const nombre = c.nombre ? c.nombre.split(" ")[0] : null;
             await enviarMensaje(c.phone, msg("recuperar_24h", lang, nombre));
@@ -416,6 +425,7 @@ async function onda7d() {
 
     for (const c of await filtrarNoBloqueados(r.rows)) {
         try {
+            if (await enPausaHumana(c.phone)) continue;
             const lang   = c.idioma === "pt" ? "pt" : "es";
             const nombre = c.nombre ? c.nombre.split(" ")[0] : null;
             await enviarMensaje(c.phone, msg("recuperar_7d", lang, nombre));
