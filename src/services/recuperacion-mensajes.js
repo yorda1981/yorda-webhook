@@ -252,6 +252,24 @@ function renderizarMensaje(candidato, { familia, indice }) {
     return FAMILIAS[familia].variantes[indice](ctx);
 }
 
+// Reconstruye exclusivamente una variante que pertenece al pool actual para
+// ese candidato. El cliente nunca puede suministrar texto arbitrario: solo
+// familia+índice, que se valida contra tono, servicio y límites vigentes.
+function construirVarianteAprobada(candidato, { familia, indice }) {
+    if (!candidato || typeof familia !== "string" || !Number.isInteger(indice)) return null;
+    const tono = antiguedadTono(candidato.fechaIntento);
+    const elegibles = familiasElegibles(tono, !!candidato.tipoFavorito);
+    if (!elegibles.includes(familia)) return null;
+    if (!FAMILIAS[familia] || indice < 0 || indice >= FAMILIAS[familia].variantes.length) return null;
+    return {
+        mensaje: renderizarMensaje(candidato, { familia, indice }),
+        familia,
+        indice,
+        tono,
+        servicio: candidato.servicio || fraseServicio(candidato.tipoFavorito)
+    };
+}
+
 // ── Punto de entrada del preview -- combina selección + render, y agrega
 // los metadatos que el dashboard muestra de forma discreta (familia,
 // servicio, antigüedad) SIN que formen parte del texto que vería el
@@ -281,6 +299,7 @@ module.exports = {
     totalOpciones,
     elegirFamiliaVariante,
     renderizarMensaje,
+    construirVarianteAprobada,
     generarMensajePreview,
     FAMILIAS
 };

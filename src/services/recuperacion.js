@@ -103,13 +103,28 @@ const PREDICADO_CANDIDATO = `
           AND o.status IN ('confirmada','completada')
           AND o.created_at > COALESCE(cu.fecha_estado, cu.fecha_cotizacion)
     )
+    -- Cooldown independiente de los recordatorios automáticos: un envío
+    -- manual exitoso oculta al cliente durante 24h, pero no borra historial.
+    AND NOT EXISTS (
+        SELECT 1 FROM recuperacion_envios re
+        WHERE re.phone = cu.phone
+          AND re.estado = 'ENVIADO'
+          AND re.enviado_at > NOW() - INTERVAL '24 hours'
+    )
 `;
 
 const SELECT_CANDIDATO = `
     SELECT
         cu.phone, cu.nombre, cu.estado, cu.tipo_favorito, cu.ultimo_monto,
         COALESCE(cu.fecha_estado, cu.fecha_cotizacion) AS fecha_intento,
-        cu.estado_crm, cu.ultimo_recordatorio, cu.tipo_ultimo_recordatorio
+        cu.estado_crm, cu.ultimo_recordatorio, cu.tipo_ultimo_recordatorio,
+        (SELECT json_build_object(
+            'estado', re.estado,
+            'fecha', COALESCE(re.enviado_at, re.actualizado_at, re.creado_at),
+            'error', re.error
+         ) FROM recuperacion_envios re
+         WHERE re.phone = cu.phone
+         ORDER BY re.id DESC LIMIT 1) AS ultima_recuperacion
     FROM customers cu
 `;
 
@@ -126,7 +141,8 @@ function mapearFilaCandidato(row) {
         antiguedad:             antiguedadDe(row.fecha_intento),
         estadoCrm:              row.estado_crm,
         ultimoRecordatorio:     row.ultimo_recordatorio,
-        tipoUltimoRecordatorio: row.tipo_ultimo_recordatorio
+        tipoUltimoRecordatorio: row.tipo_ultimo_recordatorio,
+        ultimaRecuperacion:     row.ultima_recuperacion || null
     };
 }
 
@@ -152,10 +168,10 @@ async function obtenerCandidatosRecuperacion() {
 // generar cualquier preview de mensaje. Un candidato que el frontend
 // recuerde de una carga vieja (ya operó, se bloqueó, entró en pausa, etc.)
 // nunca pasa esto, aunque el frontend lo siga mostrando en pantalla.
-async function obtenerCandidatoRecuperablePorTelefono(phone) {
+async function obtenerCandidatoRecuperablePorTelefono(phone, executor = pool) {
     if (!phone) return null;
     try {
-        const r = await pool.query(`
+        const r = await executor.query(`
             ${SELECT_CANDIDATO}
             WHERE cu.phone = $1 AND ${PREDICADO_CANDIDATO}
         `, [phone]);

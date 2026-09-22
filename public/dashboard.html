@@ -212,15 +212,17 @@
             </div>
         </div>
 
-        <!-- Preview de mensaje de recuperación -- solo lectura, nunca envía WhatsApp. -->
+        <!-- Preview y envío manual individual de recuperación. -->
         <div id="modalRecuperacionMensaje" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:1000; align-items:center; justify-content:center;">
             <div style="background:#141a2e; border:1px solid #2d355a; border-radius:16px; padding:24px; max-width:440px; width:90%;">
                 <h3 style="margin-top:0;">👀 Vista previa del mensaje</h3>
-                <p style="color:#8b949e; font-size:11px; margin-top:-8px;">Solo revisión -- este mensaje NO se envía desde aquí.</p>
+                <p style="color:#8b949e; font-size:11px; margin-top:-8px;">Envío individual, solo después de confirmar explícitamente.</p>
                 <div id="recMensajeTexto" style="background:#0b0e1a; border-radius:10px; padding:16px; font-size:14px; line-height:1.5; white-space:pre-wrap; margin-bottom:10px;">—</div>
                 <div id="recMensajeMeta" style="font-size:11px; color:#8b949e; margin-bottom:18px;">—</div>
+                <div id="recMensajeHistorial" style="font-size:11px; color:#8b949e; margin-bottom:14px;">Última recuperación: —</div>
                 <div style="display:flex; gap:10px; justify-content:flex-end;">
                     <button class="page-btn" onclick="recuperacionOtraVariante()">🔄 Otra variante</button>
+                    <button class="page-btn" id="btnEnviarRecuperacion" onclick="recuperacionEnviarActual()">📤 Enviar este mensaje</button>
                     <button class="page-btn" onclick="recuperacionCerrarMensaje()">Cerrar</button>
                 </div>
             </div>
@@ -1020,12 +1022,9 @@
             `).join("");
         }
 
-        // ── 👀 Ver mensaje -- preview del motor de recuperación (FASE 2) ──
-        // Solo genera texto para revisar. NUNCA envía WhatsApp, NUNCA
-        // escribe en la DB -- el backend (GET /admin/recuperacion/mensaje)
-        // es puro cálculo de lectura. "Otra variante" vuelve a pedir al
-        // mismo endpoint indicando qué (familia, índice) NO debe repetir.
+        // ── 👀 Ver mensaje / 📤 envío manual individual (FASE 2) ──
         window._recuperacionPreviewActual = null;
+        let recuperacionEnvioEnCurso = false;
 
         async function recuperacionVerMensaje(phone) {
             await recuperacionCargarMensaje(phone, null);
@@ -1041,9 +1040,14 @@
             const modal = document.getElementById("modalRecuperacionMensaje");
             const textoEl = document.getElementById("recMensajeTexto");
             const metaEl = document.getElementById("recMensajeMeta");
+            const historialEl = document.getElementById("recMensajeHistorial");
+            const enviarBtn = document.getElementById("btnEnviarRecuperacion");
             modal.style.display = "flex";
             textoEl.innerText = "Generando...";
             metaEl.innerText = "";
+            historialEl.innerText = "Última recuperación: —";
+            enviarBtn.disabled = true;
+            enviarBtn.innerText = "📤 Enviar este mensaje";
             try {
                 let url = `/admin/recuperacion/mensaje?phone=${encodeURIComponent(phone)}`;
                 if (excluir) url += `&excluirFamilia=${encodeURIComponent(excluir.familia)}&excluirIndice=${excluir.indice}`;
@@ -1054,11 +1058,16 @@
                     alert("❌ " + (d.error || "No se pudo generar el mensaje."));
                     return;
                 }
-                window._recuperacionPreviewActual = { phone: d.phone, familia: d.familia, indice: d.indice };
+                window._recuperacionPreviewActual = { phone: d.phone, familia: d.familia, indice: d.indice, mensaje: d.mensaje, nombre: (window._ultimosCandidatosRecuperacion || []).find(c => c.phone === d.phone)?.nombre || "Cliente" };
                 textoEl.innerText = d.mensaje;
                 // Información interna del dashboard -- nunca forma parte del
                 // mensaje que vería el cliente.
                 metaEl.innerText = `Familia: ${d.familia} · Servicio: ${d.servicio} · Antigüedad: ${d.antiguedadTono}`;
+                if (d.ultimaRecuperacion) {
+                    const h = d.ultimaRecuperacion;
+                    historialEl.innerText = `Última recuperación: ${new Date(h.fecha).toLocaleString("pt-BR")} · Estado: ${h.estado}`;
+                }
+                enviarBtn.disabled = false;
             } catch (e) {
                 recuperacionCerrarMensaje();
                 alert("❌ Error de conexión al generar el mensaje.");
@@ -1068,6 +1077,43 @@
         function recuperacionCerrarMensaje() {
             document.getElementById("modalRecuperacionMensaje").style.display = "none";
             window._recuperacionPreviewActual = null;
+        }
+
+        async function recuperacionEnviarActual() {
+            const actual = window._recuperacionPreviewActual;
+            const btn = document.getElementById("btnEnviarRecuperacion");
+            if (!actual || recuperacionEnvioEnCurso) return;
+            const nombre = String(actual.nombre || "Cliente").split(" ")[0] || "Cliente";
+            if (!confirm(`¿Enviar este mensaje a ${nombre}?`)) return;
+            recuperacionEnvioEnCurso = true;
+            btn.disabled = true;
+            btn.innerText = "Enviando...";
+            try {
+                const idempotencyKey = (window.crypto && crypto.randomUUID)
+                    ? crypto.randomUUID()
+                    : `rec-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+                const r = await fetch("/admin/recuperacion/enviar", {
+                    method: "POST",
+                    headers: { ...authH(), "Content-Type": "application/json" },
+                    body: JSON.stringify({ phone: actual.phone, familia: actual.familia, indice: actual.indice, idempotencyKey })
+                });
+                const d = await r.json();
+                if (!r.ok || !d.ok) {
+                    btn.disabled = false;
+                    btn.innerText = "📤 Enviar este mensaje";
+                    alert("❌ " + (d.error || "No se pudo enviar. La situación del cliente puede haber cambiado."));
+                    return;
+                }
+                btn.innerText = "✅ ENVIADO";
+                document.getElementById("recMensajeHistorial").innerText = `Última recuperación: ${new Date(d.historial.fecha).toLocaleString("pt-BR")} · Estado: ENVIADO`;
+                await cargarRecuperacion();
+            } catch (e) {
+                btn.disabled = false;
+                btn.innerText = "📤 Enviar este mensaje";
+                alert("❌ Error de conexión al enviar.");
+            } finally {
+                recuperacionEnvioEnCurso = false;
+            }
         }
 
         // Reutiliza las operaciones YA cargadas por refreshData() (window.

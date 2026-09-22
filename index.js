@@ -13,6 +13,7 @@ const { obtenerTodas, confirmarOperacion, completarOperacion, obtenerEstadistica
 const crm = require("./src/services/crm");
 const recuperacionService = require("./src/services/recuperacion");
 const recuperacionMensajes = require("./src/services/recuperacion-mensajes");
+const recuperacionEnvios = require("./src/services/recuperacion-envios");
 const entregasService = require("./src/services/entregas");
 const { leerTasas } = require("./src/flows/cotizacion-flow");
 const { esPedidoWeb, procesarPedidoWeb, crearEntregaManual } = require("./src/flows/pedido-web-flow");
@@ -438,8 +439,34 @@ app.get("/admin/recuperacion/mensaje", adminReadLimiter, verificarToken, async (
             ? { familia: String(req.query.excluirFamilia), indice: Number(req.query.excluirIndice) }
             : null;
 
-        res.json(recuperacionMensajes.generarMensajePreview(candidato, { excluir }));
+        const preview = recuperacionMensajes.generarMensajePreview(candidato, { excluir });
+        preview.ultimaRecuperacion = candidato.ultimaRecuperacion || null;
+        res.json(preview);
     } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// FASE 2: envío manual individual. El servidor reconstruye el texto a partir
+// de familia+índice y revalida el candidato; nunca acepta texto del cliente.
+app.post("/admin/recuperacion/enviar", adminWriteLimiter, verificarToken, async (req, res) => {
+    try {
+        const body = req.body || {};
+        const resultado = await recuperacionEnvios.enviarRecuperacionManual({
+            phone: String(body.phone || "").trim(),
+            familia: body.familia,
+            indice: Number(body.indice),
+            idempotencyKey: String(body.idempotencyKey || "").trim()
+        });
+        const codigo = resultado.code;
+        const status = codigo === "ENVIADO" || codigo === "YA_ENVIADO" ? 200
+            : codigo === "NO_ELEGIBLE" ? 409
+            : codigo === "COOLDOWN" || codigo === "EN_CURSO" || codigo === "INTENTO_EXISTENTE" ? 409
+            : codigo === "VARIANTE_INVALIDA" || codigo === "PETICION_INVALIDA" || codigo === "IDEMPOTENCY_CONFLICT" ? 400
+            : 502;
+        res.status(status).json(resultado);
+    } catch (e) {
+        console.error("❌ Error en recuperación manual:", e.message);
+        res.status(500).json({ ok: false, code: "ERROR_INTERNO", error: "No se pudo procesar el envío." });
+    }
 });
 
 app.get("/admin/bloqueados", adminReadLimiter, verificarToken, async (req, res) => {
