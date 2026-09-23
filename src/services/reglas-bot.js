@@ -232,12 +232,80 @@ function normalizarNumeroCubano(raw) {
 // escribía en portugués ("Posso passar reais", "Qual o valor do cup") no coincidía
 // con ninguna regla y el mensaje caía en la IA de respaldo, que a veces decidía
 // quedarse en silencio. Se agregaron los equivalentes en portugués.
-function esConsultaTasas(txt) {
-    return /a cuanto|a como|tasa.*hoy|cambio.*hoy|hoy.*cambio|hoy.*tasa|cual es la tasa|como esta el cambio|como esta la tasa|cuanto vale|cuanto esta|precio.*hoy|hoy.*precio|tasa de hoy|cambio de hoy|qual o valor|qual a taxa|quanto esta|quanto está|quanto vale|taxa de hoje|cambio de hoje|hoje.*taxa|taxa.*hoje/.test(txt);
+// NORMALIZACIÓN DE VOCABULARIO PARA CLASIFICAR INTENCIÓN.
+//
+// Recibe texto ya pasado por norm() (minúsculas y sin tildes, así que
+// "câmbio"->"cambio", "envío"->"envio", "transferência"->"transferencia")
+// y colapsa variantes ES/PT a una sola forma canónica, para que los
+// clasificadores de abajo razonen por CONCEPTO y no por frase exacta.
+// Solo se usa para decidir intención: nunca para extraer montos ni para
+// armar texto que se le manda al cliente.
+const SINONIMOS_INTENCION = [
+    [/\bhj\b/g, "hoje"],
+    [/\b(taxas?|tasas)\b/g, "tasa"],
+    [/\bcambios\b/g, "cambio"],
+    [/\bcotacao\b/g, "cotizacion"],
+    [/\benvi(o|os|ar|a|e|amos)\b/g, "enviar"],
+    [/\bmand(o|a|e|ar|amos)\b/g, "mandar"],
+    [/\b(transferencias?|transfiero|transferir)\b/g, "transferir"],
+    [/\b(remessas?|remesas)\b/g, "remesa"],
+    [/\b(dinheiro|plata)\b/g, "dinero"],
+    [/\bpra\b/g, "para"]
+];
+
+function canonizarIntencion(txt) {
+    let c = String(txt || "");
+    for (const [re, reemplazo] of SINONIMOS_INTENCION) c = c.replace(re, reemplazo);
+    return c;
 }
 
+const TASAS_FRASES = /a cuanto|a como|tasa.*hoy|cambio.*hoy|hoy.*cambio|hoy.*tasa|cual es la tasa|como esta el cambio|como esta la tasa|cuanto vale|cuanto esta|precio.*hoy|hoy.*precio|tasa de hoy|cambio de hoy|qual o valor|qual a taxa|quanto esta|quanto está|quanto vale|taxa de hoje|cambio de hoje|hoje.*taxa|taxa.*hoje/;
+
+// Además de las frases históricas, reconoce por concepto: menciona la
+// tasa/el cambio Y pregunta por su valor actual ("o câmbio como está hj",
+// "cambio hoy", "qual a taxa hoje"), en cualquier orden. La rama conceptual
+// no aplica si el mensaje trae números (eso lo resuelven los flujos de
+// cotización con monto) ni si habla de tarjeta ("cambio de tarjeta").
+function esConsultaTasas(txt) {
+    return TASAS_FRASES.test(txt) || esConsultaTasasPorConcepto(txt);
+}
+
+function esConsultaTasasPorConcepto(txt) {
+    const c = canonizarIntencion(txt);
+    if (/\d/.test(c) || /\b(tarjeta|cartao)\b/.test(c)) return false;
+    const mencionaTasa    = /\b(tasa|cambio|cotizacion)\b/.test(c);
+    const pideValorActual = /\b(hoy|hoje|ahora|agora|como|cuanto|quanto|cual|qual)\b/.test(c) || c.includes("?");
+    return mencionaTasa && pideValorActual;
+}
+
+const INTENCION_FRASES = /quiero enviar|necesito enviar|quiero mandar|quiero hacer (una )?(remesa|transferencia)|necesito (una )?(remesa|transferencia)|posso (enviar|mandar|passar)|quero enviar|quero mandar|preciso enviar|quero fazer (uma )?(remessa|transferencia)|preciso (fazer )?(uma )?(remessa|transferencia)/;
+
+// Además de las frases históricas, reconoce por concepto: verbo de deseo/
+// necesidad + (hasta 3 palabras) + acción de envío ("quero realizar envio a
+// Cuba", "quiero hacer un envío", "quero fazer um envio"). Reconocer la
+// intención NO fija monto ni inicia operación: el caller solo pregunta
+// cuánto. Si lo que se quiere mandar es un comprobante/foto/pix, no es
+// intención de envío de dinero.
 function esIntencionSinMonto(txt) {
-    return /quiero enviar|necesito enviar|quiero mandar|quiero hacer (una )?(remesa|transferencia)|necesito (una )?(remesa|transferencia)|posso (enviar|mandar|passar)|quero enviar|quero mandar|preciso enviar|quero fazer (uma )?(remessa|transferencia)|preciso (fazer )?(uma )?(remessa|transferencia)/.test(txt);
+    if (INTENCION_FRASES.test(txt)) return true;
+    const c = canonizarIntencion(txt);
+    if (/\b(foto|fotos|comprobante|comprovante|documento|pix|imagen|imagem|captura|print|mensaje|mensagem|audio)\b/.test(c)) return false;
+    return /\b(quiero|quero|necesito|preciso|deseo|quisiera|gostaria de|me gustaria|puedo|posso)\b(\s+\S+){0,3}?\s+(enviar|mandar|transferir|remesa)\b/.test(c);
+}
+
+// PORTÓN ÚNICO DE NEGOCIO — lo que los clasificadores de arriba reconocen
+// (o menciona vocabulario inequívoco de remesas/cambio) nunca debe ser
+// descartado antes por el filtro de gatillos de openai.js, ni quedar en
+// silencio si la IA de respaldo contesta IGNORAR. Así hay UN solo criterio
+// en vez de dos vocabularios que se contradicen.
+function esMensajeDeNegocio(txt) {
+    // Se usa la rama CONCEPTUAL de tasas, no TASAS_FRASES: esa regex
+    // histórica tiene subcadenas muy amplias ("a como" coincide con "hola
+    // como estas") que, abiertas en el portón, harían responder a saludos.
+    if (esConsultaTasasPorConcepto(txt) || esIntencionSinMonto(txt)) return true;
+    const c = canonizarIntencion(txt);
+    return /\b(remesa|cuba|cup|usd|mlc|dolar|dolares|tasa|cambio|cotizacion)\b/.test(c) ||
+        /\b(enviar|mandar|transferir)\b.{0,30}\b(dinero|reales|reais)\b/.test(c);
 }
 
 // ─────────────────────────────────────────────────────────
@@ -511,8 +579,10 @@ module.exports = {
     nombraModalidadRecarga,
     interpretarAccionRecarga,
     normalizarNumeroCubano,
+    canonizarIntencion,
     esConsultaTasas,
     esIntencionSinMonto,
+    esMensajeDeNegocio,
     yaAvisoEntregaReciente,
     CONTEXTO_CORTO_TTL_MS,
     contextoCortoVigente,

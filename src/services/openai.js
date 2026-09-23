@@ -9,13 +9,14 @@ const crm                                          = require("./crm");
 const {
     esTarjetaDuplicada, esConsultaEntrega, esBareMontoValido, esEnvioNuevoSobreAbandonado, puedeCotizarBRL,
     clienteEstaOcupado, tieneContextoReemplazable, esFraseDeAbandonoExplicito,
-    debeCompletarConMontoPendiente, debeConfirmarCotizacion, tieneTarjetaGuardada, esConsultaTasas, esIntencionSinMonto, yaAvisoEntregaReciente,
+    debeCompletarConMontoPendiente, debeConfirmarCotizacion, tieneTarjetaGuardada, esConsultaTasas, esIntencionSinMonto, esMensajeDeNegocio, yaAvisoEntregaReciente,
     contextoUtilizable, interpretarSeleccionOpcion, interpretarTarjetaPorPalabra, monedaPendienteDeContexto,
     esRechazoTarjeta, esPausaTemporal, esSenalConfusion, esCierreNatural, esPreguntaExploratoria,
     interpretarAccionRecarga,
     franjaPorHora, franjaSaludoExplicita, primerNombreConfiable
 } = require("./reglas-bot");
 const { horaSaoPaulo } = require("../utils/timezone");
+const { log } = require("../utils/structured-logger");
 
 // Flows
 const { detectarImagenUnificada, detectarComprobantePDF, llamarAsistente } = require("../flows/imagen-flow");
@@ -41,9 +42,13 @@ const {
 // ROUTER PRINCIPAL
 // ─────────────────────────────────────────
 
-async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
+// Resultado de un mensaje, para observabilidad (ver logResultadoMensaje):
+// "respondido" por defecto; los puntos donde el bot se queda en silencio lo
+// reportan con su motivo vía opciones.onResultado.
+async function procesarMensaje(phone, text, pushName = "", imageUrl = null, opciones = {}) {
+    const reportar = (resultado) => { try { opciones?.onResultado?.(resultado); } catch { /* observabilidad nunca rompe el flujo */ } };
     try {
-        if (!text || !phone) return "";
+        if (!text || !phone) { reportar("sin_texto"); return ""; }
 
         const txt = norm(text);
 
@@ -88,6 +93,8 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
                     : "Estamos fora do horário 😊\n\nNosso horário de atendimento é das 8h às 23h (horário de Brasília).\n\nResponderemos assim que estivermos disponíveis. 👌";
                 await enviarSeguro(phone, msg);
                 marcarSaludoPendiente(phone).catch(() => {});
+            } else {
+                reportar("fuera_horario");
             }
             return "";
         }
@@ -132,9 +139,13 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         const debeResponder = gatilhos.some(g => txt.includes(norm(g))) ||
             palabrasNegocio.some(p => txt.includes(p)) || !!cliente?.estado || !!imageUrl ||
             /^\d+([.,]\d{1,2})?$/.test(txt.trim()) || txt.replace(/\D/g,"").length === 16 || esConfirma ||
-            montoValido; // FIX: "400 reales" tras "¿Cuánto deseas enviar?" no tenía estado guardado
-                         // ni gatillo, y quedaba sin respuesta pese a ser un monto válido.
-        if (!debeResponder) return "";
+            montoValido || // FIX: "400 reales" tras "¿Cuánto deseas enviar?" no tenía estado guardado
+                           // ni gatillo, y quedaba sin respuesta pese a ser un monto válido.
+            // Portón unificado: lo que los clasificadores reales de reglas-bot.js
+            // reconocen (tasas, intención de envío, vocabulario de remesas) nunca
+            // se descarta aquí por no estar en la lista de gatillos.
+            esMensajeDeNegocio(txt);
+        if (!debeResponder) { reportar("porton"); return ""; }
 
         // ── Abandono explícito de la operación en curso ──
         // "olvida eso"/"cancela eso"/"no era eso"/"otra operación" -- el cliente
@@ -611,10 +622,10 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
         if (hayContextoBRL && !esUSD && !esMLC && puedeCotizarBRL(cliente, montoValido, valorFinal, hayOperacionRealBRL))
             return await cotizarBRL(phone, pushName, valorFinal, lang) || "";
 
-        if (valorFinal && !montoValido) return "";
+        if (valorFinal && !montoValido) { reportar("monto_invalido"); return ""; }
 
         // ── Cuba sin monto ──
-        if (txt.includes("cuba") && /dinero|dinheiro|enviar|mandar|pasar|passar|plata|remesa|remessa/.test(txt)) {
+        if (txt.includes("cuba") && (/dinero|dinheiro|enviar|mandar|pasar|passar|plata|remesa|remessa/.test(txt) || esIntencionSinMonto(txt))) {
             const n = pushName ? `, ${pushName.split(" ")[0]}` : "";
             await enviarSeguro(phone, `¡Hola${n}! 😊\n\n¿Cuánto quieres enviar a Cuba?`); return "";
         }
@@ -636,7 +647,8 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
 
         // ── Asistente GPT fallback ──
         const palabras = txt.trim().split(/\s+/);
-        if (palabras.length < 4 || /^\d+$/.test(txt.trim())) return "";
+        if (palabras.length < 4 || /^\d+$/.test(txt.trim())) { reportar("fallback_corto"); return ""; }
+        let motivoSilencio = "ia_vacio";
         try {
             // FIX SESIÓN VIEJA: si la última interacción fue hace más de 2 horas, no
             // encadenar el hilo de GPT anterior — si no, un cliente que vuelve días
@@ -644,16 +656,41 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null) {
             const hiloVencido = cliente?.ultima_interaccion &&
                 (Date.now() - new Date(cliente.ultima_interaccion).getTime()) > DOS_HORAS;
             const { texto, responseId } = await llamarAsistente(text, hiloVencido ? null : cliente?.last_response_id);
-            const esIgnorar = /^ignorar[.!]?$/i.test(texto.trim()) || /silencio total/i.test(texto) || texto.trim() === "";
-            if (texto && !esIgnorar) {
+            const esIgnorar = /^ignorar[.!]?$/i.test(texto.trim()) || /silencio total/i.test(texto);
+            if (texto && texto.trim() && !esIgnorar) {
                 await guardarCliente({ phone, lastResponseId: responseId });
                 await enviarSeguro(phone, texto);
                 return texto;
             }
-        } catch (e) { console.error("❌ Asistente:", e.message); }
+            motivoSilencio = esIgnorar ? "ia_ignorar" : "ia_vacio";
+        } catch (e) { console.error("❌ Asistente:", e.message); motivoSilencio = "ia_error"; }
 
-    } catch (e) { console.error("❌ procesarMensaje:", e.message); }
+        // ── Red de seguridad del fallback ──
+        // Un mensaje claramente de negocio (remesas, Cuba, cambio/tasas,
+        // CUP/USD/MLC, intención de enviar) no queda en silencio solo porque la
+        // IA contestó IGNORAR/vacío o falló. Respuesta fija: no cita tasas,
+        // montos ni disponibilidad, y no inicia ninguna operación -- solo
+        // reencamina a los flujos deterministas (tasa del día o monto).
+        if (esMensajeDeNegocio(txt)) {
+            const m = esEs
+                ? "Claro, te ayudo con eso 😊 ¿Quieres saber la tasa de hoy o ya tienes el monto que deseas enviar?"
+                : "Claro, te ajudo com isso 😊 Quer saber a taxa de hoje ou já tem o valor que deseja enviar?";
+            await enviarSeguro(phone, m);
+            reportar(`respondido_rescate_${motivoSilencio}`);
+            return m;
+        }
+        reportar(motivoSilencio);
+
+    } catch (e) { console.error("❌ procesarMensaje:", e.message); reportar("error"); }
     return "";
+}
+
+// Una línea de log por mensaje de texto procesado, distinguiendo lo que se
+// respondió de lo que quedó en silencio y por qué (portón, IA IGNORAR, IA
+// vacía/error...). Solo teléfono enmascarado y el motivo -- nunca el texto.
+function logResultadoMensaje(phone, resultado = "respondido") {
+    if (String(resultado).startsWith("respondido")) log("MESSAGE_PROCESSED", { phone, resultado });
+    else log("MESSAGE_DISCARDED", { phone, motivo: resultado });
 }
 
 // ─────────────────────────────────────────
@@ -938,7 +975,7 @@ async function preguntarCantidadUSD(phone, txt, lang, esEs) {
 }
 
 module.exports = {
-    detectarImagenUnificada, detectarComprobantePDF, procesarMensaje, extraerMonto, detectarTarjetaTexto,
+    detectarImagenUnificada, detectarComprobantePDF, procesarMensaje, logResultadoMensaje, extraerMonto, detectarTarjetaTexto,
     // exportada aparte para pruebas automáticas del formato de saludo sin
     // pasar por todo el router -- es pura, no manda WhatsApp ni toca la DB.
     construirSaludo

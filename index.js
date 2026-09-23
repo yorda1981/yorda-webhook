@@ -323,9 +323,10 @@ app.post("/webhook", verificarSecretoWebhook, webhookLimiter, validarPayloadWebh
             const msgFinal = pendingMessages.get(phoneRaw);
             if (!msgFinal) return;
             try {
-                await openaiService.procesarMensaje(phoneRaw, msgFinal, pushName);
+                let resultado = "respondido";
+                await openaiService.procesarMensaje(phoneRaw, msgFinal, pushName, null, { onResultado: r => { resultado = r; } });
                 pendingMessages.delete(phoneRaw);
-                log("MESSAGE_PROCESSED", { phone: phoneRaw });
+                openaiService.logResultadoMensaje(phoneRaw, resultado);
             } catch (e) {
                 console.error(`❌ Error OpenAI: ${e.message}`);
                 log("EXTERNAL_API_ERROR", { origen: "openai.procesarMensaje", error: e.message });
