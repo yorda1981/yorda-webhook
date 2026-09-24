@@ -50,30 +50,31 @@
         .btn-limpiar:hover { opacity: 0.9; }
         .layout-superior { display: grid; grid-template-columns: 2fr 1fr; gap: 20px; align-items: start; margin-bottom: 30px; }
         @media (max-width: 900px) { .layout-superior { grid-template-columns: 1fr; } }
-        .columna-derecha { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
-        .columna-derecha .grid-inputs { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-        .columna-derecha input[type="number"] { padding: 10px 12px; font-size: 14px; }
-        /* El CRM ocupa todo el alto de la fila (igual al de la columna derecha);
-           contain:size evita que su contenido estire la fila -- scroll interno. */
-        #seccionCrmTransferencias { align-self: stretch; display: flex; flex-direction: column; min-width: 0; padding: 22px; }
-        #seccionCrmTransferencias.dashboard-section-collapsed { align-self: start; }
-        #seccionCrmTransferencias:not(.dashboard-section-collapsed) > .dashboard-section-body { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
-        .crm-tr-filtros { display: grid; grid-template-columns: minmax(0, 2fr) repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 10px; }
+        /* Tasas (izq.) + Nueva transferencia (der.) usan .layout-superior (2fr 1fr). */
+        .layout-superior > .config-section { min-width: 0; }
+        #seccionTasas .grid-inputs { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; }
+        #btnCrearTransferencia:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+        /* Resumen General + Embudo de Conversión en la misma fila. */
+        .fila-resumen-embudo { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(0, 2fr); gap: 20px; align-items: stretch; margin-bottom: 30px; }
+        .fila-resumen-embudo > .config-section { min-width: 0; }
+        @media (max-width: 1250px) { .fila-resumen-embudo .embudo-flow { flex-wrap: wrap; gap: 12px; } .fila-resumen-embudo .embudo-stage { flex: 1 1 calc(33.33% - 12px); } .fila-resumen-embudo .embudo-stage::after { display: none; } }
+        @media (max-width: 900px) { .fila-resumen-embudo { grid-template-columns: 1fr; } }
+        /* CRM de Transferencias: ancho completo; 5 filas al abrir, "Ver todas" amplía con scroll. */
+        .crm-tr-filtros { display: grid; grid-template-columns: minmax(0, 2fr) repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 10px; max-width: 900px; }
         .crm-tr-filtros .campo-tm { padding: 8px 10px; font-size: 12px; min-width: 0; }
-        .crm-tr-scroll { flex: 1 1 0; min-height: 360px; overflow: auto; contain: size; border: 1px solid #2d355a; border-radius: 12px; }
-        .crm-tr-tabla th { position: sticky; top: 0; background: var(--card); z-index: 1; padding: 8px 6px; font-size: 10px; white-space: normal; vertical-align: bottom; }
-        .crm-tr-tabla td { padding: 6px; font-size: 11px; white-space: nowrap; line-height: 1.35; }
-        .crm-tr-tabla td.crm-cliente { white-space: normal; min-width: 90px; max-width: 130px; }
+        .crm-tr-scroll { overflow: auto; border: 1px solid #2d355a; border-radius: 12px; }
+        .crm-tr-scroll.expandido { max-height: 60vh; }
+        .crm-tr-tabla th { position: sticky; top: 0; background: var(--card); z-index: 1; padding: 8px 10px; font-size: 10px; white-space: normal; vertical-align: bottom; }
+        .crm-tr-tabla td { padding: 7px 10px; font-size: 12px; white-space: nowrap; line-height: 1.35; }
+        .crm-tr-tabla td.crm-cliente { white-space: normal; min-width: 110px; }
         .crm-tr-tabla .btn-confirm { padding: 4px 8px; font-size: 10px; }
         .crm-estado { padding: 2px 6px; border-radius: 10px; font-size: 9px; font-weight: 700; text-transform: uppercase; }
         .crm-estado.pendiente { background: rgba(251,191,36,.15); color: var(--yellow); }
         .crm-estado.confirmada { background: rgba(96,165,250,.15); color: #60a5fa; }
         .crm-estado.completada { background: rgba(74,222,128,.15); color: var(--green); }
         .crm-estado.expirada { background: rgba(148,163,184,.15); color: #94a3b8; }
-        @media (max-width: 900px) {
-            .crm-tr-filtros { grid-template-columns: 1fr 1fr; }
-            .crm-tr-scroll { contain: none; flex: none; max-height: 65vh; min-height: 0; }
-        }
+        .crm-tr-pie { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-top: 8px; font-size: 11px; color: #8b949e; }
+        @media (max-width: 900px) { .crm-tr-filtros { grid-template-columns: 1fr 1fr; } }
         #btnCrearTransferencia:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
         .campo-tm { background: #0b0e1a; border: 1px solid #2d355a; padding: 12px 14px; border-radius: 10px; color: white; font-size: 14px; outline: none; }
         .tm-preview { background: #0b0e1a; border: 1px solid #2d355a; border-radius: 12px; padding: 12px 14px; font-size: 13px; line-height: 1.7; white-space: pre-line; margin-top: 14px; }
@@ -152,50 +153,51 @@
             </div>
         </div>
 
-        <div class="layout-superior">
-            <!-- CRM de Transferencias: las MISMAS operaciones reales de
-                 /admin/operaciones (WhatsApp, calculadora y alta manual), solo
-                 transferencias (nunca Entregas ni Recargas). Acciones = las de
-                 siempre (confirmar/completar). -->
-            <div class="config-section" id="seccionCrmTransferencias" style="margin-bottom:0;">
-                <h3 style="margin-bottom:12px;">💸 CRM de Transferencias <span class="badge-count" id="countCrmTransferencias">0</span></h3>
-                <div class="crm-tr-filtros">
-                    <input type="text" class="campo-tm" id="crmTrBuscar" placeholder="Buscar ID, cliente, teléfono o tarjeta" oninput="renderCrmTransferencias()">
-                    <select class="campo-tm" id="crmTrEstado" onchange="renderCrmTransferencias()">
-                        <option value="">Estado</option>
-                        <option value="pendiente">Pendiente</option>
-                        <option value="confirmada">Confirmada</option>
-                        <option value="completada">Completada</option>
-                        <option value="expirada">Expirada</option>
-                    </select>
-                    <select class="campo-tm" id="crmTrMoneda" onchange="renderCrmTransferencias()">
-                        <option value="">Moneda</option>
-                        <option value="CUP">CUP</option>
-                        <option value="USD">USD</option>
-                        <option value="MLC">MLC</option>
-                    </select>
-                    <select class="campo-tm" id="crmTrOrigen" onchange="renderCrmTransferencias()">
-                        <option value="">Origen</option>
-                        <option value="whatsapp">WhatsApp</option>
-                        <option value="dashboard_manual">Dashboard manual</option>
-                    </select>
-                </div>
-                <div class="crm-tr-scroll">
-                    <table class="crm-tr-tabla">
-                        <thead>
-                            <tr><th>ID</th><th>Fecha</th><th>Cliente / Teléfono</th><th>Moneda</th><th>BRL</th><th>Destino</th><th>Tarjeta/ cuenta</th><th>Estado</th><th>Origen</th><th>Acción</th></tr>
-                        </thead>
-                        <tbody id="tablaCrmTransferencias">
-                            <tr><td colspan="10" style="text-align:center; padding:20px; color:#8b949e;">Conecta para ver datos</td></tr>
-                        </tbody>
-                    </table>
-                </div>
-                <div id="crmTrPie" style="font-size:11px; color:#8b949e; margin-top:8px;"></div>
+        <!-- CRM de Transferencias: las MISMAS operaciones reales de
+             /admin/operaciones (WhatsApp, calculadora y alta manual), solo
+             transferencias (nunca Entregas ni Recargas). Acciones = las de
+             siempre (confirmar/completar). -->
+        <div class="config-section" id="seccionCrmTransferencias">
+            <h3 style="margin-bottom:12px;">💸 CRM de Transferencias <span class="badge-count" id="countCrmTransferencias">0</span></h3>
+            <div class="crm-tr-filtros">
+                <input type="text" class="campo-tm" id="crmTrBuscar" placeholder="Buscar ID, cliente, teléfono o tarjeta" oninput="renderCrmTransferencias()">
+                <select class="campo-tm" id="crmTrEstado" onchange="renderCrmTransferencias()">
+                    <option value="">Estado</option>
+                    <option value="pendiente">Pendiente</option>
+                    <option value="confirmada">Confirmada</option>
+                    <option value="completada">Completada</option>
+                    <option value="expirada">Expirada</option>
+                </select>
+                <select class="campo-tm" id="crmTrMoneda" onchange="renderCrmTransferencias()">
+                    <option value="">Moneda</option>
+                    <option value="CUP">CUP</option>
+                    <option value="USD">USD</option>
+                    <option value="MLC">MLC</option>
+                </select>
+                <select class="campo-tm" id="crmTrOrigen" onchange="renderCrmTransferencias()">
+                    <option value="">Origen</option>
+                    <option value="whatsapp">WhatsApp</option>
+                    <option value="dashboard_manual">Dashboard manual</option>
+                </select>
             </div>
+            <div class="crm-tr-scroll" id="crmTrScroll">
+                <table class="crm-tr-tabla">
+                    <thead>
+                        <tr><th>ID</th><th>Fecha</th><th>Cliente / Teléfono</th><th>Moneda</th><th>BRL</th><th>Destino</th><th>Tarjeta/ cuenta</th><th>Estado</th><th>Origen</th><th>Acción</th></tr>
+                    </thead>
+                    <tbody id="tablaCrmTransferencias">
+                        <tr><td colspan="10" style="text-align:center; padding:20px; color:#8b949e;">Conecta para ver datos</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="crm-tr-pie">
+                <span id="crmTrPie"></span>
+                <button class="page-btn" id="btnCrmTrVerMas" style="display:none;" onclick="toggleCrmTransferenciasVerMas()"></button>
+            </div>
+        </div>
 
-
-
-            <div class="columna-derecha">
+        <!-- Tasas + Nueva transferencia (debajo del CRM) -->
+        <div class="layout-superior">
             <div class="config-section" id="seccionTasas" style="margin-bottom:0;">
                 <h3>💱 Configuración de Tasas</h3>
                 <div id="tasasForm">
@@ -262,22 +264,6 @@
                 <div id="tmInfo" style="font-size:13px; margin-top:10px;"></div>
             </div>
 
-            <div class="config-section" style="margin-bottom:0;">
-                <h3 style="margin-bottom:4px;">📊 Resumen General</h3>
-                <p style="color:#8b949e; font-size:11px; margin-top:0; margin-bottom:10px;">Resumen financiero y comercial de Yorda Envíos</p>
-                <div class="resumen-compacto">
-                    <div class="resumen-compacto-item"><span class="label">Contactos registrados</span><span class="value" id="stat-clientes">—</span></div>
-                    <div class="resumen-compacto-item"><span class="label">Pago confirmado</span><span class="value" id="stat-ops">—</span></div>
-                    <div class="resumen-compacto-item"><span class="label">Volumen confirmado</span><span class="value" id="stat-vol">—</span></div>
-                    <div class="resumen-compacto-item"><span class="label">Pendientes de confirmación</span><span class="value" id="stat-pend" style="color: var(--yellow);">—</span></div>
-                    <div class="resumen-compacto-item"><span class="label">Completadas</span><span class="value" id="stat-completadas" style="color:#60a5fa;">—</span></div>
-                    <div class="resumen-compacto-item"><span class="label">Clientes cotizados hoy</span><span class="value" id="stat-cotizados" style="color:#38bdf8;">—</span></div>
-                    <div class="resumen-compacto-item"><span class="label">Cierres Hoy</span><span class="value" id="stat-cierres" style="color:var(--green);">—</span></div>
-                    <div class="resumen-compacto-item" title="No existe todavía una relación inequívoca entre cada cotización y su operación."><span class="label">Conversión hoy</span><span class="value" id="stat-conversion" style="color:#a78bfa;">—</span></div>
-                    <div class="resumen-compacto-item" title="Clientes actualmente en abandono con actividad en los últimos 30 días."><span class="label">En abandono (30 días)</span><span class="value" id="stat-abandonos" style="color:var(--red);">—</span></div>
-                </div>
-            </div>
-            </div>
         </div>
 
         <div class="config-section" style="border-left: 5px solid #a78bfa;">
@@ -692,23 +678,42 @@
             </div>
         </div>
 
-        <!-- EMBUDO CRM -->
-        <div class="config-section" style="border-left: 5px solid #a78bfa; margin-bottom: 30px;">
-            <h3 style="color:#a78bfa;">📊 Embudo de Conversión <small style="color:#8b949e;font-size:12px;font-weight:400;">· últimos 30 días</small></h3>
-            <p style="color:#8b949e;font-size:11px;margin-top:-6px;">Clientes registrados en los últimos 30 días y su avance comercial; etapas acumulativas por cliente único.</p>
-            <div id="embudo" class="embudo-flow"></div>
-            <div style="margin-top:20px; display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px;" id="crm-mini-stats">
-                <div style="background:#0b0e1a;border-radius:12px;padding:16px;border:1px solid #2d355a;">
-                    <div style="font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:1px;">Frecuentes</div>
-                    <div style="font-size:24px;font-weight:700;color:#fbbf24;margin-top:6px;" id="stat-frecuentes">—</div>
+        <!-- Resumen General + Embudo de Conversión, misma fila -->
+        <div class="fila-resumen-embudo">
+            <div class="config-section" style="margin-bottom:0;">
+                <h3 style="margin-bottom:4px;">📊 Resumen General</h3>
+                <p style="color:#8b949e; font-size:11px; margin-top:0; margin-bottom:10px;">Resumen financiero y comercial de Yorda Envíos</p>
+                <div class="resumen-compacto">
+                    <div class="resumen-compacto-item"><span class="label">Contactos registrados</span><span class="value" id="stat-clientes">—</span></div>
+                    <div class="resumen-compacto-item"><span class="label">Pago confirmado</span><span class="value" id="stat-ops">—</span></div>
+                    <div class="resumen-compacto-item"><span class="label">Volumen confirmado</span><span class="value" id="stat-vol">—</span></div>
+                    <div class="resumen-compacto-item"><span class="label">Pendientes de confirmación</span><span class="value" id="stat-pend" style="color: var(--yellow);">—</span></div>
+                    <div class="resumen-compacto-item"><span class="label">Completadas</span><span class="value" id="stat-completadas" style="color:#60a5fa;">—</span></div>
+                    <div class="resumen-compacto-item"><span class="label">Clientes cotizados hoy</span><span class="value" id="stat-cotizados" style="color:#38bdf8;">—</span></div>
+                    <div class="resumen-compacto-item"><span class="label">Cierres Hoy</span><span class="value" id="stat-cierres" style="color:var(--green);">—</span></div>
+                    <div class="resumen-compacto-item" title="No existe todavía una relación inequívoca entre cada cotización y su operación."><span class="label">Conversión hoy</span><span class="value" id="stat-conversion" style="color:#a78bfa;">—</span></div>
+                    <div class="resumen-compacto-item" title="Clientes actualmente en abandono con actividad en los últimos 30 días."><span class="label">En abandono (30 días)</span><span class="value" id="stat-abandonos" style="color:var(--red);">—</span></div>
                 </div>
-                <div style="background:#0b0e1a;border-radius:12px;padding:16px;border:1px solid #2d355a;">
-                    <div style="font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:1px;">Esp. PIX</div>
-                    <div style="font-size:24px;font-weight:700;color:#38bdf8;margin-top:6px;" id="stat-esp-pix">—</div>
-                </div>
-                <div style="background:#0b0e1a;border-radius:12px;padding:16px;border:1px solid #2d355a;">
-                    <div style="font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:1px;">Esp. Comprobante</div>
-                    <div style="font-size:24px;font-weight:700;color:#f59e0b;margin-top:6px;" id="stat-esp-comp">—</div>
+            </div>
+
+            <!-- EMBUDO CRM -->
+            <div class="config-section" style="border-left: 5px solid #a78bfa; margin-bottom:0;">
+                <h3 style="color:#a78bfa;">📊 Embudo de Conversión <small style="color:#8b949e;font-size:12px;font-weight:400;">· últimos 30 días</small></h3>
+                <p style="color:#8b949e;font-size:11px;margin-top:-6px;">Clientes registrados en los últimos 30 días y su avance comercial; etapas acumulativas por cliente único.</p>
+                <div id="embudo" class="embudo-flow"></div>
+                <div style="margin-top:20px; display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px;" id="crm-mini-stats">
+                    <div style="background:#0b0e1a;border-radius:12px;padding:16px;border:1px solid #2d355a;">
+                        <div style="font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:1px;">Frecuentes</div>
+                        <div style="font-size:24px;font-weight:700;color:#fbbf24;margin-top:6px;" id="stat-frecuentes">—</div>
+                    </div>
+                    <div style="background:#0b0e1a;border-radius:12px;padding:16px;border:1px solid #2d355a;">
+                        <div style="font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:1px;">Esp. PIX</div>
+                        <div style="font-size:24px;font-weight:700;color:#38bdf8;margin-top:6px;" id="stat-esp-pix">—</div>
+                    </div>
+                    <div style="background:#0b0e1a;border-radius:12px;padding:16px;border:1px solid #2d355a;">
+                        <div style="font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:1px;">Esp. Comprobante</div>
+                        <div style="font-size:24px;font-weight:700;color:#f59e0b;margin-top:6px;" id="stat-esp-comp">—</div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1465,6 +1470,14 @@
         // (operadores.montosTransferencia), nada financiero se calcula aquí.
         // Acciones = confirmar()/completar() de siempre.
         const CRM_TR_MAX_FILAS = 300;
+        // Al abrir se muestran solo las 5 más recientes; "Ver todas" amplía
+        // (con scroll interno) sin salir del módulo.
+        const CRM_TR_FILAS_INICIALES = 5;
+        let crmTrVerTodas = false;
+        function toggleCrmTransferenciasVerMas() {
+            crmTrVerTodas = !crmTrVerTodas;
+            renderCrmTransferencias();
+        }
         function renderCrmTransferencias() {
             const tbody = document.getElementById("tablaCrmTransferencias");
             if (!tbody) return;
@@ -1485,7 +1498,8 @@
             if (filtradas.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:#8b949e;padding:20px;">No hay transferencias para mostrar.</td></tr>';
             } else {
-                tbody.innerHTML = filtradas.slice(0, CRM_TR_MAX_FILAS).map(o => {
+                const limite = crmTrVerTodas ? CRM_TR_MAX_FILAS : CRM_TR_FILAS_INICIALES;
+                tbody.innerHTML = filtradas.slice(0, limite).map(o => {
                     const t = o.transferencia;
                     const f = new Date(o.created_at);
                     const accion = o.status === "pendiente"
@@ -1509,10 +1523,18 @@
                     </tr>`;
                 }).join("");
             }
+            const visibles = Math.min(filtradas.length, crmTrVerTodas ? CRM_TR_MAX_FILAS : CRM_TR_FILAS_INICIALES);
             const pie = document.getElementById("crmTrPie");
-            if (pie) pie.innerText = filtradas.length > CRM_TR_MAX_FILAS
+            if (pie) pie.innerText = filtradas.length > CRM_TR_MAX_FILAS && crmTrVerTodas
                 ? `Mostrando las ${CRM_TR_MAX_FILAS} más recientes de ${filtradas.length}. Usa los filtros para acotar.`
-                : `${filtradas.length} transferencia(s)`;
+                : `Mostrando ${visibles} de ${filtradas.length} transferencia(s)`;
+            const btnMas = document.getElementById("btnCrmTrVerMas");
+            if (btnMas) {
+                btnMas.style.display = filtradas.length > CRM_TR_FILAS_INICIALES ? "inline-block" : "none";
+                btnMas.innerText = crmTrVerTodas ? "Ver menos" : `Ver todas (${filtradas.length})`;
+            }
+            const scroll = document.getElementById("crmTrScroll");
+            if (scroll) scroll.classList.toggle("expandido", crmTrVerTodas);
         }
 
         async function confirmar(id, btn) {

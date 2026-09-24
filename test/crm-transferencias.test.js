@@ -105,3 +105,37 @@ test("CRM: columnas pedidas y layout (CRM izquierda; Tasas, Nueva transferencia 
         assert.match(html, new RegExp(`<th>${th}</th>`), th);
     assert.match(html, /@media \(max-width: 900px\) \{\s*\.crm-tr-filtros/, "responsive en móvil");
 });
+
+test("CRM: al abrir muestra máximo 5; 'Ver todas' muestra el resto y 'Ver menos' vuelve a 5", () => {
+    const { sandbox, el } = sandboxDashboard();
+    const muchas = Array.from({ length: 8 }, (_, i) => ({
+        id: 500 + i, created_at: "2026-09-20T10:00:00Z", nombre: `Cliente ${i}`, phone: "55119000000" + i, tarjeta: "9205000000000000",
+        tipo: "brl_cup", status: "pendiente", transferencia: { moneda: "CUP", brl: 100, destino: 12000 }
+    }));
+    sandbox.window._ultimasOperaciones = muchas;
+    const filas = () => (el("tablaCrmTransferencias").innerHTML.match(/<tr>/g) || []).length;
+    sandbox.renderCrmTransferencias();
+    assert.equal(filas(), 5);
+    assert.equal(el("countCrmTransferencias").innerText, 8, "el contador sigue mostrando el total");
+    assert.equal(el("btnCrmTrVerMas").style.display, "inline-block");
+    assert.equal(el("btnCrmTrVerMas").innerText, "Ver todas (8)");
+    sandbox.toggleCrmTransferenciasVerMas();
+    assert.equal(filas(), 8);
+    assert.equal(el("btnCrmTrVerMas").innerText, "Ver menos");
+    sandbox.toggleCrmTransferenciasVerMas();
+    assert.equal(filas(), 5);
+});
+
+test("CRM: con 5 o menos no aparece 'Ver todas'", () => {
+    const { sandbox, el } = sandboxDashboard();
+    sandbox.window._ultimasOperaciones = OPS;
+    sandbox.renderCrmTransferencias();
+    assert.equal(el("btnCrmTrVerMas").style.display, "none");
+});
+
+test("layout: CRM a ancho completo y Resumen General junto al Embudo, responsive", () => {
+    const html = fs.readFileSync(DASHBOARD_PATH, "utf8");
+    assert.doesNotMatch(html, /columna-derecha/, "ya no hay columna vertical");
+    assert.match(html, /\.fila-resumen-embudo \{[^}]*grid-template-columns:/);
+    assert.match(html, /@media \(max-width: 900px\) \{ \.fila-resumen-embudo \{ grid-template-columns: 1fr; \} \}/);
+});
