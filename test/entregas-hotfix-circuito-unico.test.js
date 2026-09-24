@@ -10,11 +10,10 @@ const { mensajeCompletarOperacion } = require("../src/services/operation-message
 const env = require("../src/config/env");
 const { destinatariosInternosEntregas } = require("../src/flows/shared");
 
-test("Transferencia conserva su transición general y su mensaje normal", async (t) => {
-    t.mock.method(pool, "query", async () => ({ rows: [{ id: 1, tipo: "brl_cup", status: "completada" }] }));
+test("Transferencia exige operador para aplicar el saldo antes de completarse", async (t) => {
+    t.mock.method(pool, "query", async () => ({ rows: [{ id: 1, tipo: "brl_cup", status: "confirmada" }] }));
     const op = await operations.completarOperacion(1);
-    assert.equal(op.status, "completada");
-    assert.match(mensajeCompletarOperacion(op), /transferencia fue completada/i);
+    assert.deepEqual(op, { error: "Selecciona el operador asignado" });
 });
 
 test("Recarga conserva su transición general y su mensaje propio", async (t) => {

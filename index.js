@@ -28,6 +28,7 @@ const { adminReadLimiter, adminWriteLimiter } = require("./src/middleware/admin-
 const { verificarToken, verificarTokenEntregas } = require("./src/middleware/admin-auth");
 const blockedNumbers = require("./src/services/blocked-numbers");
 const operadoresService = require("./src/services/operadores");
+const operatorBalances = require("./src/services/operator-balances");
 const entregasAvisos = require("./src/services/entregas-avisos");
 const entregasCoordinator = require("./src/services/entregas-coordinator");
 
@@ -534,6 +535,19 @@ app.post("/admin/operadores/:id/activo", adminWriteLimiter, verificarToken, asyn
     } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
+app.post("/admin/operadores/:id/saldo", adminWriteLimiter, verificarToken, async (req, res) => {
+    try {
+        const r = await operatorBalances.ajustarSaldo(req.params.id, req.body || {});
+        if (r.error) return res.status(400).json({ success: false, error: r.error });
+        res.json({ success: true, movimiento: r.movimiento });
+    } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+app.get("/admin/operadores/:id/movimientos", adminReadLimiter, verificarToken, async (req, res) => {
+    try { res.json(await operatorBalances.listarMovimientos(req.params.id)); }
+    catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Trazabilidad (sección F): qué operador(es) recibieron el aviso de una
 // operación y cuándo -- solo lectura, nunca borra historial financiero.
 app.get("/admin/operaciones/:id/avisos-operador", adminReadLimiter, verificarToken, async (req, res) => {
@@ -546,6 +560,7 @@ app.post("/admin/completar-todas-antiguas", adminWriteLimiter, verificarToken, a
             UPDATE operations SET status = 'completada', completed_at = NOW()
             WHERE status = 'confirmada'
               AND tipo NOT IN ('cup_efectivo', 'usd_efectivo')
+              AND tipo NOT IN ('brl_cup','cup_transferencia','usd_clasica','usd_prepago','usd_pendiente_tipo','usd_transferencia','mlc','mlc_transferencia')
             RETURNING id
         `);
         res.json({ success: true, actualizadas: r.rows.length });
@@ -585,7 +600,8 @@ app.post("/admin/confirmar-operacion/:id", adminWriteLimiter, verificarToken, as
 
 app.post("/admin/completar-operacion/:id", adminWriteLimiter, verificarToken, async (req, res) => {
     try {
-        const operacion = await completarOperacion(req.params.id);
+        const operacion = await completarOperacion(req.params.id, (req.body || {}).operadorId);
+        if (operacion?.error) return res.status(400).json({ success: false, error: operacion.error });
         if (!operacion) return res.status(404).json({ success: false, error: "Operación no encontrada" });
 
         const { enviarMensaje } = require("./src/services/zapi");
@@ -623,6 +639,9 @@ app.post("/admin/completar-operacion/:id", adminWriteLimiter, verificarToken, as
 
         res.json({ success: true, notificado });
     } catch (e) {
+        if (e instanceof operatorBalances.SaldoInsuficienteError) {
+            return res.status(409).json({ success: false, error: e.message, moneda: e.moneda, disponible: e.disponible, faltante: e.faltante });
+        }
         res.status(500).json({ success: false, error: e.message });
     }
 });

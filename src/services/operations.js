@@ -1,5 +1,6 @@
 const pool = require("../../db");
 const { log } = require("../utils/structured-logger");
+const operatorBalances = require("./operator-balances");
 
 // =====================
 // AGREGAR OPERACIÓN
@@ -80,19 +81,31 @@ async function confirmarOperacion(id) {
 // 'confirmada'. Antes actualizaba sin condición — una doble llamada podía
 // reenviar el mensaje de "completada" al cliente y volver a recalcular el
 // nivel VIP innecesariamente (ver el caller en index.js).
-async function completarOperacion(id) {
+async function completarOperacion(id, operadorId) {
     try {
-        const result = await pool.query(`
-            UPDATE operations SET status = 'completada', completed_at = NOW()
-            WHERE id = $1 AND status = 'confirmada'
-              AND tipo NOT IN ('cup_efectivo', 'usd_efectivo')
-            RETURNING *
-        `, [id]);
-        if (result.rows.length === 0) return null;
+        const actual = await pool.query("SELECT * FROM operations WHERE id = $1", [id]);
+        const esTransferencia = require("./operadores").esOperacionDeTransferencia(actual.rows[0]);
+        let operacion;
+        if (esTransferencia) {
+            if (!operadorId) return { error: "Selecciona el operador asignado" };
+            const result = await operatorBalances.completarConDescuento(id, operadorId);
+            if (!result || result.error) return result;
+            operacion = result.operacion;
+        } else {
+            const result = await pool.query(`
+                UPDATE operations SET status = 'completada', completed_at = NOW()
+                WHERE id = $1 AND status = 'confirmada'
+                  AND tipo NOT IN ('cup_efectivo', 'usd_efectivo')
+                RETURNING *
+            `, [id]);
+            operacion = result.rows[0];
+            if (!operacion) return null;
+        }
         console.log(`🏁 Operación COMPLETADA: ${id}`);
         log("OPERATION_COMPLETED", { operationId: id });
-        return result.rows[0];
+        return operacion;
     } catch (err) {
+        if (err instanceof operatorBalances.SaldoInsuficienteError) throw err;
         console.error("❌ Error completando operación:", err.message);
         return null;
     }

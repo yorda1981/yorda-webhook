@@ -144,10 +144,10 @@
             <div class="table-wrapper">
                 <table>
                     <thead>
-                        <tr><th>Nombre</th><th>WhatsApp</th><th>Modalidades</th><th>Estado</th><th></th></tr>
+                        <tr><th>Nombre</th><th>WhatsApp</th><th>Modalidades</th><th>Saldos restantes</th><th>Estado</th><th></th></tr>
                     </thead>
                     <tbody id="tablaOperadores">
-                        <tr><td colspan="5" style="text-align:center; padding:20px; color:#8b949e;">Conecta para ver datos</td></tr>
+                        <tr><td colspan="6" style="text-align:center; padding:20px; color:#8b949e;">Conecta para ver datos</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -1071,6 +1071,7 @@
             try {
                 const r = await fetch("/admin/operadores", { headers: authH() });
                 const lista = await r.json();
+                window._ultimosOperadores = Array.isArray(lista) ? lista : [];
                 renderOperadores(Array.isArray(lista) ? lista : []);
             } catch(e) { console.error("Error cargando operadores:", e); }
         }
@@ -1079,7 +1080,7 @@
             document.getElementById("countOperadores").innerText = lista.length;
             const tbody = document.getElementById("tablaOperadores");
             if (lista.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#8b949e;padding:20px;">Sin operadores registrados todavía.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#8b949e;padding:20px;">Sin operadores registrados todavía.</td></tr>';
                 return;
             }
             const etiquetaModalidad = m => ({ cup: "CUP", usd: "USD", mlc: "MLC", todos: "Todos" }[m] || m);
@@ -1088,12 +1089,13 @@
                     <td><strong>${escapeHtml(op.nombre)}</strong></td>
                     <td><small>${escapeHtml(op.telefono)}</small></td>
                     <td>${(op.modalidades || []).map(etiquetaModalidad).join(", ")}</td>
+                    <td style="white-space:nowrap;"><strong>${Number(op.saldo_cup || 0).toLocaleString("es-ES")} CUP</strong> | <strong>${Number(op.saldo_usd || 0).toLocaleString("es-ES")} USD</strong> | <strong>${Number(op.saldo_mlc || 0).toLocaleString("es-ES")} MLC</strong></td>
                     <td>
                         <button class="page-btn" style="border-color:${op.activo ? 'var(--green)' : '#8b949e'};color:${op.activo ? 'var(--green)' : '#8b949e'};" onclick="toggleActivoOperador(${op.id}, ${!op.activo})">
                             ${op.activo ? "● ACTIVO" : "○ INACTIVO"}
                         </button>
                     </td>
-                    <td><button class="page-btn" onclick="editarOperadorForm(${op.id})">✏️ Editar</button></td>
+                    <td style="white-space:nowrap;"><button class="page-btn" onclick="editarOperadorForm(${op.id})">✏️ Editar</button> <button class="page-btn" onclick="ajustarSaldoOperador(${op.id})">💰 Saldo</button> <button class="page-btn" onclick="verMovimientosOperador(${op.id})">🕘 Movimientos</button></td>
                 </tr>
             `).join("");
         }
@@ -1313,6 +1315,34 @@
                 if (d.success) cargarOperadores();
                 else alert("❌ Error: " + (d.error || "desconocido"));
             } catch(e) { alert("❌ Error de conexión"); }
+        }
+
+        async function ajustarSaldoOperador(id) {
+            const moneda = String(prompt("Moneda: CUP, USD o MLC", "CUP") || "").trim().toUpperCase();
+            if (!moneda) return;
+            const tipo = String(prompt("Tipo: carga o ajuste", "carga") || "").trim().toLowerCase();
+            if (!tipo) return;
+            const montoTxt = prompt(tipo === "ajuste" ? "Monto (puede ser negativo):" : "Monto a cargar:", "0");
+            if (montoTxt === null) return;
+            const monto = Number(String(montoTxt).replace(",", "."));
+            try {
+                const r = await fetch(`/admin/operadores/${id}/saldo`, { method: "POST", headers: authH(), body: JSON.stringify({ moneda, tipo, monto }) });
+                const d = await r.json();
+                if (!r.ok || !d.success) return alert("❌ " + (d.error || "No se pudo actualizar el saldo"));
+                await cargarOperadores();
+            } catch (e) { alert("❌ Error de conexión"); }
+        }
+
+        async function verMovimientosOperador(id) {
+            try {
+                const r = await fetch(`/admin/operadores/${id}/movimientos`, { headers: authH() });
+                const lista = await r.json();
+                if (!Array.isArray(lista) || lista.length === 0) return alert("Sin movimientos registrados.");
+                alert("Movimientos recientes:\n\n" + lista.map(m => {
+                    const operacion = m.operation_id ? ` · operación #${m.operation_id}` : "";
+                    return `${new Date(m.created_at).toLocaleString("pt-BR")} · ${String(m.tipo).toUpperCase()} · ${Number(m.monto).toLocaleString("es-ES")} ${m.moneda}${operacion} · ${Number(m.saldo_anterior).toLocaleString("es-ES")} → ${Number(m.saldo_posterior).toLocaleString("es-ES")}`;
+                }).join("\n"));
+            } catch (e) { alert("❌ Error cargando movimientos"); }
         }
 
         function conectar() {
@@ -1557,10 +1587,23 @@
         }
 
         async function completar(id, btn) {
+            const operacion = (window._ultimasOperaciones || []).find(o => String(o.id) === String(id));
+            let operadorId = null;
+            if (operacion?.transferencia) {
+                const modalidad = String(operacion.transferencia.moneda || "").toLowerCase();
+                const operadores = (window._ultimosOperadores || []).filter(o =>
+                    o.activo && Array.isArray(o.modalidades) && (o.modalidades.includes("todos") || o.modalidades.includes(modalidad))
+                );
+                if (operadores.length === 0) { alert(`❌ No hay operadores activos para ${operacion.transferencia.moneda}.`); return; }
+                const campoSaldo = `saldo_${modalidad}`;
+                const opciones = operadores.map(o => `${o.id}: ${o.nombre} · ${Number(o[campoSaldo] || 0).toLocaleString("es-ES")} ${operacion.transferencia.moneda}`).join("\n");
+                operadorId = Number(prompt(`Operador asignado:\n${opciones}\n\nEscribe el ID:`, operadores[0].id));
+                if (!operadores.some(o => Number(o.id) === operadorId)) { alert("❌ Selecciona un operador válido."); return; }
+            }
             if (!confirm("¿Confirmas que esta operación fue completada (entrega/transferencia realizada)?")) return;
             if (btn) btn.disabled = true;
             try {
-                const res = await fetch("/admin/completar-operacion/" + id, { method: "POST", headers: authH() });
+                const res = await fetch("/admin/completar-operacion/" + id, { method: "POST", headers: authH(), body: JSON.stringify({ operadorId }) });
                 const data = await res.json();
                 if (data.success) {
                     refreshData();
