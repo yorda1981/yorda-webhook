@@ -21,14 +21,17 @@ function monedaValida(moneda) {
     return COLUMNAS[normalizada] ? normalizada : null;
 }
 
-async function ajustarSaldo(operadorId, { moneda, monto, tipo }) {
+async function ajustarSaldo(operadorId, { moneda, monto, tipo, saldoFinal, motivo }) {
     const monedaFinal = monedaValida(moneda);
     const tipoFinal = String(tipo || "").toLowerCase();
     const cantidad = Number(monto);
+    const nuevoSaldo = Number(saldoFinal);
+    const motivoFinal = String(motivo || "").trim();
     if (!monedaFinal) return { error: "Moneda inválida" };
-    if (!Number.isFinite(cantidad) || cantidad === 0) return { error: "El monto debe ser distinto de cero" };
     if (!['carga', 'ajuste'].includes(tipoFinal)) return { error: "Tipo de movimiento inválido" };
-    if (tipoFinal === "carga" && cantidad < 0) return { error: "Una carga debe ser positiva" };
+    if (tipoFinal === "carga" && (!Number.isFinite(cantidad) || cantidad <= 0)) return { error: "Una carga debe ser positiva" };
+    if (tipoFinal === "ajuste" && (!Number.isFinite(nuevoSaldo) || nuevoSaldo < 0)) return { error: "El nuevo saldo debe ser cero o positivo" };
+    if (tipoFinal === "ajuste" && !motivoFinal) return { error: "El motivo del ajuste es obligatorio" };
 
     const columna = COLUMNAS[monedaFinal];
     const client = await pool.connect();
@@ -37,13 +40,14 @@ async function ajustarSaldo(operadorId, { moneda, monto, tipo }) {
         const actual = await client.query(`SELECT ${columna} AS saldo FROM operadores WHERE id = $1 FOR UPDATE`, [operadorId]);
         if (!actual.rows[0]) { await client.query("ROLLBACK"); return { error: "Operador no encontrado" }; }
         const saldoAnterior = Number(actual.rows[0].saldo);
-        const saldoPosterior = saldoAnterior + cantidad;
-        if (saldoPosterior < 0) { await client.query("ROLLBACK"); return { error: `El ajuste dejaría saldo negativo. Disponible: ${saldoAnterior.toFixed(2)} ${monedaFinal}` }; }
+        const saldoPosterior = tipoFinal === "ajuste" ? nuevoSaldo : saldoAnterior + cantidad;
+        const diferencia = saldoPosterior - saldoAnterior;
+        if (diferencia === 0) { await client.query("ROLLBACK"); return { error: "El nuevo saldo debe ser diferente del saldo actual" }; }
         await client.query(`UPDATE operadores SET ${columna} = $1, updated_at = NOW() WHERE id = $2`, [saldoPosterior, operadorId]);
         const movimiento = await client.query(
-            `INSERT INTO operador_movimientos (operador_id, moneda, monto, tipo, saldo_anterior, saldo_posterior)
-             VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-            [operadorId, monedaFinal, cantidad, tipoFinal, saldoAnterior, saldoPosterior]
+            `INSERT INTO operador_movimientos (operador_id, moneda, monto, tipo, saldo_anterior, saldo_posterior, motivo)
+             VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+            [operadorId, monedaFinal, diferencia, tipoFinal, saldoAnterior, saldoPosterior, tipoFinal === "ajuste" ? motivoFinal : null]
         );
         await client.query("COMMIT");
         return { movimiento: movimiento.rows[0] };

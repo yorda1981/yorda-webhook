@@ -27,8 +27,11 @@ function cargarServicio(t, { saldo = 150, status = "confirmada", movimientos = [
                 if (estado.movimientos.some(m => m.tipo === tipo && m.operation_id === Number(params[3] || 10))) {
                     const e = new Error("duplicate"); e.code = "23505"; throw e;
                 }
-                estado.movimientos.push({ tipo, operation_id: 10, moneda: params[1], monto: Number(params[2]) });
-                return { rows: [{ id: estado.movimientos.length }] };
+                const movimiento = tipo === "ajuste"
+                    ? { tipo, operation_id: null, moneda: params[1], monto: Number(params[2]), saldo_anterior: Number(params[4]), saldo_posterior: Number(params[5]), motivo: params[6] }
+                    : { tipo, operation_id: 10, moneda: params[1], monto: Number(params[2]) };
+                estado.movimientos.push(movimiento);
+                return { rows: [{ id: estado.movimientos.length, ...movimiento }] };
             }
             if (/UPDATE operations SET status = 'completada'/.test(q)) {
                 if (estado.status !== "confirmada") return { rows: [] };
@@ -83,6 +86,33 @@ test("operador inactivo o sin la modalidad no puede completar", async t => {
     const otraModalidad = cargarServicio(t, { modalidades: ["cup"] });
     assert.deepEqual(await otraModalidad.servicio.completarConDescuento(10, 3), { error: "El operador seleccionado no gestiona transferencias en USD" });
     assert.equal(otraModalidad.estado.saldo, 150);
+});
+
+test("ajuste fija el saldo final, permite disminuir hasta cero y audita diferencia y motivo", async t => {
+    const { servicio, estado } = cargarServicio(t, { saldo: 100000 });
+    const r = await servicio.ajustarSaldo(3, { moneda: "USD", tipo: "ajuste", saldoFinal: 80000, motivo: "Carga registrada por error" });
+    assert.equal(estado.saldo, 80000);
+    assert.deepEqual(r.movimiento, {
+        id: 1, tipo: "ajuste", operation_id: null, moneda: "USD", monto: -20000,
+        saldo_anterior: 100000, saldo_posterior: 80000, motivo: "Carga registrada por error"
+    });
+
+    const aCero = await servicio.ajustarSaldo(3, { moneda: "USD", tipo: "ajuste", saldoFinal: 0, motivo: "Corrección total" });
+    assert.equal(estado.saldo, 0);
+    assert.equal(aCero.movimiento.monto, -80000);
+    assert.equal(aCero.movimiento.saldo_posterior, 0);
+});
+
+test("ajuste permite aumentar pero rechaza saldo negativo, motivo vacío y valor sin cambio", async t => {
+    const { servicio, estado } = cargarServicio(t, { saldo: 50 });
+    const aumento = await servicio.ajustarSaldo(3, { moneda: "USD", tipo: "ajuste", saldoFinal: 75, motivo: "Corrección de conteo" });
+    assert.equal(aumento.movimiento.monto, 25);
+    assert.equal(estado.saldo, 75);
+
+    assert.deepEqual(await servicio.ajustarSaldo(3, { moneda: "USD", tipo: "ajuste", saldoFinal: -1, motivo: "Error" }), { error: "El nuevo saldo debe ser cero o positivo" });
+    assert.deepEqual(await servicio.ajustarSaldo(3, { moneda: "USD", tipo: "ajuste", saldoFinal: 70, motivo: "  " }), { error: "El motivo del ajuste es obligatorio" });
+    assert.deepEqual(await servicio.ajustarSaldo(3, { moneda: "USD", tipo: "ajuste", saldoFinal: 75, motivo: "Sin cambio" }), { error: "El nuevo saldo debe ser diferente del saldo actual" });
+    assert.equal(estado.saldo, 75);
 });
 
 test("completar dos veces es idempotente y nunca duplica el descuento", async t => {
