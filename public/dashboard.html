@@ -105,6 +105,23 @@
             .embudo-stage { flex-basis: 100%; }
         }
         .resumen-compacto-item .value { font-weight: 700; color: var(--accent); font-size: 15px; text-align: right; overflow-wrap: anywhere; }
+        .op-informe { margin-top: 16px; border: 1px solid #2d355a; border-radius: 12px; background: #0f1426; }
+        .op-informe-cabecera { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:12px 14px; font-weight:700; color:#cbd5e1; }
+        .op-informe-contenido { padding: 0 14px 14px; }
+        .op-informe-filtros { display: grid; grid-template-columns: repeat(6, minmax(110px, 1fr)) auto; gap: 8px; align-items: end; margin-bottom: 12px; }
+        .op-informe-filtros .input-group { gap: 4px; }
+        .op-informe-filtros .campo-tm { padding: 8px 10px; font-size: 12px; min-width: 0; }
+        .op-informe-totales, .op-cierre-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); gap: 8px; margin: 10px 0; }
+        .op-informe-card { background: #0b0e1a; border: 1px solid #2d355a; border-radius: 10px; padding: 9px 11px; }
+        .op-informe-card small { display: block; color: #8b949e; font-size: 10px; text-transform: uppercase; }
+        .op-informe-card strong { color: var(--accent); font-size: 14px; }
+        .op-cierre-moneda { background: #0b0e1a; border: 1px solid #2d355a; border-radius: 10px; padding: 10px 12px; }
+        .op-cierre-moneda h4 { margin: 0 0 6px; color: var(--green); }
+        .op-cierre-linea { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; padding: 2px 0; }
+        .op-informe-tabla th { padding: 7px 8px; font-size: 9px; white-space: nowrap; }
+        .op-informe-tabla td { padding: 6px 8px; font-size: 11px; white-space: nowrap; }
+        @media (max-width: 900px) { .op-informe-filtros { grid-template-columns: 1fr 1fr; } }
+        @media print { .op-informe { background:white; color:black; } .op-informe-filtros, .op-informe-cabecera { display:none; } .op-informe-contenido { display:block; } }
     </style>
 </head>
 <body>
@@ -150,6 +167,33 @@
                         <tr><td colspan="6" style="text-align:center; padding:20px; color:#8b949e;">Conecta para ver datos</td></tr>
                     </tbody>
                 </table>
+            </div>
+            <div class="op-informe" id="opInformePanel" style="display:none;">
+                <div class="op-informe-cabecera"><span>📊 Informe y cierre de caja por operador</span><button class="page-btn" onclick="cerrarInformeOperador()">✕ Ocultar</button></div>
+                <div class="op-informe-contenido">
+                    <div class="op-informe-filtros">
+                        <div class="input-group"><label>Operador</label><select class="campo-tm" id="opInfOperador"><option value="">Selecciona</option></select></div>
+                        <div class="input-group"><label>Período</label><select class="campo-tm" id="opInfPeriodo" onchange="aplicarPeriodoInforme(this.value)"><option value="hoy">Hoy</option><option value="semana_actual">Esta semana</option><option value="semana_anterior">Semana anterior</option><option value="mes_actual" selected>Este mes</option><option value="mes_anterior">Mes anterior</option><option value="personalizado">Personalizado</option></select></div>
+                        <div class="input-group" id="opInfDesdeGrupo" style="display:none;"><label>Desde</label><input class="campo-tm" type="date" id="opInfDesde"></div>
+                        <div class="input-group" id="opInfHastaGrupo" style="display:none;"><label>Hasta</label><input class="campo-tm" type="date" id="opInfHasta"></div>
+                        <div class="input-group"><label>Moneda</label><select class="campo-tm" id="opInfMoneda"><option value="">Todas</option><option>CUP</option><option>USD</option><option>MLC</option></select></div>
+                        <div class="input-group"><label>Estado</label><select class="campo-tm" id="opInfEstado"><option value="">Todos</option><option value="pendiente">Pendiente</option><option value="confirmada">Confirmada</option><option value="completada">Completada</option><option value="expirada">Expirada</option><option value="rechazada">Rechazada</option></select></div>
+                        <button class="page-btn" onclick="cargarInformeOperador()">Consultar</button>
+                    </div>
+                    <div id="opInformeResultado" style="display:none;">
+                        <div id="opInformeEncabezado" style="font-size:12px;color:#94a3b8;"></div>
+                        <div class="op-informe-totales" id="opInformeTotales"></div>
+                        <h4 style="margin:14px 0 6px;">Cierre de caja</h4>
+                        <div class="op-cierre-grid" id="opCierreGrid"></div>
+                        <h4 style="margin:14px 0 6px;">Transferencias individuales</h4>
+                        <div class="table-wrapper">
+                            <table class="op-informe-tabla">
+                                <thead><tr><th>Fecha/hora</th><th>ID</th><th>Cliente/teléfono</th><th>Moneda</th><th>BRL</th><th>Destino</th><th>Tarjeta/cuenta</th><th>Estado</th><th>Operador</th><th>Saldo antes</th><th>Débito</th><th>Saldo después</th></tr></thead>
+                                <tbody id="opInformeFilas"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -1072,8 +1116,117 @@
                 const r = await fetch("/admin/operadores", { headers: authH() });
                 const lista = await r.json();
                 window._ultimosOperadores = Array.isArray(lista) ? lista : [];
+                actualizarSelectInformeOperadores(window._ultimosOperadores);
                 renderOperadores(Array.isArray(lista) ? lista : []);
             } catch(e) { console.error("Error cargando operadores:", e); }
+        }
+
+        function actualizarSelectInformeOperadores(lista) {
+            const select = document.getElementById("opInfOperador");
+            if (!select) return;
+            const elegido = select.value;
+            select.innerHTML = '<option value="">Selecciona</option>' + lista.map(op => `<option value="${Number(op.id)}">${escapeHtml(op.nombre)}</option>`).join("");
+            if (lista.some(op => String(op.id) === elegido)) select.value = elegido;
+            if (!document.getElementById("opInfDesde").value) {
+                aplicarPeriodoInforme(document.getElementById("opInfPeriodo").value);
+            }
+        }
+
+        function aplicarPeriodoInforme(periodo) {
+            const desdeGrupo = document.getElementById("opInfDesdeGrupo");
+            const hastaGrupo = document.getElementById("opInfHastaGrupo");
+            const personalizado = periodo === "personalizado";
+            desdeGrupo.style.display = personalizado ? "flex" : "none";
+            hastaGrupo.style.display = personalizado ? "flex" : "none";
+            if (personalizado) return;
+            const rango = rangoPeriodoInforme(periodo, hoyInformeISO());
+            document.getElementById("opInfDesde").value = rango.desde;
+            document.getElementById("opInfHasta").value = rango.hasta;
+            if (document.getElementById("opInformePanel").style.display !== "none" && document.getElementById("opInfOperador").value) cargarInformeOperador();
+        }
+
+        // "Hoy" en America/Bahia, la misma zona con la que el backend corta el período.
+        function hoyInformeISO() {
+            return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Bahia", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+        }
+
+        // Rango inclusivo {desde, hasta} (YYYY-MM-DD) de un período rápido; semanas de lunes a domingo.
+        function rangoPeriodoInforme(periodo, hoyISO) {
+            const [y, m, d] = hoyISO.split("-").map(Number);
+            const fecha = f => `${f.getFullYear()}-${String(f.getMonth() + 1).padStart(2, "0")}-${String(f.getDate()).padStart(2, "0")}`;
+            const hoy = new Date(y, m - 1, d);
+            const lunes = new Date(y, m - 1, d - (hoy.getDay() + 6) % 7);
+            if (periodo === "semana_actual") return { desde: fecha(lunes), hasta: fecha(hoy) };
+            if (periodo === "semana_anterior") return { desde: fecha(new Date(lunes.getFullYear(), lunes.getMonth(), lunes.getDate() - 7)), hasta: fecha(new Date(lunes.getFullYear(), lunes.getMonth(), lunes.getDate() - 1)) };
+            if (periodo === "mes_actual") return { desde: fecha(new Date(y, m - 1, 1)), hasta: fecha(hoy) };
+            if (periodo === "mes_anterior") return { desde: fecha(new Date(y, m - 2, 1)), hasta: fecha(new Date(y, m - 1, 0)) };
+            return { desde: fecha(hoy), hasta: fecha(hoy) };
+        }
+
+        function abrirInformeOperador(id) {
+            document.getElementById("opInfOperador").value = String(id);
+            const panel = document.getElementById("opInformePanel");
+            panel.style.display = "block";
+            panel.scrollIntoView({ behavior: "smooth", block: "start" });
+            cargarInformeOperador();
+        }
+
+        function cerrarInformeOperador() {
+            document.getElementById("opInformePanel").style.display = "none";
+        }
+
+        async function cargarInformeOperador() {
+            const operadorId = document.getElementById("opInfOperador").value;
+            const desde = document.getElementById("opInfDesde").value;
+            const hasta = document.getElementById("opInfHasta").value;
+            if (!operadorId || !desde || !hasta) return alert("❌ Selecciona operador y período");
+            const q = new URLSearchParams({ operadorId, desde, hasta });
+            const moneda = document.getElementById("opInfMoneda").value;
+            const estado = document.getElementById("opInfEstado").value;
+            if (moneda) q.set("moneda", moneda);
+            if (estado) q.set("estado", estado);
+            try {
+                const r = await fetch(`/admin/operadores/informe?${q}`, { headers: authH() });
+                const d = await r.json();
+                if (!r.ok || !d.success) return alert("❌ " + (d.error || "No se pudo generar el informe"));
+                renderInformeOperador(d);
+            } catch (e) { alert("❌ Error cargando el informe"); }
+        }
+
+        function renderInformeOperador(d) {
+            const fmt = n => Number(n || 0).toLocaleString("es-ES", { maximumFractionDigits: 2 });
+            document.getElementById("opInformeResultado").style.display = "block";
+            document.getElementById("opInformeEncabezado").innerText = `${d.operador.nombre} · ${d.periodo.desde} → ${d.periodo.hasta}`;
+            const t = d.totales;
+            document.getElementById("opInformeTotales").innerHTML = [
+                ["Transferencias", t.transferencias], ["Total BRL", `R$ ${fmt(t.brl)}`],
+                ["Total CUP", `${fmt(t.CUP)} CUP`], ["Total USD", `${fmt(t.USD)} USD`], ["Total MLC", `${fmt(t.MLC)} MLC`]
+            ].map(([label, valor]) => `<div class="op-informe-card"><small>${label}</small><strong>${valor}</strong></div>`).join("");
+            const cierre = d.filtros && d.filtros.moneda ? d.cierre.filter(c => c.moneda === d.filtros.moneda) : d.cierre;
+            document.getElementById("opCierreGrid").innerHTML = cierre.map(c => `
+                <div class="op-cierre-moneda">
+                    <h4>${escapeHtml(c.moneda)}</h4>
+                    <div class="op-cierre-linea"><span>Saldo inicial</span><strong>${fmt(c.saldoInicial)}</strong></div>
+                    <div class="op-cierre-linea"><span>Cargas</span><strong>+${fmt(c.cargas)}</strong></div>
+                    <div class="op-cierre-linea"><span>Ajustes</span><strong>${c.ajustes > 0 ? "+" : ""}${fmt(c.ajustes)}</strong></div>
+                    <div class="op-cierre-linea"><span>Transferencias</span><strong>-${fmt(c.transferido)}</strong></div>
+                    <div class="op-cierre-linea"><span>Reintegros</span><strong>+${fmt(c.reintegros)}</strong></div>
+                    <div class="op-cierre-linea"><span>Saldo final</span><strong>${fmt(c.saldoFinal)}</strong></div>
+                    <div class="op-cierre-linea"><span>N.º transferencias</span><strong>${Number(c.transferencias)}</strong></div>
+                </div>`).join("");
+            const filas = document.getElementById("opInformeFilas");
+            if (!d.transferencias.length) {
+                filas.innerHTML = '<tr><td colspan="12" style="text-align:center;color:#8b949e;">Sin transferencias para estos filtros.</td></tr>';
+                return;
+            }
+            filas.innerHTML = d.transferencias.map(o => `<tr>
+                <td>${new Date(o.procesada_at).toLocaleString("pt-BR")}</td>
+                <td>#${Number(o.operation_id)}</td>
+                <td>${escapeHtml(o.nombre || o.titular || "-")}<br><small>${escapeHtml(o.phone || "-")}</small></td>
+                <td>${escapeHtml(o.moneda)}</td><td>R$ ${fmt(o.brl)}</td><td>${fmt(o.destino)} ${escapeHtml(o.moneda)}</td>
+                <td title="${escapeHtml(o.tarjeta || "")}">${escapeHtml(o.tarjeta || "-")}</td><td>${escapeHtml(o.status || "-")}</td>
+                <td>${escapeHtml(o.operador_nombre)}</td><td>${fmt(o.saldo_anterior)}</td><td>-${fmt(o.debito)}</td><td>${fmt(o.saldo_posterior)}</td>
+            </tr>`).join("");
         }
 
         function renderOperadores(lista) {
@@ -1095,7 +1248,7 @@
                             ${op.activo ? "● ACTIVO" : "○ INACTIVO"}
                         </button>
                     </td>
-                    <td style="white-space:nowrap;"><button class="page-btn" onclick="editarOperadorForm(${op.id})">✏️ Editar</button> <button class="page-btn" onclick="cargarSaldoOperador(${op.id})">💰 Cargar saldo</button> <button class="page-btn" onclick="ajustarSaldoOperador(${op.id})">⚖️ Ajustar saldo</button> <button class="page-btn" onclick="verMovimientosOperador(${op.id})">🕘 Movimientos</button></td>
+                    <td style="white-space:nowrap;"><button class="page-btn" onclick="editarOperadorForm(${op.id})">✏️ Editar</button> <button class="page-btn" onclick="cargarSaldoOperador(${op.id})">💰 Cargar saldo</button> <button class="page-btn" onclick="ajustarSaldoOperador(${op.id})">⚖️ Ajustar saldo</button> <button class="page-btn" onclick="abrirInformeOperador(${op.id})">📊 Informe / Cierre</button> <button class="page-btn" onclick="verMovimientosOperador(${op.id})">🕘 Movimientos</button></td>
                 </tr>
             `).join("");
         }

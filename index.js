@@ -29,6 +29,7 @@ const { verificarToken, verificarTokenEntregas } = require("./src/middleware/adm
 const blockedNumbers = require("./src/services/blocked-numbers");
 const operadoresService = require("./src/services/operadores");
 const operatorBalances = require("./src/services/operator-balances");
+const operatorReports = require("./src/services/operator-reports");
 const entregasAvisos = require("./src/services/entregas-avisos");
 const entregasCoordinator = require("./src/services/entregas-coordinator");
 
@@ -546,6 +547,14 @@ app.post("/admin/operadores/:id/saldo", adminWriteLimiter, verificarToken, async
 app.get("/admin/operadores/:id/movimientos", adminReadLimiter, verificarToken, async (req, res) => {
     try { res.json(await operatorBalances.listarMovimientos(req.params.id)); }
     catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get("/admin/operadores/informe", adminReadLimiter, verificarToken, async (req, res) => {
+    try {
+        const informe = await operatorReports.obtenerInforme(req.query || {});
+        if (informe.error) return res.status(400).json({ success: false, error: informe.error });
+        res.json({ success: true, ...informe });
+    } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
 // Trazabilidad (sección F): qué operador(es) recibieron el aviso de una
