@@ -168,25 +168,37 @@ async function operadoresActivosParaModalidad(modalidad) {
 // montos hacia WhatsApp) solo agrega separador de miles para lectura --
 // nunca toca el valor real de operacion.monto/cup, ni lo que ya se
 // guardó/calculó en `operations`. Puramente visual.
-function datosMontoOperador(operacion) {
+// Montos NUMÉRICOS de una transferencia, en la moneda real de cada lado.
+// Único lugar que sabe que en usd_clasica/usd_prepago/mlc las columnas
+// están invertidas (`monto` = cantidad destino, `cup` = R$ pagados). Lo
+// usan el aviso al operador (datosMontoOperador) y el CRM de
+// Transferencias del dashboard. null si no es una transferencia.
+function montosTransferencia(operacion) {
     const tipo = operacion?.tipo;
+    const n = (v) => (v === null || v === undefined || v === "" ? null : Number(v));
     switch (tipo) {
         case "brl_cup":
         case "cup_transferencia":
-            return { pagado: `R$${fmt(operacion.monto)}`, destino: `${fmt(operacion.cup)} CUP` };
+            return { moneda: "CUP", brl: n(operacion.monto), destino: n(operacion.cup) };
         case "usd_clasica":
         case "usd_prepago":
         case "usd_pendiente_tipo":
-            return { pagado: `R$${fmt(operacion.cup)}`, destino: `${fmt(operacion.monto)} USD` };
+            return { moneda: "USD", brl: n(operacion.cup), destino: n(operacion.monto) };
         case "usd_transferencia":
-            return { pagado: `R$${fmt(operacion.monto)}`, destino: operacion.cup ? `${fmt(operacion.cup)} USD` : null };
+            return { moneda: "USD", brl: n(operacion.monto), destino: n(operacion.cup) || null };
         case "mlc":
-            return { pagado: `R$${fmt(operacion.cup)}`, destino: `${fmt(operacion.monto)} MLC` };
+            return { moneda: "MLC", brl: n(operacion.cup), destino: n(operacion.monto) };
         case "mlc_transferencia":
-            return { pagado: `R$${fmt(operacion.monto)}`, destino: operacion.cup ? `${fmt(operacion.cup)} MLC` : null };
+            return { moneda: "MLC", brl: n(operacion.monto), destino: n(operacion.cup) || null };
         default:
             return null;
     }
+}
+
+function datosMontoOperador(operacion) {
+    const m = montosTransferencia(operacion);
+    if (!m) return null;
+    return { pagado: `R$${fmt(m.brl)}`, destino: m.destino !== null ? `${fmt(m.destino)} ${m.moneda}` : null };
 }
 
 // Mensaje mínimo para EJECUTAR la transferencia -- el CRM ya conserva el
@@ -286,6 +298,7 @@ module.exports = {
     editarOperador,
     cambiarActivo,
     operadoresActivosParaModalidad,
+    montosTransferencia,
     datosMontoOperador,
     construirMensajeOperador,
     reclamarAviso,

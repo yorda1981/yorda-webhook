@@ -49,9 +49,32 @@ function mensajeCompletarOperacion(operacion) {
     return "🎉 ¡Tu transferencia fue completada con éxito! Gracias por preferir nuestros servicios. 🇨🇺💜";
 }
 
+// Recibo al CREAR una transferencia manual desde el dashboard (estado
+// PENDIENTE). Mismo estilo de emojis que el pedido de la calculadora web;
+// los pasos siguientes (confirmar/completar) usan los mensajes de arriba.
+function mensajeReciboTransferencia(operacion, calculo) {
+    const fmt = (n) => Number(n).toLocaleString("es-ES");
+    const lineas = [
+        `🧾 *Recibo de transferencia #${operacion.id}*`,
+        "",
+        `👤 Cliente: ${operacion.nombre}`,
+        `🇨🇺 Beneficiario recibe: ${fmt(calculo.cantidad)} ${calculo.moneda}`,
+        `💰 Total a pagar: R$ ${fmt(calculo.brl)}`,
+        `💱 Tasa aplicada: ${fmt(calculo.tasa)} ${calculo.tasaEtiqueta}`,
+        `💳 Tarjeta/cuenta destino: ${operacion.tarjeta}`,
+        "",
+        "⏳ Estado: PENDIENTE",
+        "🇧🇷 Pago: PIX",
+        "",
+        "Te avisamos por aquí en cuanto confirmemos tu pago. 😊"
+    ];
+    return lineas.join("\n");
+}
+
 module.exports = {
     esEntregaEfectivo,
     esOperacionDeRecarga,
     mensajeConfirmarOperacion,
-    mensajeCompletarOperacion
+    mensajeCompletarOperacion,
+    mensajeReciboTransferencia
 };

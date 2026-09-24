@@ -84,6 +84,7 @@ Clave: `id` (serial, autoincremental — usado en `RETURNING *` / `WHERE id = $1
 | `status` | VARCHAR (`pendiente` → `confirmada` → `completada`, o `expirada`) | base |
 | `created_at`, `confirmed_at`, `completed_at`, `updated_at` | TIMESTAMP | base |
 | `ref_web` | VARCHAR(20) | `index.js` ALTER (histórico) — dedup de pedidos de la calculadora |
+| `origen` | VARCHAR(30) | `0020` — origen interno (`dashboard_manual` = alta manual de transferencias); NULL en los flujos existentes |
 | `direccion`, `provincia`, `municipio` | TEXT/VARCHAR(60) | `index.js` ALTER (histórico) |
 | `referencia_entrega`, `telefono_entrega` | TEXT/VARCHAR(30) | `index.js` ALTER (histórico) |
 | `entrega_disponible` | BOOLEAN | `index.js` ALTER (histórico) |

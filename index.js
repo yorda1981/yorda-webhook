@@ -16,7 +16,7 @@ const recuperacionMensajes = require("./src/services/recuperacion-mensajes");
 const recuperacionEnvios = require("./src/services/recuperacion-envios");
 const entregasService = require("./src/services/entregas");
 const { leerTasas } = require("./src/flows/cotizacion-flow");
-const { esPedidoWeb, procesarPedidoWeb, crearEntregaManual } = require("./src/flows/pedido-web-flow");
+const { esPedidoWeb, procesarPedidoWeb, crearEntregaManual, cotizarTransferenciaManual, crearTransferenciaManual } = require("./src/flows/pedido-web-flow");
 const { enviarSeguro, getAdminPhone, getPIXKey, getPIXHolder, getPIXBank, getPIXImage } = require("./src/flows/shared");
 const { yaFueProcesado, activarPausaHumana, enPausaHumana, limpiarWebhookEventsViejos } = require("./src/services/webhook-guard");
 const { verificarSecretoWebhook, validarPayloadWebhook } = require("./src/middleware/webhook-security");
@@ -401,7 +401,12 @@ app.get("/admin/clientes", adminReadLimiter, verificarToken, async (req, res) =>
 });
 
 app.get("/admin/operaciones", adminReadLimiter, verificarToken, async (req, res) => {
-    try { res.json(await obtenerTodas()); } catch (e) { res.status(500).json({ error: e.message }); }
+    // `transferencia` (aditivo): montos por moneda para el CRM de
+    // Transferencias -- mismo mapeo que el aviso a operadores.
+    try {
+        const ops = await obtenerTodas();
+        res.json(ops.map(op => ({ ...op, transferencia: operadoresService.montosTransferencia(op) })));
+    } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.get("/admin/stats", adminReadLimiter, verificarToken, async (req, res) => {
@@ -724,6 +729,25 @@ app.get("/admin/entregas/tasa-usdt", adminReadLimiter, verificarTokenEntregas, a
 app.post("/admin/entregas/manual", adminWriteLimiter, verificarToken, async (req, res) => {
     try {
         const resultado = await crearEntregaManual(req.body || {});
+        if (resultado.error) return res.status(400).json({ error: resultado.error });
+        res.json(resultado);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Transferencia manual desde el dashboard (recuperar operaciones que no se
+// cerraron por WhatsApp). Solo ADMIN_TOKEN. /cotizar es la vista previa
+// (no crea nada); la creación recalcula todo en el backend.
+app.post("/admin/transferencias/manual/cotizar", adminReadLimiter, verificarToken, async (req, res) => {
+    try {
+        const resultado = await cotizarTransferenciaManual(req.body || {});
+        if (resultado.error) return res.status(400).json({ error: resultado.error });
+        res.json(resultado);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post("/admin/transferencias/manual", adminWriteLimiter, verificarToken, async (req, res) => {
+    try {
+        const resultado = await crearTransferenciaManual(req.body || {});
         if (resultado.error) return res.status(400).json({ error: resultado.error });
         res.json(resultado);
     } catch (e) { res.status(500).json({ error: e.message }); }

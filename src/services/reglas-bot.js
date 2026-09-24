@@ -15,6 +15,8 @@
 // hace las acciones (enviarSeguro, guardarCliente, etc.).
 // ─────────────────────────────────────────────────────────
 
+const { fechaSaoPaulo } = require("../utils/timezone");
+
 const ESTADOS_QUE_BLOQUEAN = ["aguardando_comprovante", "aguardando_numero_recarga", "confirmando_recarga"];
 
 function clienteEstaOcupado(cliente) {
@@ -291,6 +293,110 @@ function esIntencionSinMonto(txt) {
     const c = canonizarIntencion(txt);
     if (/\b(foto|fotos|comprobante|comprovante|documento|pix|imagen|imagem|captura|print|mensaje|mensagem|audio)\b/.test(c)) return false;
     return /\b(quiero|quero|necesito|preciso|deseo|quisiera|gostaria de|me gustaria|puedo|posso)\b(\s+\S+){0,3}?\s+(enviar|mandar|transferir|remesa)\b/.test(c);
+}
+
+// SALUDO NATURAL / COMBINADO.
+//
+// Antes el saludo solo se reconocía si el mensaje era EXACTAMENTE uno de
+// una lista ("hola", "buenas tardes"...): "Hola buenas noches", "Hola,
+// buenos días" o "Hola" + "Buenas" juntados por el debounce no eran saludo
+// ni tenían gatillo -> el portón los descartaba en silencio. Ahora se
+// consumen saludos del INICIO del texto (uno o varios, con puntuación,
+// saltos de línea o emojis entre medio) y se devuelve lo que queda:
+//   { tieneSaludo: false }                      -> no empieza con saludo
+//   { tieneSaludo: true, resto: "" }            -> solo saludo
+//   { tieneSaludo: true, resto: "<intención>" } -> saludo + algo más
+// `resto` conserva el texto ORIGINAL (tildes, mayúsculas) para que el
+// resto del router lo procese como si hubiera llegado solo.
+const SALUDOS = [
+    "buenas tardes", "buenas noches", "buenos dias", "buen dia", "buenas", "buenos",
+    "boa tarde", "boa noite", "bom dia", "boas",
+    "good morning", "hola", "ola", "oie", "oi", "hey", "hello", "hi",
+    "e ai", "eai", "que tal", "saludos"
+];
+// Solo se consumen DESPUÉS de un saludo ("hola Yordanys", "oi amigo").
+const VOCATIVOS = ["yordanys", "yorda", "bot", "amigo", "amiga", "hermano", "mano"];
+const SEPARADORES_SALUDO = /^[\s,.;:!?¡¿…\-–—~*()\p{Extended_Pictographic}\uFE0F\u200D]+/u;
+
+function separarSaludo(text) {
+    const original = String(text || "").normalize("NFC");
+    const n = original.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").normalize("NFC");
+    // Mapeo 1:1 original<->normalizado (válido para texto NFC en alfabeto
+    // latino); si no, se trabaja sobre el normalizado.
+    const base = n.length === original.length ? original : n;
+    let i = 0, tieneSaludo = false;
+    const saltarSeparadores = () => { const m = n.slice(i).match(SEPARADORES_SALUDO); if (m) i += m[0].length; };
+    const consumir = (lista) => {
+        for (const w of lista) {
+            if (n.startsWith(w, i) && !/[a-z0-9]/.test(n.charAt(i + w.length))) { i += w.length; return true; }
+        }
+        return false;
+    };
+    saltarSeparadores();
+    while (consumir(SALUDOS)) {
+        tieneSaludo = true;
+        saltarSeparadores();
+        if (consumir(VOCATIVOS)) saltarSeparadores();
+    }
+    return { tieneSaludo, resto: tieneSaludo ? base.slice(i).trim() : String(text || "") };
+}
+
+// CONSULTA DE ESTADO / SEGUIMIENTO de una operación PROPIA, por concepto:
+// referencia a "mi/meu/minha" + envío/transferencia/operación/remesa/
+// pedido/dinero/pago (normalizado con canonizarIntencion) Y una señal de
+// seguimiento (estado, cómo va, ya salió/llegó, cuándo llega, qué pasó,
+// demora...). Exigir el posesivo evita confundirlo con preguntas generales
+// ("cómo va todo", "cómo está el cambio").
+const OBJETO_OPERACION_PROPIA = /\b(mi|mis|meu|minha|meus|minhas|nuestro|nuestra)\s+(enviar|transferir|operacion|operaciones|operacao|remesa|pedido|dinero|pago|pagamento|deposito)\b/;
+const SENAL_SEGUIMIENTO = /\b(estado|status|situacion|seguimiento|andamento|como (va|vai|anda|esta|sigue)|ya (salio|llego|esta|se hizo|lo hicieron)|salio|llego|chegou|saiu|cuando (llega|sale)|quando (chega|sai)|que (paso|sucedio)|o que (houve|aconteceu)|paso algo|demora|tarda|falta|novedad|novedades|noticias|listo|pronto)\b/;
+
+function esConsultaEstadoOperacion(txt) {
+    const c = canonizarIntencion(txt);
+    return OBJETO_OPERACION_PROPIA.test(c) && SENAL_SEGUIMIENTO.test(c);
+}
+
+// ── CONTEXTO DE PAGO ──
+
+// Pedido del PIX / de la clave para pagar, por CONCEPTO (verbo de pedido +
+// pix/chave/llave/clave, en cualquier orden y con "por favor" alrededor),
+// no por frase exacta: "Puede enviar o pix", "manda o pix por favor",
+// "qual a chave?". Nunca cuando el cliente dice que YA pagó (eso es
+// comprobante verbal).
+function esPedidoDePix(txt) {
+    const t = String(txt || "").replace(/\s+/g, " ").trim();
+    if (!/\b(pix|chave|llave|clave)\b/.test(t)) return false;
+    if (/\b(fiz|hice|paguei|pague|mandei|enviei|transferi|feito|realizado|comprovante|comprobante)\b|\bya (mande|envie|pague)\b/.test(t)) return false;
+    return /^(el |o |a |la )?(pix|chave|llave|clave)( pix)?( por favor| pf| pfv| porfa)?[?!.]*$/.test(t) ||
+        /\b(manda|mande|mandar|mandame|mandas|envia|envie|enviar|enviame|envias|pasa|pasame|pasas|passa|passe|passar|da|dame|me da|cual|qual|quero|quiero|pode|puede|podes|puedes|poderia|podria|necesito|preciso)\b.{0,25}\b(pix|chave|llave|clave)\b/.test(t);
+}
+
+const ESTADOS_CON_OPERACION_EN_CURSO = ["cotizacion_realizada", "aguardando_comprovante"];
+
+// El cliente ya tiene un monto cotizado (y, si aplica, tarjeta) en curso:
+// ningún camino del bot debe volver a preguntarle cuánto quiere enviar.
+// Solo se retoma una cotización RECIENTE de la conversación actual:
+//  - con fecha conocida (fecha_cotizacion/fecha_estado; sin fecha no se
+//    retoma -- updated_at no sirve, cambia con cualquier interacción),
+//  - de hace 2 h como máximo (mismo criterio que el pedido de PIX), y
+//  - del MISMO día en America/Sao_Paulo: una cotización de ayer nunca
+//    contamina una conversación nueva, aunque sea de hace minutos (23:50 -> 00:10).
+// Recargas quedan fuera (tienen su propio flujo). Esto es solo contexto
+// conversacional (customers): una OPERACIÓN real pendiente vive en
+// `operations` y no depende de esta función.
+const VIGENCIA_COTIZACION_MS = 2 * 60 * 60 * 1000;
+function tieneOperacionEnCurso(cliente, ahora = Date.now()) {
+    if (!ESTADOS_CON_OPERACION_EN_CURSO.includes(cliente?.estado) || !(Number(cliente?.ultimo_monto) > 0)) return false;
+    if (String(cliente?.tipo_favorito || "").startsWith("recarga_")) return false;
+    const ref = cliente?.fecha_cotizacion || cliente?.fecha_estado;
+    const ts = ref ? new Date(ref).getTime() : NaN;
+    if (!Number.isFinite(ts) || ahora - ts > VIGENCIA_COTIZACION_MS) return false;
+    return fechaSaoPaulo(new Date(ts)) === fechaSaoPaulo(new Date(ahora));
+}
+
+// Detecta respuestas (de la IA) que vuelven a preguntar el monto.
+function preguntaElMonto(texto) {
+    const t = String(texto || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    return /cuanto (quieres|deseas|vas a|desea|quiere)\s*(enviar|mandar)|que monto|quanto (voce )?(quer|deseja|vai) (enviar|mandar)|qual (o )?valor|dime el monto|me (diz|fala) o valor/.test(t);
 }
 
 // PORTÓN ÚNICO DE NEGOCIO — lo que los clasificadores de arriba reconocen
@@ -583,6 +689,11 @@ module.exports = {
     esConsultaTasas,
     esIntencionSinMonto,
     esMensajeDeNegocio,
+    separarSaludo,
+    esConsultaEstadoOperacion,
+    esPedidoDePix,
+    tieneOperacionEnCurso,
+    preguntaElMonto,
     yaAvisoEntregaReciente,
     CONTEXTO_CORTO_TTL_MS,
     contextoCortoVigente,

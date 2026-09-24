@@ -18,6 +18,11 @@ const { agregarEntrega, obtenerEntregaPorId, nombreReceptor } = require("../serv
 const { guardarCliente } = require("../services/customer-memory");
 const { enviarSeguro, destinatariosInternosEntregas, fmt } = require("./shared");
 const idempotencia = require("../services/idempotency");
+const { leerTasas } = require("./cotizacion-flow");
+const { calcularTransferenciaManual } = require("../services/calculator");
+const { mensajeReciboTransferencia } = require("../services/operation-messages");
+const { normalizarTelefono } = require("../services/blocked-numbers");
+const { log } = require("../utils/structured-logger");
 
 // Consulta el nivel VIP (0-3) de este teléfono (para el descuento de entrega escalado).
 async function nivelVipDe(phone) {
@@ -508,6 +513,99 @@ async function crearEntregaManual(datos) {
     return { success: true, operacion, entrega };
 }
 
+// ── TRANSFERENCIA MANUAL (desde el dashboard) ────────────────────────────
+// Recupera operaciones que no llegaron a cerrarse por WhatsApp. Crea la
+// MISMA operación real que el bot/la calculadora (agregarOperacion, tipo
+// *_transferencia, status 'pendiente'), así que después sigue exactamente
+// el circuito de siempre (confirmar -> operadores -> completar) y cuenta en
+// todas las estadísticas. `origen = 'dashboard_manual'` solo identifica de
+// dónde vino. Transferencias, nunca Entregas.
+const SCOPE_TRANSFERENCIA_MANUAL = "transferencia_manual";
+const ORIGEN_DASHBOARD_MANUAL = "dashboard_manual";
+
+function validarTransferenciaManual(datos) {
+    const nombre   = String(datos.clienteNombre || "").trim();
+    const phone    = normalizarTelefono(datos.telefonoCliente);
+    const moneda   = String(datos.moneda || "").toUpperCase();
+    const cantidad = Number(datos.cantidad);
+    const tarjeta  = String(datos.tarjeta || "").replace(/[\s-]/g, "").slice(0, 40);
+    if (!nombre || !phone || !tarjeta || !["CUP", "USD", "MLC"].includes(moneda) || !Number.isFinite(cantidad) || cantidad <= 0) {
+        return { error: "Faltan datos obligatorios (cliente, WhatsApp, moneda CUP/USD/MLC, cantidad y tarjeta/cuenta destino)." };
+    }
+    return { nombre, phone, moneda, cantidad, tarjeta };
+}
+
+// Vista previa: mismas tasas vigentes y mismo cálculo que la creación real.
+async function cotizarTransferenciaManual(datos) {
+    const v = validarTransferenciaManual(datos || {});
+    if (v.error) return v;
+    const calculo = calcularTransferenciaManual({ moneda: v.moneda, cantidad: v.cantidad, tasas: await leerTasas() });
+    if (!calculo) return { error: `No hay tasa vigente configurada para ${v.moneda}.` };
+    return { success: true, calculo, destino: v.tarjeta, clienteNombre: v.nombre, telefono: v.phone };
+}
+
+async function crearTransferenciaManual(datos) {
+    const v = validarTransferenciaManual(datos || {});
+    if (v.error) return v;
+
+    // El BRL SIEMPRE se recalcula aquí con las tasas vigentes -- nunca se
+    // confía en un monto que venga del navegador.
+    const calculo = calcularTransferenciaManual({ moneda: v.moneda, cantidad: v.cantidad, tasas: await leerTasas() });
+    if (!calculo) return { error: `No hay tasa vigente configurada para ${v.moneda}.` };
+
+    // Mismo esquema de idempotencia que crearEntregaManual (doble clic/reintento).
+    const idempotencyKey = datos.idempotencyKey ? String(datos.idempotencyKey).slice(0, 100) : null;
+    if (idempotencyKey) {
+        const claim = await idempotencia.reclamar(idempotencyKey, SCOPE_TRANSFERENCIA_MANUAL);
+        if (!claim.nueva) {
+            if (claim.resourceId) return { success: true, operacion: { id: Number(claim.resourceId) }, duplicado: true };
+            return { error: "Ya hay una creación en curso con este mismo intento. Esperá un momento antes de reintentar." };
+        }
+    }
+
+    const operacion = await agregarOperacion({
+        phone:   v.phone,
+        nombre:  v.nombre,
+        monto:   calculo.brl,
+        // Igual que manejarTransferencia(): `cup` guarda la cantidad destino en
+        // la moneda de la operación (CUP/USD/MLC).
+        cup:     calculo.cantidad,
+        tarjeta: v.tarjeta,
+        tipo:    calculo.tipo
+    });
+    if (!operacion) {
+        if (idempotencyKey) await idempotencia.liberar(idempotencyKey);
+        return { error: "No se pudo registrar la operación." };
+    }
+    if (idempotencyKey) await idempotencia.resolver(idempotencyKey, operacion.id);
+
+    // Origen interno (columna de la migración 0020). Si todavía no se aplicó,
+    // la operación ya existe y sigue siendo válida -- solo se registra el aviso.
+    try {
+        await pool.query("UPDATE operations SET origen = $2 WHERE id = $1", [operacion.id, ORIGEN_DASHBOARD_MANUAL]);
+        operacion.origen = ORIGEN_DASHBOARD_MANUAL;
+    } catch (e) {
+        console.error(`⚠️ No se pudo guardar origen de la operación #${operacion.id}:`, e.message);
+    }
+
+    // Mismo "modo silencio" del bot que los pedidos de la calculadora; lo
+    // limpia completar-operacion como siempre.
+    await guardarCliente({ phone: v.phone, nombre: v.nombre, estado: "pedido_web_pendiente" });
+
+    // Si WhatsApp falla, la operación NO se pierde ni se revierte.
+    let reciboEnviado = false;
+    try {
+        reciboEnviado = !!(await enviarSeguro(v.phone, mensajeReciboTransferencia(operacion, calculo)));
+    } catch (e) {
+        console.error(`❌ Error enviando recibo de la operación #${operacion.id}:`, e.message);
+    }
+    if (!reciboEnviado) {
+        log("EXTERNAL_API_ERROR", { origen: "transferencia_manual.recibo", operationId: operacion.id, phone: v.phone });
+    }
+
+    return { success: true, operacion, calculo, reciboEnviado };
+}
+
 // ── ENTRADA ÚNICA ────────────────────────────────────────
 
 async function procesarPedidoWeb(phone, texto, pushName) {
@@ -523,6 +621,7 @@ async function procesarPedidoWeb(phone, texto, pushName) {
 
 module.exports = {
     esPedidoWeb, procesarPedidoWeb, crearEntregaManual,
+    cotizarTransferenciaManual, crearTransferenciaManual,
     // exportados también para pruebas automáticas (test/pedido-web-flow.test.js) —
     // son funciones puras, no tocan WhatsApp ni la base de datos
     esEntrega, parsearPedidoEntrega, parsearPedidoTransferencia, limpiarNumero,

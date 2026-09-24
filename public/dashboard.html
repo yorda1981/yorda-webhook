@@ -50,6 +50,33 @@
         .btn-limpiar:hover { opacity: 0.9; }
         .layout-superior { display: grid; grid-template-columns: 2fr 1fr; gap: 20px; align-items: start; margin-bottom: 30px; }
         @media (max-width: 900px) { .layout-superior { grid-template-columns: 1fr; } }
+        .columna-derecha { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+        .columna-derecha .grid-inputs { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+        .columna-derecha input[type="number"] { padding: 10px 12px; font-size: 14px; }
+        /* El CRM ocupa todo el alto de la fila (igual al de la columna derecha);
+           contain:size evita que su contenido estire la fila -- scroll interno. */
+        #seccionCrmTransferencias { align-self: stretch; display: flex; flex-direction: column; min-width: 0; padding: 22px; }
+        #seccionCrmTransferencias.dashboard-section-collapsed { align-self: start; }
+        #seccionCrmTransferencias:not(.dashboard-section-collapsed) > .dashboard-section-body { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+        .crm-tr-filtros { display: grid; grid-template-columns: minmax(0, 2fr) repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 10px; }
+        .crm-tr-filtros .campo-tm { padding: 8px 10px; font-size: 12px; min-width: 0; }
+        .crm-tr-scroll { flex: 1 1 0; min-height: 360px; overflow: auto; contain: size; border: 1px solid #2d355a; border-radius: 12px; }
+        .crm-tr-tabla th { position: sticky; top: 0; background: var(--card); z-index: 1; padding: 8px 6px; font-size: 10px; white-space: normal; vertical-align: bottom; }
+        .crm-tr-tabla td { padding: 6px; font-size: 11px; white-space: nowrap; line-height: 1.35; }
+        .crm-tr-tabla td.crm-cliente { white-space: normal; min-width: 90px; max-width: 130px; }
+        .crm-tr-tabla .btn-confirm { padding: 4px 8px; font-size: 10px; }
+        .crm-estado { padding: 2px 6px; border-radius: 10px; font-size: 9px; font-weight: 700; text-transform: uppercase; }
+        .crm-estado.pendiente { background: rgba(251,191,36,.15); color: var(--yellow); }
+        .crm-estado.confirmada { background: rgba(96,165,250,.15); color: #60a5fa; }
+        .crm-estado.completada { background: rgba(74,222,128,.15); color: var(--green); }
+        .crm-estado.expirada { background: rgba(148,163,184,.15); color: #94a3b8; }
+        @media (max-width: 900px) {
+            .crm-tr-filtros { grid-template-columns: 1fr 1fr; }
+            .crm-tr-scroll { contain: none; flex: none; max-height: 65vh; min-height: 0; }
+        }
+        #btnCrearTransferencia:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+        .campo-tm { background: #0b0e1a; border: 1px solid #2d355a; padding: 12px 14px; border-radius: 10px; color: white; font-size: 14px; outline: none; }
+        .tm-preview { background: #0b0e1a; border: 1px solid #2d355a; border-radius: 12px; padding: 12px 14px; font-size: 13px; line-height: 1.7; white-space: pre-line; margin-top: 14px; }
         .resumen-compacto-item { display: flex; justify-content: space-between; align-items: baseline; padding: 10px 0; border-bottom: 1px solid #2d355a; gap: 10px; }
         .resumen-compacto-item:last-child { border-bottom: none; }
         .resumen-compacto-item .label { font-size: 11px; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; }
@@ -126,6 +153,49 @@
         </div>
 
         <div class="layout-superior">
+            <!-- CRM de Transferencias: las MISMAS operaciones reales de
+                 /admin/operaciones (WhatsApp, calculadora y alta manual), solo
+                 transferencias (nunca Entregas ni Recargas). Acciones = las de
+                 siempre (confirmar/completar). -->
+            <div class="config-section" id="seccionCrmTransferencias" style="margin-bottom:0;">
+                <h3 style="margin-bottom:12px;">💸 CRM de Transferencias <span class="badge-count" id="countCrmTransferencias">0</span></h3>
+                <div class="crm-tr-filtros">
+                    <input type="text" class="campo-tm" id="crmTrBuscar" placeholder="Buscar ID, cliente, teléfono o tarjeta" oninput="renderCrmTransferencias()">
+                    <select class="campo-tm" id="crmTrEstado" onchange="renderCrmTransferencias()">
+                        <option value="">Estado</option>
+                        <option value="pendiente">Pendiente</option>
+                        <option value="confirmada">Confirmada</option>
+                        <option value="completada">Completada</option>
+                        <option value="expirada">Expirada</option>
+                    </select>
+                    <select class="campo-tm" id="crmTrMoneda" onchange="renderCrmTransferencias()">
+                        <option value="">Moneda</option>
+                        <option value="CUP">CUP</option>
+                        <option value="USD">USD</option>
+                        <option value="MLC">MLC</option>
+                    </select>
+                    <select class="campo-tm" id="crmTrOrigen" onchange="renderCrmTransferencias()">
+                        <option value="">Origen</option>
+                        <option value="whatsapp">WhatsApp</option>
+                        <option value="dashboard_manual">Dashboard manual</option>
+                    </select>
+                </div>
+                <div class="crm-tr-scroll">
+                    <table class="crm-tr-tabla">
+                        <thead>
+                            <tr><th>ID</th><th>Fecha</th><th>Cliente / Teléfono</th><th>Moneda</th><th>BRL</th><th>Destino</th><th>Tarjeta/ cuenta</th><th>Estado</th><th>Origen</th><th>Acción</th></tr>
+                        </thead>
+                        <tbody id="tablaCrmTransferencias">
+                            <tr><td colspan="10" style="text-align:center; padding:20px; color:#8b949e;">Conecta para ver datos</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div id="crmTrPie" style="font-size:11px; color:#8b949e; margin-top:8px;"></div>
+            </div>
+
+
+
+            <div class="columna-derecha">
             <div class="config-section" id="seccionTasas" style="margin-bottom:0;">
                 <h3>💱 Configuración de Tasas</h3>
                 <div id="tasasForm">
@@ -167,6 +237,31 @@
                 <button class="btn-save" id="btnSave" onclick="guardarTasas()">Guardar Cambios de Tasas</button>
             </div>
 
+            <!-- Alta manual de transferencias: recupera operaciones que no se
+                 cerraron por WhatsApp. Crea la misma operación real que el bot
+                 (estado PENDIENTE) con las tasas vigentes -- ver
+                 crearTransferenciaManual en src/flows/pedido-web-flow.js. -->
+            <div class="config-section" id="seccionNuevaTransferencia" style="margin-bottom:0;">
+                <h3>🧾 Nueva transferencia</h3>
+                <div style="display:flex; flex-direction:column; gap:12px;">
+                    <div class="input-group"><label>Cliente</label><input type="text" class="campo-tm" id="tmCliente" placeholder="Ej: Juan Pérez" oninput="invalidarPreviewTransferencia()"></div>
+                    <div class="input-group"><label>Teléfono/WhatsApp</label><input type="tel" class="campo-tm" id="tmTelefono" placeholder="5511999999999" oninput="invalidarPreviewTransferencia()"></div>
+                    <div class="input-group"><label>Moneda</label>
+                        <select class="campo-tm" id="tmMoneda" onchange="invalidarPreviewTransferencia()">
+                            <option value="CUP">CUP</option>
+                            <option value="USD">USD</option>
+                            <option value="MLC">MLC</option>
+                        </select>
+                    </div>
+                    <div class="input-group"><label>Cantidad a transferir/recibir</label><input type="number" class="campo-tm" id="tmCantidad" min="0" step="0.01" placeholder="Ej: 10000" oninput="invalidarPreviewTransferencia()"></div>
+                    <div class="input-group"><label>Tarjeta/cuenta destino</label><input type="text" class="campo-tm" id="tmTarjeta" placeholder="16 dígitos" oninput="invalidarPreviewTransferencia()"></div>
+                </div>
+                <button class="page-btn" style="width:100%; margin-top:16px; padding:12px;" onclick="revisarTransferenciaManual()">Revisar cálculo</button>
+                <div class="tm-preview" id="tmPreview" style="display:none;"></div>
+                <button class="btn-save" id="btnCrearTransferencia" style="margin-top:14px;" disabled onclick="crearTransferenciaManualForm(this)">Crear operación pendiente</button>
+                <div id="tmInfo" style="font-size:13px; margin-top:10px;"></div>
+            </div>
+
             <div class="config-section" style="margin-bottom:0;">
                 <h3 style="margin-bottom:4px;">📊 Resumen General</h3>
                 <p style="color:#8b949e; font-size:11px; margin-top:0; margin-bottom:10px;">Resumen financiero y comercial de Yorda Envíos</p>
@@ -181,6 +276,7 @@
                     <div class="resumen-compacto-item" title="No existe todavía una relación inequívoca entre cada cotización y su operación."><span class="label">Conversión hoy</span><span class="value" id="stat-conversion" style="color:#a78bfa;">—</span></div>
                     <div class="resumen-compacto-item" title="Clientes actualmente en abandono con actividad en los últimos 30 días."><span class="label">En abandono (30 días)</span><span class="value" id="stat-abandonos" style="color:var(--red);">—</span></div>
                 </div>
+            </div>
             </div>
         </div>
 
@@ -1290,6 +1386,7 @@
                 // vivan en la misma tabla `operations` (ver esOperacionDeRecarga).
                 window._ultimasOperaciones = operaciones;
                 renderRecargasOps(operaciones);
+                renderCrmTransferencias();
 
                 // Pendientes
                 const tablaPendientes = document.getElementById("tablaPendientes");
@@ -1360,6 +1457,62 @@
             } catch (e) {
                 console.error("❌ Error dashboard:", e);
             }
+        }
+
+        // ── CRM de Transferencias ──
+        // Solo lee window._ultimasOperaciones (lo mismo que ya trae
+        // refreshData) -- `op.transferencia` viene calculado por el backend
+        // (operadores.montosTransferencia), nada financiero se calcula aquí.
+        // Acciones = confirmar()/completar() de siempre.
+        const CRM_TR_MAX_FILAS = 300;
+        function renderCrmTransferencias() {
+            const tbody = document.getElementById("tablaCrmTransferencias");
+            if (!tbody) return;
+            const ops = (window._ultimasOperaciones || []).filter(o => o && o.transferencia);
+            const q = (document.getElementById("crmTrBuscar")?.value || "").trim().toLowerCase();
+            const fEstado = document.getElementById("crmTrEstado")?.value || "";
+            const fMoneda = document.getElementById("crmTrMoneda")?.value || "";
+            const fOrigen = document.getElementById("crmTrOrigen")?.value || "";
+            const origenDe = o => o.origen === "dashboard_manual" ? "dashboard_manual" : "whatsapp";
+            const filtradas = ops.filter(o =>
+                (!fEstado || o.status === fEstado) &&
+                (!fMoneda || o.transferencia.moneda === fMoneda) &&
+                (!fOrigen || origenDe(o) === fOrigen) &&
+                (!q || [o.id, o.nombre, o.titular, o.phone, o.tarjeta].some(v => String(v ?? "").toLowerCase().includes(q)))
+            );
+            document.getElementById("countCrmTransferencias").innerText = ops.length;
+            const fmtN = n => (n === null || n === undefined || isNaN(n)) ? "—" : Number(n).toLocaleString("es-ES");
+            if (filtradas.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:#8b949e;padding:20px;">No hay transferencias para mostrar.</td></tr>';
+            } else {
+                tbody.innerHTML = filtradas.slice(0, CRM_TR_MAX_FILAS).map(o => {
+                    const t = o.transferencia;
+                    const f = new Date(o.created_at);
+                    const accion = o.status === "pendiente"
+                        ? `<button class="btn-confirm" onclick="confirmar('${Number(o.id)}', this)">VERIFICADO</button>`
+                        : o.status === "confirmada"
+                            ? `<button class="btn-confirm" onclick="completar('${Number(o.id)}', this)">COMPLETAR</button>`
+                            : '<span style="color:#8b949e;">—</span>';
+                    const origen = origenDe(o) === "dashboard_manual" ? '<span title="Dashboard manual">🖥️ Manual</span>' : "💬 WhatsApp";
+                    const estado = escapeHtml(o.status || "-");
+                    return `<tr>
+                        <td><strong>#${Number(o.id)}</strong></td>
+                        <td>${f.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit" })}<br><small style="color:#8b949e;">${f.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</small></td>
+                        <td class="crm-cliente"><strong>${escapeHtml(o.nombre || "-")}</strong><br><small style="color:#8b949e;">${escapeHtml(o.phone || "-")}</small></td>
+                        <td>${escapeHtml(t.moneda)}</td>
+                        <td style="color:var(--yellow);font-weight:700;">R$ ${fmtN(t.brl)}</td>
+                        <td>${t.destino !== null ? `${fmtN(t.destino)} ${escapeHtml(t.moneda)}` : "—"}</td>
+                        <td style="font-family:monospace;" title="${escapeHtml(o.tarjeta || "")}">${o.tarjeta ? "•••• " + escapeHtml(String(o.tarjeta).slice(-4)) : "-"}</td>
+                        <td><span class="crm-estado ${estado}">${estado}</span></td>
+                        <td><small>${origen}</small></td>
+                        <td>${accion}</td>
+                    </tr>`;
+                }).join("");
+            }
+            const pie = document.getElementById("crmTrPie");
+            if (pie) pie.innerText = filtradas.length > CRM_TR_MAX_FILAS
+                ? `Mostrando las ${CRM_TR_MAX_FILAS} más recientes de ${filtradas.length}. Usa los filtros para acotar.`
+                : `${filtradas.length} transferencia(s)`;
         }
 
         async function confirmar(id, btn) {
@@ -1581,6 +1734,89 @@
             if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
             // Respaldo para navegadores sin crypto.randomUUID (HTTP sin TLS, muy viejos).
             return "k-" + Date.now() + "-" + Math.random().toString(36).slice(2);
+        }
+
+        // ── Nueva transferencia (alta manual) ──
+        // La vista previa y la creación las calcula el BACKEND con las tasas
+        // vigentes -- aquí no se repite ninguna fórmula. Cualquier cambio en
+        // el formulario invalida la vista previa y obliga a revisar de nuevo.
+        let transferenciaManualIdempotencyKey = null;
+
+        function datosTransferenciaManual() {
+            return {
+                clienteNombre:   document.getElementById("tmCliente").value.trim(),
+                telefonoCliente: document.getElementById("tmTelefono").value.trim(),
+                moneda:          document.getElementById("tmMoneda").value,
+                cantidad:        document.getElementById("tmCantidad").value,
+                tarjeta:         document.getElementById("tmTarjeta").value.trim()
+            };
+        }
+
+        function invalidarPreviewTransferencia() {
+            document.getElementById("btnCrearTransferencia").disabled = true;
+            document.getElementById("tmPreview").style.display = "none";
+        }
+
+        async function revisarTransferenciaManual() {
+            const info = document.getElementById("tmInfo");
+            const preview = document.getElementById("tmPreview");
+            invalidarPreviewTransferencia();
+            info.innerText = "";
+            try {
+                const res = await fetch("/admin/transferencias/manual/cotizar", { method: "POST", headers: authH(), body: JSON.stringify(datosTransferenciaManual()) });
+                const data = await res.json();
+                if (!data.success) {
+                    info.style.color = "var(--red)";
+                    info.innerText = "❌ " + (data.error || "Error desconocido");
+                    return;
+                }
+                const c = data.calculo;
+                const fmtN = n => Number(n).toLocaleString("es-ES");
+                preview.innerText =
+                    `Moneda: ${c.moneda}\n` +
+                    `Cantidad destino: ${fmtN(c.cantidad)} ${c.moneda}\n` +
+                    `Total BRL: R$ ${fmtN(c.brl)}\n` +
+                    `Tasa aplicada: ${fmtN(c.tasa)} ${c.tasaEtiqueta}\n` +
+                    `Destino: ${data.destino}`;
+                preview.style.display = "block";
+                document.getElementById("btnCrearTransferencia").disabled = false;
+                if (!transferenciaManualIdempotencyKey) transferenciaManualIdempotencyKey = generarIdempotencyKey();
+            } catch (e) {
+                info.style.color = "var(--red)";
+                info.innerText = "❌ Error de conexión";
+            }
+        }
+
+        async function crearTransferenciaManualForm(btn) {
+            const info = document.getElementById("tmInfo");
+            const datos = datosTransferenciaManual();
+            if (!transferenciaManualIdempotencyKey) transferenciaManualIdempotencyKey = generarIdempotencyKey();
+            datos.idempotencyKey = transferenciaManualIdempotencyKey;
+
+            if (btn) btn.disabled = true; // evita doble clic mientras el request está en curso
+            let creada = false;
+            try {
+                const res = await fetch("/admin/transferencias/manual", { method: "POST", headers: authH(), body: JSON.stringify(datos) });
+                const data = await res.json();
+                if (data.success) {
+                    creada = true;
+                    info.style.color = data.reciboEnviado === false ? "var(--yellow)" : "var(--green)";
+                    info.innerText = `✅ Operación #${data.operacion?.id} creada (PENDIENTE)` +
+                        (data.reciboEnviado === false ? " — ⚠️ no se pudo enviar el recibo por WhatsApp" : "");
+                    ["tmCliente", "tmTelefono", "tmCantidad", "tmTarjeta"].forEach(id => document.getElementById(id).value = "");
+                    invalidarPreviewTransferencia();
+                    transferenciaManualIdempotencyKey = null; // próxima creación = intento nuevo
+                    refreshData();
+                } else {
+                    info.style.color = "var(--red)";
+                    info.innerText = "❌ " + (data.error || "Error desconocido");
+                }
+            } catch (e) {
+                info.style.color = "var(--red)";
+                info.innerText = "❌ Error de conexión";
+            } finally {
+                if (btn && !creada) btn.disabled = false;
+            }
         }
 
         async function crearEntregaManualForm(btn) {

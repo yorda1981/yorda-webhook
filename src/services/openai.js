@@ -10,6 +10,7 @@ const {
     esTarjetaDuplicada, esConsultaEntrega, esBareMontoValido, esEnvioNuevoSobreAbandonado, puedeCotizarBRL,
     clienteEstaOcupado, tieneContextoReemplazable, esFraseDeAbandonoExplicito,
     debeCompletarConMontoPendiente, debeConfirmarCotizacion, tieneTarjetaGuardada, esConsultaTasas, esIntencionSinMonto, esMensajeDeNegocio, yaAvisoEntregaReciente,
+    separarSaludo, esPedidoDePix, tieneOperacionEnCurso, preguntaElMonto, esConsultaEstadoOperacion,
     contextoUtilizable, interpretarSeleccionOpcion, interpretarTarjetaPorPalabra, monedaPendienteDeContexto,
     esRechazoTarjeta, esPausaTemporal, esSenalConfusion, esCierreNatural, esPreguntaExploratoria,
     interpretarAccionRecarga,
@@ -125,11 +126,27 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null, opci
         }
 
         // ── Saludo ──
-        const esSaludo = /^(hola|oi|bom dia|buenas|buenos dias|boa tarde|boa noite|buen dia|hey|hi|hello|e ai|eai|buenas tardes|buenas noches|good morning)[\s!?.]*$/.test(txt);
-        if (esSaludo) return await manejarSaludo(phone, pushName, cliente, yaSaludado, lang, esEs, txt);
+        // Saludos naturales y combinados ("Hola buenas noches", "Hola" +
+        // "Buenas" del debounce) -- ver separarSaludo en reglas-bot.js.
+        //  - solo saludo            -> se responde (manejarSaludo, como siempre)
+        //  - saludo + algo más      -> saludo inicial (si todavía no se le
+        //    saludó) y se procesa el resto como si hubiera llegado solo; si el
+        //    resto no es de negocio, el portón lo sigue descartando.
+        const saludo = separarSaludo(text);
+        if (saludo.tieneSaludo && !saludo.resto) return await manejarSaludo(phone, pushName, cliente, yaSaludado, lang, esEs, txt);
+        if (saludo.tieneSaludo) {
+            const saludoInicial = !yaSaludado ? await enviarSaludoInicial(phone, pushName, cliente, lang, txt) : null;
+            let resultadoResto = "respondido";
+            const r = await procesarMensaje(phone, saludo.resto, pushName, imageUrl, { onResultado: x => { resultadoResto = x; } });
+            if (!saludoInicial && !String(resultadoResto).startsWith("respondido")) reportar(resultadoResto);
+            return r || saludoInicial || "";
+        }
 
         // ── Filtro de gatillo ──
-        const txtTrim = txt.trim();
+        // Espacios/saltos de línea colapsados: el debounce junta mensajes con
+        // "\n" ("Sim\nPode mandar") y eso no debe impedir reconocer la
+        // confirmación del inicio.
+        const txtTrim = txt.trim().replace(/\s+/g, " ");
         const esConfirma = confirmaOperacion.includes(txtTrim) ||
             // FIX: "si por favor", "dale entonces", etc. — antes solo matcheaba exacto
             // contra la lista y quedaban sin respuesta pese a ser confirmaciones claras.
@@ -144,7 +161,9 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null, opci
             // Portón unificado: lo que los clasificadores reales de reglas-bot.js
             // reconocen (tasas, intención de envío, vocabulario de remesas) nunca
             // se descarta aquí por no estar en la lista de gatillos.
-            esMensajeDeNegocio(txt);
+            esMensajeDeNegocio(txt) ||
+            // Seguimiento de una operación propia ("cómo va mi envío").
+            esConsultaEstadoOperacion(txt);
         if (!debeResponder) { reportar("porton"); return ""; }
 
         // ── Abandono explícito de la operación en curso ──
@@ -333,7 +352,9 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null, opci
         // futura operación con la misma tarjeta sí vuelva a confirmar.
         // Rechazo ya se maneja arriba (esRechazoTarjeta); este bloque cubre
         // el "sí".
-        if (contextoUtilizable(cliente) && cliente?.ultima_pregunta === "confirmar_tarjeta_frecuente" && esConfirma) {
+        // Pedir el PIX ("pode mandar o pix") ante esa misma pregunta también
+        // es un sí: el cliente quiere pagar con la tarjeta ofrecida.
+        if (contextoUtilizable(cliente) && cliente?.ultima_pregunta === "confirmar_tarjeta_frecuente" && (esConfirma || esPedidoDePix(txt))) {
             await limpiarContextoCorto(phone);
             return await _enviarPIXFinal(phone, await obtenerCliente(phone), esEs);
         }
@@ -514,7 +535,10 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null, opci
             /\b(quiero|voy a) (hacer|enviar|mandar)( el)? pix\b/.test(txt) ||
             /\bvoy a pagar\b/.test(txt) ||
             /\b(llave|chave|clave)\b.{0,15}\bpix\b/.test(txt) ||
-            /\b(quiero|quero|vou)\s+pagar\b/.test(txt);
+            /\b(quiero|quero|vou)\s+pagar\b/.test(txt) ||
+            // Por concepto (verbo de pedido + pix/chave), no frase exacta:
+            // "Puede enviar o pix", "manda o pix por favor" -- ver reglas-bot.js.
+            esPedidoDePix(txt);
 
         if (quierePagar) {
             const ref = cliente?.fecha_cotizacion || cliente?.updated_at;
@@ -564,12 +588,20 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null, opci
         }
 
         // ── Estado de operación ──
-        if (/estado|mi operacion|mi envio|cuando llega|cuando llego|cuanto falta|ya llego|esta listo/.test(txt)) {
+        if (esConsultaEstadoOperacion(txt) || /estado|mi operacion|mi envio|cuando llega|cuando llego|cuanto falta|ya llego|esta listo/.test(txt)) {
             const ultima = await obtenerUltimaOperacion(phone);
-            if (!ultima) { await enviarSeguro(phone, "No encuentro operaciones registradas 🤔\n\n¿Quieres hacer un envío?"); return ""; }
+            if (!ultima) {
+                // Sin operación real: una cotización en curso NO es una
+                // operación -- se retoma como cotización, sin inventar estado.
+                if (tieneOperacionEnCurso(cliente)) return await continuarOperacionEnCurso(phone, cliente, esEs);
+                await enviarSeguro(phone, "No encuentro operaciones registradas 🤔\n\n¿Quieres hacer un envío?"); return "";
+            }
+            // Solo el estado REAL de la fila; uno desconocido se muestra tal cual.
             const estadoTxt = ultima.status === "completada" ? "🎉 Completada"
                 : ultima.status === "confirmada" ? "✅ Confirmada, en proceso"
-                : "⏳ Pendiente de verificar";
+                : ultima.status === "pendiente" ? "⏳ Pendiente de verificar"
+                : ultima.status === "expirada" ? "⌛ Expirada (el pago no se llegó a confirmar)"
+                : `Estado: ${ultima.status}`;
             await enviarSeguro(phone, `Tu última operación: R$${ultima.monto} — ${estadoTxt}`);
             return "";
         }
@@ -625,7 +657,12 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null, opci
         if (valorFinal && !montoValido) { reportar("monto_invalido"); return ""; }
 
         // ── Cuba sin monto ──
-        if (txt.includes("cuba") && (/dinero|dinheiro|enviar|mandar|pasar|passar|plata|remesa|remessa/.test(txt) || esIntencionSinMonto(txt))) {
+        // Con un monto ya cotizado en curso NUNCA se vuelve a preguntar
+        // cuánto: se retoma esa operación (ver continuarOperacionEnCurso).
+        const cubaSinMonto = txt.includes("cuba") && (/dinero|dinheiro|enviar|mandar|pasar|passar|plata|remesa|remessa/.test(txt) || esIntencionSinMonto(txt));
+        if ((cubaSinMonto || esIntencionSinMonto(txt)) && tieneOperacionEnCurso(cliente))
+            return await continuarOperacionEnCurso(phone, cliente, esEs);
+        if (cubaSinMonto) {
             const n = pushName ? `, ${pushName.split(" ")[0]}` : "";
             await enviarSeguro(phone, `¡Hola${n}! 😊\n\n¿Cuánto quieres enviar a Cuba?`); return "";
         }
@@ -658,6 +695,10 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null, opci
             const { texto, responseId } = await llamarAsistente(text, hiloVencido ? null : cliente?.last_response_id);
             const esIgnorar = /^ignorar[.!]?$/i.test(texto.trim()) || /silencio total/i.test(texto);
             if (texto && texto.trim() && !esIgnorar) {
+                // La IA no conoce el estado: si hay un monto en curso y su
+                // respuesta vuelve a preguntarlo, se reemplaza por la
+                // continuación determinista de esa operación.
+                if (tieneOperacionEnCurso(cliente) && preguntaElMonto(texto)) return await continuarOperacionEnCurso(phone, cliente, esEs);
                 await guardarCliente({ phone, lastResponseId: responseId });
                 await enviarSeguro(phone, texto);
                 return texto;
@@ -671,6 +712,11 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null, opci
         // IA contestó IGNORAR/vacío o falló. Respuesta fija: no cita tasas,
         // montos ni disponibilidad, y no inicia ninguna operación -- solo
         // reencamina a los flujos deterministas (tasa del día o monto).
+        if (tieneOperacionEnCurso(cliente)) {
+            const m = await continuarOperacionEnCurso(phone, cliente, esEs);
+            reportar(`respondido_rescate_${motivoSilencio}`);
+            return m;
+        }
         if (esMensajeDeNegocio(txt)) {
             const m = esEs
                 ? "Claro, te ayudo con eso 😊 ¿Quieres saber la tasa de hoy o ya tienes el monto que deseas enviar?"
@@ -863,27 +909,46 @@ function construirSaludo({ lang, esRegistrado, frecuente, nombre, franja }) {
     return pick(plantillas)(sufijoNombre);
 }
 
-async function manejarSaludo(phone, pushName, cliente, yaSaludado, lang, esEs, txt = "") {
-    if (!yaSaludado) {
-        // "Registrado" = existe una fila en `customers` para este teléfono
-        // (ya escribió antes), sin importar si tiene operaciones reales --
-        // eso es "frecuente", un caso más específico dentro de "registrado".
-        const esRegistrado = !!cliente;
-        const frecuente = !!cliente?.cliente_frecuente;
-        // Preferir el nombre YA GUARDADO (de operaciones/conversaciones
-        // anteriores, más confiable) sobre el nombre del perfil de WhatsApp
-        // del mensaje actual -- nunca se inventa uno si ninguno es confiable.
-        const nombre = primerNombreConfiable(cliente?.nombre) || primerNombreConfiable(pushName);
-        // Si el cliente ya dijo "buenos días"/"boa noite"/etc., se le
-        // corresponde con esa franja -- si el saludo es genérico ("hola"),
-        // se usa la hora real de Brasil.
-        const franja = franjaSaludoExplicita(txt) || franjaPorHora(horaSaoPaulo());
+// Retoma la operación ya cotizada sin volver a preguntar el monto: usa el
+// monto y la tarjeta guardados en el estado del cliente (nada se recalcula
+// ni se inventa).
+async function continuarOperacionEnCurso(phone, cliente, esEs) {
+    const monto = fmt(await montoPagoEnReales(cliente));
+    const tarjeta = cliente?.tarjeta || cliente?.tarjeta_frecuente;
+    const destino = tarjeta ? (esEs ? ` a la tarjeta •••• ${String(tarjeta).slice(-4)}` : ` para o cartão •••• ${String(tarjeta).slice(-4)}`) : "";
+    const m = cliente?.estado === "aguardando_comprovante"
+        ? (esEs ? `Tu envío de R$${monto}${destino} está listo para pagar 😊 Cuando hagas el PIX, mándame el comprobante 📎`
+                : `Seu envio de R$${monto}${destino} está pronto para pagar 😊 Quando fizer o PIX, me manda o comprovante 📎`)
+        : (esEs ? `Tengo tu envío de R$${monto}${destino} 😊 ¿Te envío el PIX para pagar?`
+                : `Tenho seu envio de R$${monto}${destino} 😊 Te mando o PIX para pagar?`);
+    await enviarSeguro(phone, m);
+    return m;
+}
 
-        const s = construirSaludo({ lang, esRegistrado, frecuente, nombre, franja });
-        await guardarCliente({ phone, saludoEnviado: true });
-        await enviarSeguro(phone, s);
-        return s;
-    }
+// Saludo de primer contacto (cliente registrado vs nuevo, franja horaria).
+async function enviarSaludoInicial(phone, pushName, cliente, lang, txt = "") {
+    // "Registrado" = existe una fila en `customers` para este teléfono
+    // (ya escribió antes), sin importar si tiene operaciones reales --
+    // eso es "frecuente", un caso más específico dentro de "registrado".
+    const esRegistrado = !!cliente;
+    const frecuente = !!cliente?.cliente_frecuente;
+    // Preferir el nombre YA GUARDADO (de operaciones/conversaciones
+    // anteriores, más confiable) sobre el nombre del perfil de WhatsApp
+    // del mensaje actual -- nunca se inventa uno si ninguno es confiable.
+    const nombre = primerNombreConfiable(cliente?.nombre) || primerNombreConfiable(pushName);
+    // Si el cliente ya dijo "buenos días"/"boa noite"/etc., se le
+    // corresponde con esa franja -- si el saludo es genérico ("hola"),
+    // se usa la hora real de Brasil.
+    const franja = franjaSaludoExplicita(txt) || franjaPorHora(horaSaoPaulo());
+
+    const s = construirSaludo({ lang, esRegistrado, frecuente, nombre, franja });
+    await guardarCliente({ phone, saludoEnviado: true });
+    await enviarSeguro(phone, s);
+    return s;
+}
+
+async function manejarSaludo(phone, pushName, cliente, yaSaludado, lang, esEs, txt = "") {
+    if (!yaSaludado) return await enviarSaludoInicial(phone, pushName, cliente, lang, txt);
     if (cliente?.estado === "cotizacion_realizada" && cliente?.ultimo_monto) {
         const m = pick(lang === "pt"
             ? [`Oi! Ainda quer fazer o envio de R$${cliente.ultimo_monto}? 💸`, `Olá! Continuamos com o envio de R$${cliente.ultimo_monto}? 😊`]

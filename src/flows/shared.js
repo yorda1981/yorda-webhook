@@ -87,7 +87,11 @@ const triggersCubaBrasil = [
 const confirmaOperacion = [
     "si","sí","ok","dale","vamos","quiero hacerlo","continuar","deseo continuar",
     "de acuerdo","hagamoslo","hagámoslo","continuemos","perfecto","listo","va",
-    "claro","seguro","exacto","adelante","procede","procedemos","quiero","acepto"
+    "claro","seguro","exacto","adelante","procede","procedemos","quiero","acepto",
+    // Portugués -- antes un "Sim" tras la cotización no confirmaba nada y el
+    // cliente quedaba sin respuesta.
+    "sim","pode","pode sim","claro que sim","certo","fechado","bora","isso","isso mesmo",
+    "pode ser","com certeza","quero sim","vamos sim"
 ];
 
 // ─────────────────────────────────────────

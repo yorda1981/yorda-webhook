@@ -132,8 +132,10 @@ test("CASO 1: 'Boa tarde' + 'O câmbio como está hj' -> responde con las tasas 
 test("CASO 2: 'Buenas tardes' + 'Quero realizar envio a Cuba' + 'Pôr favor' -> pregunta el monto, sin IA ni operación", async (t) => {
     const mundo = mockMundo(t);
     const { enviados, resultado } = await procesar("5511900070002", "Buenas tardes\nQuero realizar envio a Cuba\nPôr favor");
-    assert.equal(enviados.length, 1);
-    assert.match(enviados[0], /Cuánto quieres enviar a Cuba/);
+    // Cliente nuevo: saludo inicial + continúa con la intención (regla aprobada).
+    assert.equal(enviados.length, 2);
+    assert.match(enviados[0], /[Bb]uenas tardes/);
+    assert.match(enviados[1], /Cuánto quieres enviar a Cuba/);
     assert.equal(resultado, "respondido");
     assert.equal(cuentaLlamadasGPT, 0);
     assert.equal(mundo.customers.get("5511900070002")?.ultimo_monto ?? null, null, "no inventa monto");
@@ -145,8 +147,9 @@ test("CASO 2: 'Buenas tardes' + 'Quero realizar envio a Cuba' + 'Pôr favor' -> 
 test("'Boa tarde, quero enviar dinheiro pra Cuba' -> responde (flujo de entrega existente), nunca silencio", async (t) => {
     mockMundo(t);
     const { enviados, resultado } = await procesar("5511900070003", "Boa tarde, quero enviar dinheiro pra Cuba");
-    assert.equal(enviados.length, 1);
-    assert.match(enviados[0], /calculadora/);
+    // Cliente nuevo: saludo inicial + continúa con la intención (regla aprobada).
+    assert.equal(enviados.length, 2);
+    assert.match(enviados[1], /calculadora/);
     assert.equal(resultado, "respondido");
     assert.equal(cuentaLlamadasGPT, 0);
 });
@@ -176,8 +179,9 @@ for (const [i, frase] of ["qual a taxa hoje", "cambio hoy", "Como está o câmbi
 test("mensajes consecutivos que JUNTOS expresan la intención ('Oi' + 'quero mandar' + 'pra Cuba')", async (t) => {
     mockMundo(t);
     const { enviados } = await procesar("5511900070020", "Oi\nquero mandar\npra Cuba");
-    assert.equal(enviados.length, 1);
-    assert.match(enviados[0], /Cuánto quieres enviar a Cuba/);
+    // Cliente nuevo: saludo inicial + continúa con la intención (regla aprobada).
+    assert.equal(enviados.length, 2);
+    assert.match(enviados[1], /Cuánto quieres enviar a Cuba/);
 });
 
 test("mensajes consecutivos ES: 'Hola' + 'a cómo está' + 'el cambio hoy' -> tasas", async (t) => {
@@ -190,10 +194,16 @@ test("mensajes consecutivos ES: 'Hola' + 'a cómo está' + 'el cambio hoy' -> ta
 
 test("mensaje ajeno al negocio -> sigue ignorado en el portón, sin IA, motivo 'porton'", async (t) => {
     mockMundo(t);
-    const { r, resultado, enviados } = await procesar("5511900070030", "oi tudo bem, vou ao mercado hoje");
+    const { r, resultado, enviados } = await procesar("5511900070030", "tudo bem, vou ao mercado hoje");
     assert.equal(r, "");
     assert.deepEqual(enviados, []);
     assert.equal(resultado, "porton");
+    assert.equal(cuentaLlamadasGPT, 0);
+
+    // Con saludo delante (cliente nuevo): solo el saludo inicial, el resto
+    // ajeno al negocio no genera nada más ni llama a la IA (regla aprobada).
+    const conSaludo = await procesar("5511900070039", "oi tudo bem, vou ao mercado hoje");
+    assert.equal(conSaludo.enviados.length, 1);
     assert.equal(cuentaLlamadasGPT, 0);
 });
 

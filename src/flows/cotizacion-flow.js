@@ -1,7 +1,7 @@
 "use strict";
 
 const pool              = require("../../db");
-const { calcularOperacion }  = require("../services/calculator");
+const { calcularOperacion, calcularCUPInversoConTasas } = require("../services/calculator");
 const { guardarCliente }     = require("../services/customer-memory");
 const crm                    = require("../services/crm");
 const {
@@ -217,26 +217,9 @@ async function cotizarCUPInverso(phone, pushName, montoCUP, lang) {
     const t = await leerTasas();
     if (!t) return null;
 
-    const tramos = [
-        { min: 0,    max: 99,    tasa: Number(t.brl_0)    },
-        { min: 100,  max: 499,   tasa: Number(t.brl_100)  },
-        { min: 500,  max: 999,   tasa: Number(t.brl_500)  },
-        { min: 1000, max: 999999, tasa: Number(t.brl_1000) },
-    ];
-
-    let realesNecesarios = null, tasaUsada = null;
-    for (const tr of tramos) {
-        const est = montoCUP / tr.tasa;
-        if (est >= tr.min && est <= tr.max) {
-            realesNecesarios = Math.ceil(est);
-            tasaUsada = tr.tasa;
-            break;
-        }
-    }
-    if (!realesNecesarios) {
-        tasaUsada = Number(t.brl_1000);
-        realesNecesarios = Math.ceil(montoCUP / tasaUsada);
-    }
+    // Matemática por tramos en src/services/calculator.js (compartida con el
+    // alta manual de transferencias del dashboard).
+    const { realesNecesarios, tasaUsada } = calcularCUPInversoConTasas(montoCUP, t);
 
     const cupFmt = montoCUP >= 1000
         ? (montoCUP / 1000 % 1 === 0 ? `${montoCUP/1000} mil` : `${(montoCUP/1000).toFixed(1)} mil`)
