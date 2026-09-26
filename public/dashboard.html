@@ -73,6 +73,9 @@
         .crm-estado.confirmada { background: rgba(96,165,250,.15); color: #60a5fa; }
         .crm-estado.completada { background: rgba(74,222,128,.15); color: var(--green); }
         .crm-estado.expirada { background: rgba(148,163,184,.15); color: #94a3b8; }
+        .crm-estado.cancelada { background: rgba(239,68,68,.15); color: #f87171; }
+        .crm-tr-tabla .btn-cancelar-tr { padding: 4px 6px; font-size: 10px; margin-left: 4px; background: transparent; color: #f87171; border: 1px solid rgba(248,113,113,.45); border-radius: 6px; cursor: pointer; }
+        .crm-tr-tabla .btn-cancelar-tr:disabled { opacity: .45; cursor: not-allowed; }
         .crm-tr-pie { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-top: 8px; font-size: 11px; color: #8b949e; }
         @media (max-width: 900px) { .crm-tr-filtros { grid-template-columns: 1fr 1fr; } }
         #btnCrearTransferencia:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
@@ -211,6 +214,7 @@
                     <option value="confirmada">Confirmada</option>
                     <option value="completada">Completada</option>
                     <option value="expirada">Expirada</option>
+                    <option value="cancelada">Cancelada</option>
                 </select>
                 <select class="campo-tm" id="crmTrMoneda" onchange="renderCrmTransferencias()">
                     <option value="">Moneda</option>
@@ -1721,6 +1725,9 @@
                         : o.status === "confirmada"
                             ? `<button class="btn-confirm" onclick="completar('${Number(o.id)}', this)">COMPLETAR</button>`
                             : '<span style="color:#8b949e;">—</span>';
+                    const cancelar = o.status === "pendiente" || o.status === "confirmada"
+                        ? `<button class="btn-cancelar-tr" title="Cancelar transferencia" onclick="cancelarTransferencia('${Number(o.id)}', this)">✕ Cancelar</button>`
+                        : "";
                     const origen = origenDe(o) === "dashboard_manual" ? '<span title="Dashboard manual">🖥️ Manual</span>' : "💬 WhatsApp";
                     const estado = escapeHtml(o.status || "-");
                     return `<tr>
@@ -1733,7 +1740,7 @@
                         <td style="font-family:monospace;" title="${escapeHtml(o.tarjeta || "")}">${o.tarjeta ? "•••• " + escapeHtml(String(o.tarjeta).slice(-4)) : "-"}</td>
                         <td><span class="crm-estado ${estado}">${estado}</span></td>
                         <td><small>${origen}</small></td>
-                        <td>${accion}</td>
+                        <td>${accion}${cancelar}</td>
                     </tr>`;
                 }).join("");
             }
@@ -1749,6 +1756,35 @@
             }
             const scroll = document.getElementById("crmTrScroll");
             if (scroll) scroll.classList.toggle("expandido", crmTrVerTodas);
+        }
+
+        // Cancela una transferencia pendiente/verificada: motivo obligatorio y
+        // confirmación explícita con ID, cliente y monto. No toca saldos.
+        async function cancelarTransferencia(id, btn) {
+            const o = (window._ultimasOperaciones || []).find(op => String(op.id) === String(id));
+            if (!o) return;
+            const t = o.transferencia || {};
+            const resumen = `Operación #${o.id}\nCliente: ${o.nombre || "-"} (${o.phone || "-"})\nMonto: R$ ${Number(o.monto || 0).toLocaleString("es-ES")}` +
+                (t.destino !== null && t.destino !== undefined ? ` → ${Number(t.destino).toLocaleString("es-ES")} ${t.moneda}` : "");
+            const motivo = prompt(`🚫 CANCELAR TRANSFERENCIA\n\n${resumen}\n\nMotivo de cancelación (obligatorio, no se envía al cliente):`);
+            if (motivo === null) return;
+            if (!motivo.trim()) return alert("❌ El motivo de cancelación es obligatorio.");
+            if (!confirm(`¿Confirmas CANCELAR esta transferencia?\n\n${resumen}\nMotivo: ${motivo.trim()}\n\nEl cliente recibirá un aviso por WhatsApp. Esta acción no se puede deshacer.`)) return;
+            if (btn) btn.disabled = true;
+            try {
+                const res = await fetch(`/admin/operaciones/${Number(id)}/cancelar`, { method: "POST", headers: authH(), body: JSON.stringify({ motivo: motivo.trim() }) });
+                const data = await res.json();
+                if (data.success) {
+                    refreshData();
+                    if (data.notificado === false) alert("✅ Transferencia cancelada, PERO ⚠️ no se pudo enviar el aviso de WhatsApp al cliente. Avísale tú manualmente.");
+                } else {
+                    alert("❌ No se pudo cancelar: " + (data.error || "desconocido"));
+                }
+            } catch (e) {
+                alert("❌ Error de conexión al cancelar la transferencia");
+            } finally {
+                if (btn) btn.disabled = false;
+            }
         }
 
         async function confirmar(id, btn) {

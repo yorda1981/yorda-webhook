@@ -37,6 +37,12 @@ function mensajeConfirmarOperacion(operacion) {
     return `✅ Recibimos su pago de R$${operacion.monto}.\n\n${cuerpo}\n\nCuando se complete le enviaremos el comprobante. 😊${notaPlazo}`;
 }
 
+// Mensaje al CANCELAR desde el CRM: solo ID + cancelada. El motivo es
+// interno y nunca se envía al cliente.
+function mensajeCancelarOperacion(operacion) {
+    return `❌ Tu operación #${operacion.id} fue cancelada.`;
+}
+
 // Mensaje al COMPLETAR (servicio ya realizado).
 function mensajeCompletarOperacion(operacion) {
     if (esOperacionDeRecarga(operacion)) {
@@ -76,5 +82,6 @@ module.exports = {
     esOperacionDeRecarga,
     mensajeConfirmarOperacion,
     mensajeCompletarOperacion,
+    mensajeCancelarOperacion,
     mensajeReciboTransferencia
 };

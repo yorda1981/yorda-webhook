@@ -9,7 +9,7 @@ const pool = require("./db");
 
 const openaiService = require("./src/services/openai");
 const { obtenerTodos, obtenerCliente } = require("./src/services/customer-memory");
-const { obtenerTodas, confirmarOperacion, completarOperacion, obtenerEstadisticas } = require("./src/services/operations");
+const { obtenerTodas, confirmarOperacion, completarOperacion, cancelarOperacion, obtenerEstadisticas } = require("./src/services/operations");
 const crm = require("./src/services/crm");
 const recuperacionService = require("./src/services/recuperacion");
 const recuperacionMensajes = require("./src/services/recuperacion-mensajes");
@@ -651,6 +651,21 @@ app.post("/admin/completar-operacion/:id", adminWriteLimiter, verificarToken, as
         if (e instanceof operatorBalances.SaldoInsuficienteError) {
             return res.status(409).json({ success: false, error: e.message, moneda: e.moneda, disponible: e.disponible, faltante: e.faltante });
         }
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// Cancelar transferencia desde el CRM (pendiente/confirmada -> cancelada).
+// Reglas y aviso WhatsApp en operations.cancelarOperacion.
+app.post("/admin/operaciones/:id/cancelar", adminWriteLimiter, verificarToken, async (req, res) => {
+    try {
+        const r = await cancelarOperacion(req.params.id, (req.body || {}).motivo);
+        if (r.error) {
+            const status = r.code === "NO_ENCONTRADA" ? 404 : r.code === "MOTIVO_REQUERIDO" ? 400 : 409;
+            return res.status(status).json({ success: false, error: r.error, code: r.code });
+        }
+        res.json({ success: true, notificado: r.notificado });
+    } catch (e) {
         res.status(500).json({ success: false, error: e.message });
     }
 });

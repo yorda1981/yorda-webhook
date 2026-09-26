@@ -216,19 +216,77 @@ async function obtenerEstadisticas() {
                 COUNT(*) FILTER (WHERE status IN ('confirmada','completada')) AS total,
                 COALESCE(SUM(monto) FILTER (WHERE status IN ('confirmada','completada')), 0) AS volumen,
                 COUNT(*) FILTER (WHERE status = 'pendiente') AS pendientes,
-                COUNT(*) FILTER (WHERE status = 'completada') AS completadas
+                COUNT(*) FILTER (WHERE status = 'completada') AS completadas,
+                COUNT(*) FILTER (WHERE status = 'cancelada') AS canceladas
             FROM operations
         `);
         return {
             totalOperaciones: Number(result.rows[0].total),
             volumenTotal:     Number(result.rows[0].volumen),
             pendientes:       Number(result.rows[0].pendientes),
-            completadas:      Number(result.rows[0].completadas)
+            completadas:      Number(result.rows[0].completadas),
+            canceladas:       Number(result.rows[0].canceladas)
         };
     } catch (err) {
         console.error("❌ Error estadísticas:", err.message);
-        return { totalOperaciones: 0, volumenTotal: 0, pendientes: 0, completadas: 0 };
+        return { totalOperaciones: 0, volumenTotal: 0, pendientes: 0, completadas: 0, canceladas: 0 };
     }
+}
+
+// =====================
+// CANCELAR TRANSFERENCIA (CRM de Transferencias)
+// =====================
+
+// Solo 'pendiente' y 'confirmada' (VERIFICADO) se cancelan: ninguna de las
+// dos ha descontado saldo de operador (el descuento ocurre al completar), así
+// que no se toca operador_movimientos. 'completada' requiere un flujo de
+// reversión aparte. Idempotente como confirmar/completar: el UPDATE exige el
+// estado de origen, así que un doble clic o una carrera con "completar" no
+// pisa nada. La operación nunca se borra; queda como 'cancelada' con motivo
+// y fecha. El aviso de WhatsApp va DESPUÉS del UPDATE y su fallo solo se
+// loguea -- la cancelación ya quedó registrada.
+const ESTADOS_CANCELABLES = ["pendiente", "confirmada"];
+
+async function cancelarOperacion(id, motivo) {
+    const motivoFinal = String(motivo || "").trim();
+    if (!motivoFinal) return { error: "El motivo de cancelación es obligatorio", code: "MOTIVO_REQUERIDO" };
+
+    const actual = (await pool.query("SELECT * FROM operations WHERE id = $1", [id])).rows[0];
+    if (!actual) return { error: "Operación no encontrada", code: "NO_ENCONTRADA" };
+    if (!require("./operadores").esOperacionDeTransferencia(actual)) {
+        return { error: "Solo se cancelan transferencias desde este CRM", code: "NO_TRANSFERENCIA" };
+    }
+    if (actual.status === "cancelada") return { error: `La operación #${actual.id} ya está cancelada`, code: "YA_CANCELADA" };
+    if (actual.status === "completada") {
+        return { error: `La operación #${actual.id} está completada: requiere un flujo de reversión, no una cancelación`, code: "COMPLETADA" };
+    }
+    if (!ESTADOS_CANCELABLES.includes(actual.status)) {
+        return { error: `Una operación en estado '${actual.status}' no se puede cancelar`, code: "NO_CANCELABLE" };
+    }
+
+    const result = await pool.query(`
+        UPDATE operations
+        SET status = 'cancelada', cancelada_at = NOW(), motivo_cancelacion = $2, updated_at = NOW()
+        WHERE id = $1 AND status = ANY($3::text[])
+        RETURNING *
+    `, [id, motivoFinal, ESTADOS_CANCELABLES]);
+    const operacion = result.rows[0];
+    if (!operacion) return { error: "La operación cambió de estado; recarga e inténtalo de nuevo", code: "NO_CANCELABLE" };
+
+    console.log(`🚫 Operación CANCELADA: ${id}`);
+    log("OPERATION_CANCELLED", { operationId: operacion.id, estadoAnterior: actual.status });
+
+    let notificado = false;
+    try {
+        const { enviarMensaje } = require("./zapi");
+        const { mensajeCancelarOperacion } = require("./operation-messages");
+        notificado = Boolean(await enviarMensaje(operacion.phone, mensajeCancelarOperacion(operacion)));
+    } catch (e) {
+        console.error(`⚠️ Error notificando cancelación de la operación #${operacion.id}:`, e.message);
+    }
+    if (!notificado) console.error(`⚠️ No se pudo notificar al cliente la cancelación de la operación #${operacion.id} (phone: ${operacion.phone})`);
+
+    return { operacion, notificado };
 }
 
 // =====================
@@ -258,6 +316,7 @@ module.exports = {
     agregarOperacion,
     confirmarOperacion,
     completarOperacion,
+    cancelarOperacion,
     obtenerTodas,
     obtenerUltimaOperacion,
     obtenerPendienteCliente,
