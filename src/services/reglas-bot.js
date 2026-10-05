@@ -355,6 +355,21 @@ function esConsultaEstadoOperacion(txt) {
     return OBJETO_OPERACION_PROPIA.test(c) && SENAL_SEGUIMIENTO.test(c);
 }
 
+// Señales de seguimiento que NO requieren posesivo. Se usan únicamente
+// cuando el contexto ya garantiza que el cliente tiene una operación
+// activa (ver manejarSeguimientoOperacion en openai.js). Cubre los casos
+// que SENAL_SEGUIMIENTO deja fuera por no incluir el posesivo:
+// "¿sera hoy?", "¿ya enviaron?", "¿todavia esta pendiente?", etc.
+// txt debe venir ya normalizado con norm() — minúsculas, sin tildes.
+const SENAL_SEGUIMIENTO_CONTEXTUAL = /\b(sera hoy|es hoy|para hoy|llega hoy|salen hoy|llega manana|ya (enviaron|entregaron|hicieron|confirmaron|procesaron|lo entregaron)|todavia (esta|sigue|pendiente)|aun (esta|pendiente|sigue)|sigue (en proceso|pendiente|igual)|en proceso|lo estan (procesando|entregando|verificando)|noticias?)\b/;
+
+// Versión ampliada de esConsultaEstadoOperacion: detecta seguimiento
+// sin exigir posesivo, apoyándose en el contexto de operación activa.
+function esPreguntaSeguimientoActivo(txt) {
+    const c = canonizarIntencion(String(txt || ""));
+    return SENAL_SEGUIMIENTO.test(c) || SENAL_SEGUIMIENTO_CONTEXTUAL.test(c);
+}
+
 // ── CONTEXTO DE PAGO ──
 
 // Pedido del PIX / de la clave para pagar, por CONCEPTO (verbo de pedido +
@@ -691,6 +706,7 @@ module.exports = {
     esMensajeDeNegocio,
     separarSaludo,
     esConsultaEstadoOperacion,
+    esPreguntaSeguimientoActivo,
     esPedidoDePix,
     tieneOperacionEnCurso,
     preguntaElMonto,

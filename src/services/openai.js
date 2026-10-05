@@ -11,6 +11,7 @@ const {
     clienteEstaOcupado, tieneContextoReemplazable, esFraseDeAbandonoExplicito,
     debeCompletarConMontoPendiente, debeConfirmarCotizacion, tieneTarjetaGuardada, esConsultaTasas, esIntencionSinMonto, esMensajeDeNegocio, yaAvisoEntregaReciente,
     separarSaludo, esPedidoDePix, tieneOperacionEnCurso, preguntaElMonto, esConsultaEstadoOperacion,
+    esPreguntaSeguimientoActivo,
     contextoUtilizable, interpretarSeleccionOpcion, interpretarTarjetaPorPalabra, monedaPendienteDeContexto,
     esRechazoTarjeta, esPausaTemporal, esSenalConfusion, esCierreNatural, esPreguntaExploratoria,
     interpretarAccionRecarga,
@@ -68,6 +69,17 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null, opci
         }
 
         await guardarCliente({ phone, ultimaInteraccion: new Date().toISOString() });
+
+        // ── Seguimiento de operación activa ──
+        // Si el cliente tiene un estado activo y su mensaje pregunta por el
+        // estado (sin necesidad de posesivo — "¿ya llegó?", "¿será hoy?",
+        // "¿hay novedades?"), se responde de forma contextual y variada ANTES
+        // de cualquier respuesta genérica. No interfiere con flujos de
+        // cotización, PIX, OCR ni comprobantes.
+        const ESTADOS_ACTIVOS_SEGUIMIENTO = ["pedido_web_pendiente", "aguardando_comprovante", "cotizacion_realizada"];
+        if (ESTADOS_ACTIVOS_SEGUIMIENTO.includes(cliente?.estado) && esPreguntaSeguimientoActivo(txt)) {
+            return await manejarSeguimientoOperacion(phone, cliente, pushName, esEs, lang);
+        }
 
         // ── Pedido de la calculadora en proceso: el bot se queda en silencio ──
         // Una vez que un pedido llega desde la calculadora, se maneja 100% por el
@@ -907,6 +919,138 @@ function construirSaludo({ lang, esRegistrado, frecuente, nombre, franja }) {
     else plantillas = SALUDO_NUEVO[idioma][franja] || SALUDO_NUEVO[idioma].tarde;
 
     return pick(plantillas)(sufijoNombre);
+}
+
+// Responde a consultas de seguimiento cuando el cliente tiene una operación
+// activa. Personaliza según nombre, monto, estado y tiempo transcurrido.
+// No modifica ningún estado: solo informa.
+async function manejarSeguimientoOperacion(phone, cliente, pushName, esEs, lang) {
+    const nombre = primerNombreConfiable(cliente?.nombre) || primerNombreConfiable(pushName);
+    const n = nombre ? (esEs ? `, ${nombre}` : ` ${nombre}`) : "";
+
+    // Minutos transcurridos desde una fecha ISO. null si fecha inválida.
+    const minsDesdeFecha = (fecha) => {
+        if (!fecha) return null;
+        const ms = Date.now() - new Date(fecha).getTime();
+        return Number.isFinite(ms) && ms >= 0 ? Math.floor(ms / 60000) : null;
+    };
+
+    // Una sola query cubre todos los estados: timing + monto + status real.
+    const ultima = await obtenerUltimaOperacion(phone);
+
+    // Tiempo desde la creación de la operación (DB) o desde el cambio de
+    // estado del cliente, en ese orden de confiabilidad.
+    const mins = minsDesdeFecha(ultima?.created_at || cliente?.fecha_estado);
+
+    // Monto: preferir DB (valor confirmado) sobre el contexto conversacional.
+    const montoNum = Number(ultima?.monto || cliente?.ultimo_monto || 0);
+    const montoTxt = montoNum > 0 ? ` de R$${fmt(montoNum)}` : "";
+
+    // ── pedido_web_pendiente ──
+    if (cliente?.estado === "pedido_web_pendiente") {
+        // Si el dashboard ya confirmó la operación, comunicarlo positivamente.
+        if (ultima?.status === "confirmada") {
+            const m = pick(esEs
+                ? [
+                    `Hola${n} 😊\nBuenas noticias: tu pedido${montoTxt} ya fue confirmado ✅ y está en proceso. Te avisaremos aquí cuando esté listo.`,
+                    `Hola${n} 👋\nTu pedido${montoTxt} fue confirmado ✅. Estamos procesando la entrega y te escribimos en cuanto esté completa.`
+                ]
+                : [
+                    `Oi${n} 😊\nBoas notícias: seu pedido${montoTxt} já foi confirmado ✅ e está em processo. Avisamos aqui quando estiver pronto.`,
+                    `Oi${n} 👋\nSeu pedido${montoTxt} foi confirmado ✅. Estamos processando a entrega e avisamos assim que estiver concluída.`
+                ]
+            );
+            await enviarSeguro(phone, m); return m;
+        }
+        // Pendiente: respuesta según tiempo transcurrido.
+        let m;
+        if (mins !== null && mins < 30) {
+            m = esEs
+                ? `Hola${n} 😊\nTu pedido${montoTxt} fue recibido hace unos minutos ⏳ y ya está en verificación. Te avisaremos aquí en cuanto tengamos confirmación.`
+                : `Oi${n} 😊\nSeu pedido${montoTxt} foi recebido há alguns minutos ⏳ e já está sendo verificado. Avisamos aqui assim que tivermos confirmação.`;
+        } else if (mins !== null && mins > 240) {
+            m = pick(esEs
+                ? [
+                    `Hola${n} 😊\nRevisé tu pedido${montoTxt}. Lamentamos la espera — sigue en verificación ⏳. Te avisaremos en cuanto tengamos novedades.`,
+                    `Hola${n} 👋\nTu pedido${montoTxt} sigue activo ⏳. Entendemos que ha pasado tiempo; te escribimos en cuanto esté confirmado.`
+                ]
+                : [
+                    `Oi${n} 😊\nVerifiquei seu pedido${montoTxt}. Pedimos desculpas pela demora — ainda em verificação ⏳. Avisamos assim que tivermos novidades.`,
+                    `Oi${n} 👋\nSeu pedido${montoTxt} segue ativo ⏳. Entendemos que já faz tempo; avisamos assim que for confirmado.`
+                ]
+            );
+        } else {
+            m = pick(esEs
+                ? [
+                    `Hola${n} 😊\nTu pedido${montoTxt} sigue en verificación ⏳. Te avisaremos por aquí en cuanto tengamos la confirmación.`,
+                    `Hola${n} 👋\nTu operación${montoTxt} sigue activa ⏳. En cuanto esté confirmada, recibirás un mensaje aquí.`,
+                    `Hola${n} 😊\nSí, tu pedido${montoTxt} sigue en proceso ⏳. Te avisamos enseguida cuando quede confirmado.`
+                ]
+                : [
+                    `Oi${n} 😊\nSeu pedido${montoTxt} segue em verificação ⏳. Avisamos aqui assim que tivermos a confirmação.`,
+                    `Oi${n} 👋\nSua operação${montoTxt} segue ativa ⏳. Assim que confirmada, você receberá uma mensagem aqui.`,
+                    `Oi${n} 😊\nSim, seu pedido${montoTxt} segue em processo ⏳. Avisamos assim que for confirmado.`
+                ]
+            );
+        }
+        await enviarSeguro(phone, m); return m;
+    }
+
+    // ── Operação real en DB (pendiente / confirmada) ──
+    if (ultima && (ultima.status === "pendiente" || ultima.status === "confirmada")) {
+        let m;
+        if (ultima.status === "confirmada") {
+            m = pick(esEs
+                ? [
+                    `Hola${n} 😊\nTu operación${montoTxt} ya fue confirmada ✅ y está en proceso. Te avisaremos aquí cuando esté completa.`,
+                    `Hola${n} 👋\nBuenas noticias: tu envío${montoTxt} está confirmado ✅ y en camino. Te escribimos aquí cuando finalice.`
+                ]
+                : [
+                    `Oi${n} 😊\nSua operação${montoTxt} já foi confirmada ✅ e está em processo. Avisamos aqui quando estiver completa.`,
+                    `Oi${n} 👋\nBoas notícias: seu envio${montoTxt} está confirmado ✅ e a caminho. Avisamos aqui quando finalizar.`
+                ]
+            );
+        } else if (mins !== null && mins < 30) {
+            m = esEs
+                ? `Hola${n} 😊\nTu operación${montoTxt} fue recibida hace unos minutos ⏳ y ya está en verificación. Te avisamos en cuanto quede confirmada.`
+                : `Oi${n} 😊\nSua operação${montoTxt} foi recebida há alguns minutos ⏳ e já está sendo verificada. Avisamos assim que for confirmada.`;
+        } else if (mins !== null && mins > 240) {
+            m = pick(esEs
+                ? [
+                    `Hola${n} 😊\nRevisé tu operación${montoTxt}. Lamentamos la espera — sigue pendiente ⏳. Te avisaremos en cuanto quede confirmada.`,
+                    `Hola${n} 👋\nTu envío${montoTxt} sigue activo ⏳. Entendemos que ha pasado tiempo; te escribimos en cuanto tengamos confirmación.`
+                ]
+                : [
+                    `Oi${n} 😊\nVerifiquei sua operação${montoTxt}. Pedimos desculpas pela demora — ainda pendente ⏳. Avisamos assim que for confirmada.`,
+                    `Oi${n} 👋\nSeu envio${montoTxt} segue ativo ⏳. Entendemos que já faz tempo; avisamos assim que tivermos confirmação.`
+                ]
+            );
+        } else {
+            m = pick(esEs
+                ? [
+                    `Hola${n} 😊\nAcabo de revisar tu operación${montoTxt}: sigue pendiente ⏳. Te avisaremos aquí cuando esté confirmada.`,
+                    `Hola${n} 👋\nTu envío${montoTxt} sigue en proceso ⏳. En cuanto haya novedades, te escribimos de inmediato.`,
+                    `Hola${n} 😊\nRevisé tu operación${montoTxt}: pendiente de verificación ⏳. Serás el primero en saberlo.`
+                ]
+                : [
+                    `Oi${n} 😊\nAcabei de verificar sua operação${montoTxt}: ainda pendente ⏳. Avisamos aqui quando estiver confirmada.`,
+                    `Oi${n} 👋\nSeu envio${montoTxt} segue em processo ⏳. Assim que houver novidades, avisamos de imediato.`,
+                    `Oi${n} 😊\nVerifiquei sua operação${montoTxt}: pendente de verificação ⏳. Você será o primeiro a saber.`
+                ]
+            );
+        }
+        await enviarSeguro(phone, m); return m;
+    }
+
+    // ── Cotización / PIX en curso (sin fila en DB todavía) ──
+    if (tieneOperacionEnCurso(cliente)) return await continuarOperacionEnCurso(phone, cliente, esEs);
+
+    // ── Sin operación activa encontrada ──
+    const m = esEs
+        ? `Hola${n} 😊\nNo encuentro operaciones registradas. ¿Quieres hacer un envío?`
+        : `Oi${n} 😊\nNão encontro operações registradas. Quer fazer um envio?`;
+    await enviarSeguro(phone, m);
+    return m;
 }
 
 // Retoma la operación ya cotizada sin volver a preguntar el monto: usa el
