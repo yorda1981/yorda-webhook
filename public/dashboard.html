@@ -76,6 +76,15 @@
         .crm-estado.cancelada { background: rgba(239,68,68,.15); color: #f87171; }
         .crm-tr-tabla .btn-cancelar-tr { padding: 4px 6px; font-size: 10px; margin-left: 4px; background: transparent; color: #f87171; border: 1px solid rgba(248,113,113,.45); border-radius: 6px; cursor: pointer; }
         .crm-tr-tabla .btn-cancelar-tr:disabled { opacity: .45; cursor: not-allowed; }
+        .crm-tr-fila { transition: background .1s; }
+        .crm-tr-fila.crm-tr-pendiente { background: rgba(251,191,36,.04); }
+        .crm-tr-fila:hover { background: rgba(255,255,255,.03); }
+        .crm-tr-detalle > td { background: #0c1120; padding: 0 !important; }
+        .crm-tr-detalle-inner { padding: 10px 14px 12px; display: flex; flex-direction: column; gap: 8px; border-top: 1px solid #1e2a40; }
+        .crm-tr-detalle-campos { display: flex; flex-wrap: wrap; gap: 6px 22px; font-size: 12px; color: #c9d1d9; line-height: 1.6; }
+        .crm-tr-detalle-acciones { display: flex; flex-wrap: wrap; gap: 6px; }
+        .crm-btn-copia { background: #1e2a40; color: #93c5fd; border: 1px solid #2d355a; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 600; cursor: pointer; transition: background .15s; white-space: nowrap; }
+        .crm-btn-copia:hover { background: #263550; }
         .crm-tr-pie { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-top: 8px; font-size: 11px; color: #8b949e; }
         @media (max-width: 900px) { .crm-tr-filtros { grid-template-columns: 1fr 1fr; } }
         #btnCrearTransferencia:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
@@ -207,7 +216,7 @@
         <div class="config-section" id="seccionCrmTransferencias">
             <h3 style="margin-bottom:12px;">💸 CRM de Transferencias <span class="badge-count" id="countCrmTransferencias">0</span></h3>
             <div class="crm-tr-filtros">
-                <input type="text" class="campo-tm" id="crmTrBuscar" placeholder="Buscar ID, cliente, teléfono o tarjeta" oninput="renderCrmTransferencias()">
+                <input type="text" class="campo-tm" id="crmTrBuscar" placeholder="Buscar ID, cliente, teléfono, tarjeta o banco" oninput="renderCrmTransferencias()">
                 <select class="campo-tm" id="crmTrEstado" onchange="renderCrmTransferencias()">
                     <option value="">Estado</option>
                     <option value="pendiente">Pendiente</option>
@@ -1688,14 +1697,28 @@
         // (operadores.montosTransferencia), nada financiero se calcula aquí.
         // Acciones = confirmar()/completar() de siempre.
         const CRM_TR_MAX_FILAS = 300;
-        // Al abrir se muestran solo las 5 más recientes; "Ver todas" amplía
-        // (con scroll interno) sin salir del módulo.
-        const CRM_TR_FILAS_INICIALES = 5;
-        let crmTrVerTodas = false;
+        const CRM_TR_FILAS_INICIALES = 7;
+        const CRM_TR_PASO = 7;
+        let crmTrLimite = CRM_TR_FILAS_INICIALES;
+        // ID de la fila actualmente expandida; persiste a través de búsquedas
+        // y "Cargar más" -- se cierra solo si el operador vuelve a hacer clic.
+        let crmTrExpandidoId = null;
+
         function toggleCrmTransferenciasVerMas() {
-            crmTrVerTodas = !crmTrVerTodas;
+            crmTrLimite += CRM_TR_PASO;
             renderCrmTransferencias();
         }
+
+        function crmTrToggleDetalle(id) {
+            crmTrExpandidoId = String(crmTrExpandidoId) === String(id) ? null : id;
+            renderCrmTransferencias();
+        }
+
+        function crmTrOrdenarPorPrioridad(ops) {
+            const p = s => s === "pendiente" ? 0 : s === "confirmada" ? 1 : 2;
+            return [...ops].sort((a, b) => p(a.status) - p(b.status));
+        }
+
         function renderCrmTransferencias() {
             const tbody = document.getElementById("tablaCrmTransferencias");
             if (!tbody) return;
@@ -1705,19 +1728,20 @@
             const fMoneda = document.getElementById("crmTrMoneda")?.value || "";
             const fOrigen = document.getElementById("crmTrOrigen")?.value || "";
             const origenDe = o => o.origen === "dashboard_manual" ? "dashboard_manual" : "whatsapp";
-            const filtradas = ops.filter(o =>
+            const filtradas = crmTrOrdenarPorPrioridad(ops.filter(o =>
                 (!fEstado || o.status === fEstado) &&
                 (!fMoneda || o.transferencia.moneda === fMoneda) &&
                 (!fOrigen || origenDe(o) === fOrigen) &&
-                (!q || [o.id, o.nombre, o.titular, o.phone, o.tarjeta].some(v => String(v ?? "").toLowerCase().includes(q)))
-            );
+                (!q || [o.id, o.nombre, o.titular, o.phone, o.tarjeta, o.banco].some(v => String(v ?? "").toLowerCase().includes(q)))
+            ));
             document.getElementById("countCrmTransferencias").innerText = ops.length;
             const fmtN = n => (n === null || n === undefined || isNaN(n)) ? "—" : Number(n).toLocaleString("es-ES");
+            const fmtFecha = d => d ? new Date(d).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—";
             if (filtradas.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:#8b949e;padding:20px;">No hay transferencias para mostrar.</td></tr>';
             } else {
-                const limite = crmTrVerTodas ? CRM_TR_MAX_FILAS : CRM_TR_FILAS_INICIALES;
-                tbody.innerHTML = filtradas.slice(0, limite).map(o => {
+                const limite = Math.min(crmTrLimite, CRM_TR_MAX_FILAS);
+                tbody.innerHTML = filtradas.slice(0, limite).flatMap(o => {
                     const t = o.transferencia;
                     const f = new Date(o.created_at);
                     const accion = o.status === "pendiente"
@@ -1730,8 +1754,9 @@
                         : "";
                     const origen = origenDe(o) === "dashboard_manual" ? '<span title="Dashboard manual">🖥️ Manual</span>' : "💬 WhatsApp";
                     const estado = escapeHtml(o.status || "-");
-                    return `<tr>
-                        <td><strong>#${Number(o.id)}</strong></td>
+                    const expandido = String(crmTrExpandidoId) === String(o.id);
+                    const mainRow = `<tr class="crm-tr-fila${o.status === "pendiente" ? " crm-tr-pendiente" : ""}" style="cursor:pointer;" onclick="crmTrToggleDetalle('${o.id}')">
+                        <td><strong>#${Number(o.id)}</strong> <span style="font-size:9px;color:#5e6a80;">${expandido ? "▲" : "▼"}</span></td>
                         <td>${f.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit" })}<br><small style="color:#8b949e;">${f.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</small></td>
                         <td class="crm-cliente"><strong>${escapeHtml(o.nombre || "-")}</strong><br><small style="color:#8b949e;">${escapeHtml(o.phone || "-")}</small></td>
                         <td>${escapeHtml(t.moneda)}</td>
@@ -1740,22 +1765,102 @@
                         <td style="font-family:monospace;" title="${escapeHtml(o.tarjeta || "")}">${o.tarjeta ? "•••• " + escapeHtml(String(o.tarjeta).slice(-4)) : "-"}</td>
                         <td><span class="crm-estado ${estado}">${estado}</span></td>
                         <td><small>${origen}</small></td>
-                        <td>${accion}${cancelar}</td>
+                        <td onclick="event.stopPropagation()">${accion}${cancelar}</td>
                     </tr>`;
+                    if (!expandido) return [mainRow];
+                    const detailRow = `<tr class="crm-tr-detalle">
+                        <td colspan="10">
+                            <div class="crm-tr-detalle-inner">
+                                <div class="crm-tr-detalle-campos">
+                                    <span><b>Banco:</b> ${escapeHtml(o.banco || "—")}</span>
+                                    <span><b>Titular:</b> ${escapeHtml(o.titular || "—")}</span>
+                                    <span><b>Tarjeta completa:</b> <span style="font-family:monospace;">${escapeHtml(o.tarjeta || "—")}</span></span>
+                                    <span><b>CUP:</b> ${fmtN(o.cup)}</span>
+                                    <span><b>Confirmada:</b> ${fmtFecha(o.confirmed_at)}</span>
+                                    <span><b>Completada:</b> ${fmtFecha(o.completed_at)}</span>
+                                    ${o.ref_web ? `<span><b>Ref web:</b> ${escapeHtml(o.ref_web)}</span>` : ""}
+                                    ${o.notas || o.observaciones ? `<span><b>Observaciones:</b> ${escapeHtml(o.notas || o.observaciones)}</span>` : ""}
+                                </div>
+                                <div class="crm-tr-detalle-acciones">
+                                    <button class="crm-btn-copia" onclick="crmTrCopiarTodo('${o.id}', this)">📋 Copiar todo</button>
+                                    <button class="crm-btn-copia" onclick="crmTrCopiarCampo('phone','${o.id}',this)">📞 Teléfono</button>
+                                    <button class="crm-btn-copia" onclick="crmTrCopiarCampo('tarjeta','${o.id}',this)">💳 Tarjeta</button>
+                                    <button class="crm-btn-copia" onclick="crmTrCopiarCampo('titular','${o.id}',this)">👤 Titular</button>
+                                    <button class="crm-btn-copia" onclick="crmTrCopiarCampo('brl','${o.id}',this)">💰 BRL</button>
+                                    <button class="crm-btn-copia" onclick="crmTrCopiarCampo('banco','${o.id}',this)">🏦 Banco</button>
+                                </div>
+                            </div>
+                        </td>
+                    </tr>`;
+                    return [mainRow, detailRow];
                 }).join("");
             }
-            const visibles = Math.min(filtradas.length, crmTrVerTodas ? CRM_TR_MAX_FILAS : CRM_TR_FILAS_INICIALES);
+            const visibles = Math.min(filtradas.length, Math.min(crmTrLimite, CRM_TR_MAX_FILAS));
+            const restantes = Math.min(filtradas.length, CRM_TR_MAX_FILAS) - visibles;
             const pie = document.getElementById("crmTrPie");
-            if (pie) pie.innerText = filtradas.length > CRM_TR_MAX_FILAS && crmTrVerTodas
-                ? `Mostrando las ${CRM_TR_MAX_FILAS} más recientes de ${filtradas.length}. Usa los filtros para acotar.`
+            if (pie) pie.innerText = filtradas.length > CRM_TR_MAX_FILAS
+                ? `Mostrando ${visibles} de ${filtradas.length} (límite ${CRM_TR_MAX_FILAS}). Usa los filtros para acotar.`
                 : `Mostrando ${visibles} de ${filtradas.length} transferencia(s)`;
             const btnMas = document.getElementById("btnCrmTrVerMas");
             if (btnMas) {
-                btnMas.style.display = filtradas.length > CRM_TR_FILAS_INICIALES ? "inline-block" : "none";
-                btnMas.innerText = crmTrVerTodas ? "Ver menos" : `Ver todas (${filtradas.length})`;
+                btnMas.style.display = restantes > 0 ? "inline-block" : "none";
+                btnMas.innerText = `Cargar más (${restantes})`;
             }
             const scroll = document.getElementById("crmTrScroll");
-            if (scroll) scroll.classList.toggle("expandido", crmTrVerTodas);
+            if (scroll) scroll.classList.toggle("expandido", crmTrLimite > CRM_TR_FILAS_INICIALES || crmTrExpandidoId !== null);
+        }
+
+        async function crmTrCopiarTodo(id, btn) {
+            const o = (window._ultimasOperaciones || []).find(op => String(op.id) === String(id));
+            if (!o) return;
+            const t = o.transferencia || {};
+            const fmtN = n => (n === null || n === undefined || isNaN(n)) ? "—" : Number(n).toLocaleString("es-ES");
+            const fmtFecha = d => d ? new Date(d).toLocaleString("es-ES", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—";
+            const origenTexto = o.origen === "dashboard_manual" ? "Dashboard manual" : "WhatsApp";
+            const lineas = [
+                `━━━━━━━━━━━━━━━━━━━━━━`,
+                `🔖 ID: #${o.id}`,
+                `👤 Cliente: ${o.nombre || "—"}`,
+                `📞 Teléfono: ${o.phone || "—"}`,
+                `💰 Monto BRL: R$ ${fmtN(t.brl)}`,
+                (t.destino !== null && t.destino !== undefined) ? `📦 Destino: ${fmtN(t.destino)} ${t.moneda}` : null,
+                o.banco   ? `🏛️ Banco: ${o.banco}`    : null,
+                o.tarjeta ? `💳 Tarjeta: ${o.tarjeta}` : null,
+                o.titular ? `📝 Titular: ${o.titular}` : null,
+                `📊 Estado: ${o.status}`,
+                `📅 Creada: ${fmtFecha(o.created_at)}`,
+                o.confirmed_at ? `✅ Confirmada: ${fmtFecha(o.confirmed_at)}` : null,
+                o.completed_at ? `🎉 Completada: ${fmtFecha(o.completed_at)}` : null,
+                `🔗 Origen: ${origenTexto}`,
+                o.ref_web           ? `🔑 Ref web: ${o.ref_web}` : null,
+                (o.notas || o.observaciones) ? `📌 Obs: ${o.notas || o.observaciones}` : null,
+                `━━━━━━━━━━━━━━━━━━━━━━`,
+            ].filter(Boolean).join("\n");
+            try {
+                await navigator.clipboard.writeText(lineas);
+                const orig = btn.textContent;
+                btn.textContent = "✅ Copiado";
+                setTimeout(() => { btn.textContent = orig; }, 1500);
+            } catch (_) {
+                btn.textContent = "⚠️ Error";
+                setTimeout(() => { btn.textContent = "📋 Copiar todo"; }, 1500);
+            }
+        }
+
+        async function crmTrCopiarCampo(campo, id, btn) {
+            const o = (window._ultimasOperaciones || []).find(op => String(op.id) === String(id));
+            if (!o) return;
+            const t = o.transferencia || {};
+            const fmtN = n => (n === null || n === undefined || isNaN(n)) ? "" : String(Number(n).toLocaleString("es-ES"));
+            const valores = { phone: o.phone, tarjeta: o.tarjeta, titular: o.titular, banco: o.banco, brl: fmtN(t.brl) };
+            const valor = valores[campo] || "";
+            if (!valor) return;
+            try {
+                await navigator.clipboard.writeText(valor);
+                const orig = btn.textContent;
+                btn.textContent = "✅";
+                setTimeout(() => { btn.textContent = orig; }, 1200);
+            } catch (_) {}
         }
 
         // Cancela una transferencia pendiente/verificada: motivo obligatorio y
