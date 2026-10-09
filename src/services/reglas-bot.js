@@ -361,13 +361,30 @@ function esConsultaEstadoOperacion(txt) {
 // que SENAL_SEGUIMIENTO deja fuera por no incluir el posesivo:
 // "¿sera hoy?", "¿ya enviaron?", "¿todavia esta pendiente?", etc.
 // txt debe venir ya normalizado con norm() — minúsculas, sin tildes.
-const SENAL_SEGUIMIENTO_CONTEXTUAL = /\b(sera hoy|es hoy|para hoy|llega hoy|salen hoy|llega manana|ya (enviaron|entregaron|hicieron|confirmaron|procesaron|lo entregaron)|todavia (esta|sigue|pendiente)|aun (esta|pendiente|sigue)|sigue (en proceso|pendiente|igual)|en proceso|lo estan (procesando|entregando|verificando)|noticias?)\b/;
+// "en proceso" standalone se omite: es ambiguo como declaración ("ya lo
+// mandé, está en proceso") y los casos interrogativos quedan cubiertos por
+// "sigue en proceso", "esta en proceso" o "lo estan procesando".
+const SENAL_SEGUIMIENTO_CONTEXTUAL = /\b(sera hoy|es hoy|para hoy|llega hoy|salen hoy|llega manana|ya (enviaron|entregaron|hicieron|confirmaron|procesaron|lo entregaron)|todavia (esta|sigue|pendiente)|aun (esta|pendiente|sigue)|sigue (en proceso|pendiente|igual)|esta en proceso|lo estan (procesando|entregando|verificando)|noticias?)\b/;
 
 // Versión ampliada de esConsultaEstadoOperacion: detecta seguimiento
 // sin exigir posesivo, apoyándose en el contexto de operación activa.
 function esPreguntaSeguimientoActivo(txt) {
     const c = canonizarIntencion(String(txt || ""));
     return SENAL_SEGUIMIENTO.test(c) || SENAL_SEGUIMIENTO_CONTEXTUAL.test(c);
+}
+
+// ── EXPIRACIÓN DE OPERACIONES ──
+
+// TTL para operaciones pendientes (72 h). Las confirmadas no expiran por
+// tiempo — la entrega puede tomar más de un día.
+const TTL_PENDIENTE_MS = 72 * 60 * 60 * 1000;
+
+// True si la fecha de referencia supera el TTL dado.
+// Conservador cuando no hay fecha: sin dato conocido, nunca expira.
+function operacionExpirada(fechaRef, ttlMs = TTL_PENDIENTE_MS) {
+    if (!fechaRef) return false;
+    const ms = Date.now() - new Date(fechaRef).getTime();
+    return Number.isFinite(ms) && ms > ttlMs;
 }
 
 // ── CONTEXTO DE PAGO ──
@@ -707,6 +724,8 @@ module.exports = {
     separarSaludo,
     esConsultaEstadoOperacion,
     esPreguntaSeguimientoActivo,
+    operacionExpirada,
+    TTL_PENDIENTE_MS,
     esPedidoDePix,
     tieneOperacionEnCurso,
     preguntaElMonto,

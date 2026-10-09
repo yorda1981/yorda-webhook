@@ -11,7 +11,7 @@ const {
     clienteEstaOcupado, tieneContextoReemplazable, esFraseDeAbandonoExplicito,
     debeCompletarConMontoPendiente, debeConfirmarCotizacion, tieneTarjetaGuardada, esConsultaTasas, esIntencionSinMonto, esMensajeDeNegocio, yaAvisoEntregaReciente,
     separarSaludo, esPedidoDePix, tieneOperacionEnCurso, preguntaElMonto, esConsultaEstadoOperacion,
-    esPreguntaSeguimientoActivo,
+    esPreguntaSeguimientoActivo, operacionExpirada, TTL_PENDIENTE_MS,
     contextoUtilizable, interpretarSeleccionOpcion, interpretarTarjetaPorPalabra, monedaPendienteDeContexto,
     esRechazoTarjeta, esPausaTemporal, esSenalConfusion, esCierreNatural, esPreguntaExploratoria,
     interpretarAccionRecarga,
@@ -39,6 +39,20 @@ const {
     TARJETA_ILEGIBLE,
     getPIXKey
 } = require("../flows/shared");
+
+// ─────────────────────────────────────────
+// HELPERS DE MÓDULO
+// ─────────────────────────────────────────
+
+// Estados donde el intercept de seguimiento puede actuar.
+const ESTADOS_ACTIVOS_SEGUIMIENTO = ["pedido_web_pendiente", "aguardando_comprovante", "cotizacion_realizada"];
+
+// Minutos transcurridos desde una fecha ISO. null si la fecha es inválida.
+function minsDesdeFecha(fecha) {
+    if (!fecha) return null;
+    const ms = Date.now() - new Date(fecha).getTime();
+    return Number.isFinite(ms) && ms >= 0 ? Math.floor(ms / 60000) : null;
+}
 
 // ─────────────────────────────────────────
 // ROUTER PRINCIPAL
@@ -72,27 +86,35 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null, opci
 
         // ── Seguimiento de operación activa ──
         // Si el cliente tiene un estado activo y su mensaje pregunta por el
-        // estado (sin necesidad de posesivo — "¿ya llegó?", "¿será hoy?",
-        // "¿hay novedades?"), se responde de forma contextual y variada ANTES
-        // de cualquier respuesta genérica. No interfiere con flujos de
-        // cotización, PIX, OCR ni comprobantes.
-        const ESTADOS_ACTIVOS_SEGUIMIENTO = ["pedido_web_pendiente", "aguardando_comprovante", "cotizacion_realizada"];
-        if (ESTADOS_ACTIVOS_SEGUIMIENTO.includes(cliente?.estado) && esPreguntaSeguimientoActivo(txt)) {
-            return await manejarSeguimientoOperacion(phone, cliente, pushName, esEs, lang);
+        // estado ("¿ya llegó?", "¿será hoy?", "¿hay novedades?"), se responde
+        // de forma contextual ANTES de cualquier respuesta genérica.
+        // Guards: imágenes se procesan siempre por su propio handler;
+        // mensajes de comprobante verbal van al handler de comprobante.
+        const esComprobanteVerbal = /comprobante|comprovante|paguei|pague|feito|realizado|ya (envie|mande|pague)/.test(txt);
+        if (!imageUrl && !esComprobanteVerbal &&
+                ESTADOS_ACTIVOS_SEGUIMIENTO.includes(cliente?.estado) &&
+                esPreguntaSeguimientoActivo(txt)) {
+            return await manejarSeguimientoOperacion(phone, cliente, pushName, esEs);
         }
 
-        // ── Pedido de la calculadora en proceso: el bot se queda en silencio ──
-        // Una vez que un pedido llega desde la calculadora, se maneja 100% por el
-        // dashboard (VERIFICADO/COMPLETAR) — no hace falta que el bot conversacional
-        // intervenga si el cliente manda algo más (ej. la foto del comprobante),
-        // porque su estado no tiene la info que el flujo viejo espera (monto,
-        // tarjeta, etc.) y podría responder cosas confusas.
+        // ── Pedido de la calculadora en proceso ──
+        // Cuando el estado es pedido_web_pendiente el bot no tiene acceso a los
+        // datos de la operación (monto, tarjeta) — todo lo gestiona el dashboard.
+        // Excepciones: (1) si la operación expiró se limpia el estado para que
+        // el cliente pueda iniciar una nueva; (2) si el mensaje indica intención
+        // nueva (monto, negocio) se libera el flujo en vez de bloquearlo.
         if (cliente?.estado === "pedido_web_pendiente") {
-            const m = esEs
-                ? "Ya tenemos tu pedido registrado ✅ Lo estamos verificando, te avisamos por aquí en cuanto esté listo."
-                : "Já temos seu pedido registrado ✅ Estamos verificando, avisamos por aqui assim que estiver pronto.";
-            await enviarSeguro(phone, m);
-            return m;
+            // Intención nueva: liberar estado y dejar caer al flujo normal
+            if (montoValido || esFraseDeAbandonoExplicito(txt) || esMensajeDeNegocio(txt)) {
+                await limpiarSesion(phone);
+                // Sin return: el flujo normal procesa el mensaje como nuevo
+            } else {
+                const m = esEs
+                    ? "Ya tenemos tu pedido registrado ✅ Lo estamos verificando, te avisamos por aquí en cuanto esté listo."
+                    : "Já temos seu pedido registrado ✅ Estamos verificando, avisamos por aqui assim que estiver pronto.";
+                await enviarSeguro(phone, m);
+                return m;
+            }
         }
 
         // ── Horario ──
@@ -923,17 +945,10 @@ function construirSaludo({ lang, esRegistrado, frecuente, nombre, franja }) {
 
 // Responde a consultas de seguimiento cuando el cliente tiene una operación
 // activa. Personaliza según nombre, monto, estado y tiempo transcurrido.
-// No modifica ningún estado: solo informa.
-async function manejarSeguimientoOperacion(phone, cliente, pushName, esEs, lang) {
+// Solo informa — no modifica ningún estado salvo en caso de expiración.
+async function manejarSeguimientoOperacion(phone, cliente, pushName, esEs) {
     const nombre = primerNombreConfiable(cliente?.nombre) || primerNombreConfiable(pushName);
     const n = nombre ? (esEs ? `, ${nombre}` : ` ${nombre}`) : "";
-
-    // Minutos transcurridos desde una fecha ISO. null si fecha inválida.
-    const minsDesdeFecha = (fecha) => {
-        if (!fecha) return null;
-        const ms = Date.now() - new Date(fecha).getTime();
-        return Number.isFinite(ms) && ms >= 0 ? Math.floor(ms / 60000) : null;
-    };
 
     // Una sola query cubre todos los estados: timing + monto + status real.
     const ultima = await obtenerUltimaOperacion(phone);
@@ -941,6 +956,20 @@ async function manejarSeguimientoOperacion(phone, cliente, pushName, esEs, lang)
     // Tiempo desde la creación de la operación (DB) o desde el cambio de
     // estado del cliente, en ese orden de confiabilidad.
     const mins = minsDesdeFecha(ultima?.created_at || cliente?.fecha_estado);
+
+    // ── Expiración ──
+    // Una operación `pendiente` que lleva más de 72 h se considera expirada:
+    // limpiar estado y ofrecer empezar de nuevo. Las `confirmadas` no expiran
+    // por TTL (la entrega puede tardar más de un día).
+    const estaExpirada = ultima?.status === "pendiente" && operacionExpirada(ultima.created_at);
+    if (estaExpirada) {
+        await limpiarSesion(phone);
+        const m = esEs
+            ? `Hola${n} 😊 Veo que tu operación anterior ya expiró. Si deseas realizar un nuevo envío, con gusto comenzamos.`
+            : `Oi${n} 😊 Vi que sua operação anterior já expirou. Se quiser fazer um novo envio, podemos começar agora.`;
+        await enviarSeguro(phone, m);
+        return m;
+    }
 
     // Monto: preferir DB (valor confirmado) sobre el contexto conversacional.
     const montoNum = Number(ultima?.monto || cliente?.ultimo_monto || 0);
