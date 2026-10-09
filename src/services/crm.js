@@ -22,6 +22,9 @@ const pool          = require("../../db");
 const { enviarMensaje } = require("./zapi");
 const { filtrarNoBloqueados } = require("./blocked-numbers");
 const { enPausaHumana } = require("./webhook-guard");
+const { obtenerUltimaOperacion } = require("./operations");
+
+const ESTADOS_OP_ACTIVA = new Set(["pendiente", "confirmada"]);
 
 // ─────────────────────────────────────────
 // DETECCIÓN DE IDIOMA
@@ -373,6 +376,8 @@ async function onda30min() {
             // reintentará solo cuando este job vuelva a correr y la pausa ya
             // haya vencido.
             if (await enPausaHumana(c.phone)) continue;
+            const ultimaOp = await obtenerUltimaOperacion(c.phone);
+            if (ultimaOp && ESTADOS_OP_ACTIVA.has(ultimaOp.status)) continue;
             const lang   = c.idioma === "pt" ? "pt" : "es";
             const nombre = c.nombre ? c.nombre.split(" ")[0] : null;
             await enviarMensaje(c.phone, msg("recuperar_30m", lang, nombre, c.ultimo_monto));
@@ -399,6 +404,8 @@ async function onda24h() {
     for (const c of await filtrarNoBloqueados(r.rows)) {
         try {
             if (await enPausaHumana(c.phone)) continue;
+            const ultimaOp24 = await obtenerUltimaOperacion(c.phone);
+            if (ultimaOp24 && ESTADOS_OP_ACTIVA.has(ultimaOp24.status)) continue;
             const lang   = c.idioma === "pt" ? "pt" : "es";
             const nombre = c.nombre ? c.nombre.split(" ")[0] : null;
             await enviarMensaje(c.phone, msg("recuperar_24h", lang, nombre));
@@ -426,6 +433,8 @@ async function onda7d() {
     for (const c of await filtrarNoBloqueados(r.rows)) {
         try {
             if (await enPausaHumana(c.phone)) continue;
+            const ultimaOp7d = await obtenerUltimaOperacion(c.phone);
+            if (ultimaOp7d && ESTADOS_OP_ACTIVA.has(ultimaOp7d.status)) continue;
             const lang   = c.idioma === "pt" ? "pt" : "es";
             const nombre = c.nombre ? c.nombre.split(" ")[0] : null;
             await enviarMensaje(c.phone, msg("recuperar_7d", lang, nombre));

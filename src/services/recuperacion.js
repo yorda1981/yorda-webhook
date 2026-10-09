@@ -91,7 +91,7 @@ const PREDICADO_CANDIDATO = `
     -- Exclusión 2: pausa humana activa (mismo campo que usa
     -- webhook-guard.js:enPausaHumana).
     AND (cu.pausa_hasta IS NULL OR cu.pausa_hasta < NOW())
-    -- Exclusión 3: ya existe una operación real (confirmada o completada)
+    -- Exclusión 3: ya existe una operación real (pendiente, confirmada o completada)
     -- que supera este intento. La creación posterior sigue siendo suficiente;
     -- además, una confirmación posterior también resuelve el intento aunque
     -- la fila se haya creado unos minutos antes. completed_at solo se usa
@@ -100,7 +100,7 @@ const PREDICADO_CANDIDATO = `
     AND NOT EXISTS (
         SELECT 1 FROM operations o
         WHERE o.phone = cu.phone
-          AND o.status IN ('confirmada','completada')
+          AND o.status IN ('pendiente','confirmada','completada')
           AND (
               o.created_at > COALESCE(cu.fecha_estado, cu.fecha_cotizacion)
               OR o.confirmed_at > COALESCE(cu.fecha_estado, cu.fecha_cotizacion)
