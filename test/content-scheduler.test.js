@@ -40,7 +40,7 @@ test("programar persiste una sola fila y su evento con la misma idempotency key"
     assert.match(captured.sql, /INSERT INTO content_schedules/);
     assert.match(captured.sql, /ON CONFLICT \(idempotency_key\) DO NOTHING/);
     assert.match(captured.sql, /CONTENT_SCHEDULE_CREATED/);
-    assert.deepEqual(captured.params, ["es", "2026-10-12T12:00:00.000Z", "PENDIENTE", "schedule-8"]);
+    assert.deepEqual(captured.params, ["es", "2026-10-12T12:00:00.000Z", "PENDIENTE", "schedule-8", null]);
 });
 
 test("resultado del Motor de Publicación se traduce sin reglas de contenido", () => {
@@ -115,4 +115,42 @@ test("API permite programar y cancelar, sin recurrencias ni pantallas nuevas", (
     assert.match(routes, /router\.post\("\/schedules\/:id\/cancel", adminWriteLimiter, verificarToken/);
     const publicFiles = fs.readdirSync(path.join(__dirname, "..", "public"));
     assert.equal(publicFiles.filter((name) => /schedule|programacion/i.test(name)).length, 0);
+});
+
+test("programar un activo concreto lo persiste sin fijar destino", async () => {
+    let captured;
+    const db = { async query(sql, params) {
+        captured = params;
+        return { rows: [{ id: "9", idioma: "es", programada_para: params[1], estado: "PENDIENTE",
+            idempotency_key: params[3], content_item_id: params[4], publication_id: null }] };
+    } };
+    const result = await schedulePublication({
+        idioma: "es", idempotencyKey: "library-10-a", programadaPara: "2026-10-12T12:00:00Z", contentId: "10"
+    }, { pool: db, now: new Date("2026-10-11T12:00:00Z") });
+    assert.equal(captured.length, 5);
+    assert.equal(captured[4], 10);
+    assert.equal(result.schedule.contentId, 10);
+});
+
+test("al ejecutar reenvía el activo programado al mismo Motor de Publicación", async () => {
+    let input;
+    const schedule = { scheduleId: 9, idioma: "es", idempotencyKey: "library-10-a", contentId: 10 };
+    await executeClaimedSchedule(schedule, {
+        pool: {},
+        publisher: { async publishSelectedContent(received) { input = received; return { code: "PUBLISHED" }; } },
+        finishFn: async () => ({})
+    });
+    // Sin destinationId: el adaptador de salida resuelve el destino activo al ejecutar.
+    assert.deepEqual(input, { idioma: "es", idempotencyKey: "library-10-a", contentId: 10 });
+});
+
+test("migración 0028: activo opcional en programaciones y un único destino activo", () => {
+    const migration = fs.readFileSync(path.join(__dirname, "..", "migrations", "0028_content_library_publishing.sql"), "utf8");
+    assert.match(migration, /ADD COLUMN IF NOT EXISTS content_item_id BIGINT REFERENCES content_items\(id\)/);
+    assert.match(migration, /CREATE UNIQUE INDEX IF NOT EXISTS uq_content_destinations_single_active[\s\S]*WHERE activo/);
+    assert.doesNotMatch(migration, /DROP|DELETE|NOT NULL/);
+});
+
+test("programación sin destino activo queda FALLIDA con el error del flujo existente", () => {
+    assert.equal(outcomeForPublisherResult({ ok: false, code: "DESTINATION_NOT_FOUND", error: "Destino no encontrado o inactivo." }), "FALLIDA");
 });

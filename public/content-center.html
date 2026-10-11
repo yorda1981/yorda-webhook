@@ -49,6 +49,12 @@
         .preview-label { color:#c4b5fd; text-transform:uppercase; letter-spacing:.08em; font-size:11px; font-weight:800; margin-bottom:10px; }
         .preview-body { white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.55; color:#f8fafc; }
         .preview-destination { color:var(--muted); font-size:11px; margin-top:12px; }
+        .publish { margin-top:18px; padding-top:18px; border-top:1px solid var(--line); }
+        .publish[hidden] { display:none; }
+        .publish-destination { font-size:13px; margin-bottom:12px; }
+        .publish-destination.missing { color:var(--danger); }
+        .publish-row { display:flex; gap:10px; margin-bottom:10px; }
+        .publish-row input { flex:1; }
         .destinations { margin-top:18px; }
         .destinations[hidden] { display:none; }
         .group-row { display:flex; justify-content:space-between; align-items:center; gap:14px; padding:14px 18px; border-bottom:1px solid var(--line); }
@@ -64,7 +70,7 @@
         <div>
             <div class="eyebrow">Content Center</div>
             <h1>Biblioteca de Contenido</h1>
-            <p class="intro">Construye activos comerciales reutilizables para YORDA. Cada guardado conserva una revisión y prepara la biblioteca para futuras publicaciones.</p>
+            <p class="intro">Construye activos comerciales reutilizables para YORDA. Cada guardado conserva una revisión que puedes publicar al instante o programar en el destino del Motor de Marketing.</p>
         </div>
         <a class="back" href="/dashboard">Volver al dashboard</a>
     </header>
@@ -95,12 +101,11 @@
                 <div class="field">
                     <label for="body">Contenido</label>
                     <textarea id="body" maxlength="20000" required placeholder="Escribe el contenido que YORDA podrá reutilizar..."></textarea>
-                    <div class="helper">En esta etapa guardamos el texto y sus revisiones. La publicación se habilitará en una etapa posterior.</div>
                 </div>
                 <section class="preview" id="preview" hidden aria-live="polite">
-                    <div class="preview-label">Vista exacta en WhatsApp administrativo</div>
+                    <div class="preview-label">Vista exacta en WhatsApp</div>
                     <div class="preview-body" id="previewBody"></div>
-                    <div class="preview-destination">Destino futuro de V1: ADMIN_PHONE</div>
+                    <div class="preview-destination" id="previewDestination"></div>
                 </section>
                 <div class="editor-actions">
                     <span class="revision" id="lastUpdate">Sin guardar</span>
@@ -109,13 +114,24 @@
                         <button id="saveButton" type="submit">Guardar en la biblioteca</button>
                     </div>
                 </div>
+                <section class="publish" id="publishPanel" hidden>
+                    <div class="publish-destination" id="publishDestination"></div>
+                    <div class="publish-row">
+                        <button id="publishButton" type="button">Publicar ahora</button>
+                    </div>
+                    <div class="publish-row">
+                        <input id="scheduleAt" type="datetime-local" aria-label="Fecha y hora de publicación">
+                        <button class="secondary" id="scheduleButton" type="button">Programar publicación</button>
+                    </div>
+                    <div class="helper">Se publica la última revisión guardada. La hora es la de este dispositivo.</div>
+                </section>
             </form>
         </section>
     </section>
 
     <section class="panel destinations" id="destinationsPanel" hidden>
         <div class="panel-head">
-            <div><h2>Destinos del Motor de Marketing</h2><span class="count">Grupos de WhatsApp donde está el número del bot</span></div>
+            <div><h2>Destinos del Motor de Marketing</h2><span class="count">Todas las publicaciones van al destino activo. Elegir otro grupo lo reemplaza.</span></div>
             <button class="secondary" id="discoverButton" type="button">Buscar grupos</button>
         </div>
         <div id="groupList"><div class="empty">Pulsa «Buscar grupos» para consultar WhatsApp.</div></div>
@@ -126,6 +142,7 @@
     let adminToken = "";
     let assets = [];
     let selectedId = null;
+    let activeDestination = null;
 
     const byId = (id) => document.getElementById(id);
     const statusEl = byId("status");
@@ -153,6 +170,7 @@
         byId("lastUpdate").textContent = "Sin guardar";
         byId("preview").hidden = true;
         renderList();
+        renderPublishPanel();
         byId("title").focus();
     }
 
@@ -167,6 +185,7 @@
         byId("lastUpdate").textContent = `Actualizado ${formatDate(asset.actualizadoAt)}`;
         byId("preview").hidden = true;
         renderList();
+        renderPublishPanel();
     }
 
     function renderList() {
@@ -203,6 +222,7 @@
         assets = data.assets || [];
         byId("workspace").hidden = false;
         byId("destinationsPanel").hidden = false;
+        await loadActiveDestination();
         renderList();
         setStatus("Biblioteca conectada.", "ok");
     }
@@ -283,6 +303,7 @@
         setStatus("Validando con WhatsApp...");
         try {
             await requestJson(url, { method:"POST", body:JSON.stringify(body || {}) });
+            await loadActiveDestination();
             await discoverGroups();
             setStatus(okMessage, "ok");
         } catch (error) {
@@ -292,6 +313,97 @@
     }
 
     byId("discoverButton").addEventListener("click", discoverGroups);
+
+    function destinationLabel() {
+        return activeDestination ? `Destino: ${activeDestination.name}` : "No hay destino activo. Elige un grupo en «Destinos del Motor de Marketing».";
+    }
+
+    async function loadActiveDestination() {
+        const data = await requestJson("/admin/content-library/destinations");
+        activeDestination = (data.destinations || []).find((destination) => destination.active) || null;
+        byId("previewDestination").textContent = destinationLabel();
+        renderPublishPanel();
+    }
+
+    function selectedAsset() {
+        return assets.find((item) => item.id === selectedId) || null;
+    }
+
+    function renderPublishPanel() {
+        const asset = selectedAsset();
+        byId("publishPanel").hidden = !asset;
+        if (!asset) return;
+        const label = byId("publishDestination");
+        label.textContent = destinationLabel();
+        label.className = `publish-destination${activeDestination ? "" : " missing"}`;
+        byId("publishButton").disabled = !activeDestination;
+        byId("scheduleButton").disabled = !activeDestination;
+    }
+
+    function idempotencyKey(asset, action) {
+        return `library-${asset.id}-r${asset.revision}-${action}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    }
+
+    // Solo se publica lo guardado: con cambios pendientes se pide guardar primero.
+    function assetReadyToPublish() {
+        const asset = selectedAsset();
+        if (!asset) return null;
+        if (byId("title").value.trim() !== asset.titulo || byId("body").value.trim() !== asset.cuerpo) {
+            setStatus("Guarda los cambios antes de publicar o programar.", "error");
+            return null;
+        }
+        return asset;
+    }
+
+    byId("publishButton").addEventListener("click", async () => {
+        const asset = assetReadyToPublish();
+        if (!asset) return;
+        const button = byId("publishButton");
+        button.disabled = true;
+        setStatus(`Publicando en ${activeDestination.name}...`);
+        try {
+            const response = await fetch("/admin/content-library/publish", {
+                method:"POST",
+                headers:headers(),
+                body:JSON.stringify({ contentId:asset.id, idempotencyKey:idempotencyKey(asset, "now") })
+            });
+            const data = await response.json();
+            if (data.code === "PUBLISHED") return setStatus(`Publicado en ${activeDestination.name}.`, "ok");
+            if (data.code === "NO_ELIGIBLE_CONTENT") throw new Error("Este contenido no está activo para publicarse.");
+            if (data.code === "SEND_FAILED") throw new Error("WhatsApp no confirmó el envío. Quedó registrado como fallido en el Centro de Operaciones.");
+            throw new Error(data.error || "No se pudo publicar el contenido.");
+        } catch (error) {
+            setStatus(error.message, "error");
+        } finally {
+            renderPublishPanel();
+        }
+    });
+
+    byId("scheduleButton").addEventListener("click", async () => {
+        const asset = assetReadyToPublish();
+        if (!asset) return;
+        const when = byId("scheduleAt").value;
+        if (!when) return setStatus("Elige la fecha y hora de publicación.", "error");
+        const button = byId("scheduleButton");
+        button.disabled = true;
+        setStatus("Programando publicación...");
+        try {
+            const data = await requestJson("/admin/content-library/schedules", {
+                method:"POST",
+                body:JSON.stringify({
+                    contentId:asset.id,
+                    programadaPara:new Date(when).toISOString(),
+                    idempotencyKey:idempotencyKey(asset, "schedule")
+                })
+            });
+            byId("scheduleAt").value = "";
+            setStatus(`Programado para ${formatDate(data.schedule.programadaPara)} en el destino activo.`, "ok");
+        } catch (error) {
+            setStatus(error.message, "error");
+        } finally {
+            renderPublishPanel();
+        }
+    });
 
     byId("previewButton").addEventListener("click", async () => {
         const button = byId("previewButton");

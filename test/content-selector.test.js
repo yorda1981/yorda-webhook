@@ -71,3 +71,16 @@ test("motor no conoce canales, publicación, programación ni transporte", () =>
     assert.doesNotMatch(source, /zapi|whatsapp|telegram|ADMIN_PHONE|enviarMensaje|content_publications|programada_para/i);
     assert.doesNotMatch(source, /UPDATE|INSERT|DELETE/);
 });
+
+test("con contentId selecciona ese activo activo, sin filtrar por idioma", async () => {
+    let captured;
+    const db = { async query(sql, params) {
+        captured = { sql: String(sql).replace(/\s+/g, " ").trim(), params };
+        return { rows: [] };
+    } };
+    await selectContent({ idioma: "es", contentId: "10" }, db);
+    assert.deepEqual(captured.params, [10]);
+    assert.match(captured.sql, /WHERE ci\.estado = 'ACTIVO' AND ci\.id = \$1/);
+    assert.doesNotMatch(captured.sql, /ci\.idioma = \$1/);
+    await assert.rejects(selectContent({ contentId: "abc" }, db), { code: "CONTENT_SELECTOR_VALIDATION" });
+});

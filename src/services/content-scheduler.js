@@ -39,6 +39,10 @@ function normalizeScheduledAt(value, now = new Date()) {
     return date;
 }
 
+function optionalNumber(value) {
+    return value === null || value === undefined ? null : Number(value);
+}
+
 function mapSchedule(row) {
     if (!row) return null;
     return {
@@ -47,7 +51,8 @@ function mapSchedule(row) {
         programadaPara: row.programada_para,
         estado: row.estado,
         idempotencyKey: row.idempotency_key,
-        publicationId: row.publication_id === null || row.publication_id === undefined ? null : Number(row.publication_id),
+        contentId: optionalNumber(row.content_item_id),
+        publicationId: optionalNumber(row.publication_id),
         resultCode: row.result_code || null,
         error: row.error || null,
         claimedAt: row.claimed_at || null,
@@ -68,25 +73,28 @@ async function schedulePublication(input, dependencies = {}) {
     const language = contentSelector.normalizeLanguage(input?.idioma);
     const idempotencyKey = contentPublisher.normalizeIdempotencyKey(input?.idempotencyKey);
     const scheduledAt = normalizeScheduledAt(input?.programadaPara, dependencies.now || new Date());
+    const contentId = contentSelector.normalizeContentId(input?.contentId);
     try {
         const result = await db.query(`
             WITH inserted AS (
                 INSERT INTO content_schedules
-                    (idioma, programada_para, estado, idempotency_key)
-                VALUES ($1, $2, $3, $4)
+                    (idioma, programada_para, estado, idempotency_key, content_item_id)
+                VALUES ($1, $2, $3, $4, $5)
                 ON CONFLICT (idempotency_key) DO NOTHING
                 RETURNING *
             ), event AS (
                 INSERT INTO content_events (entity_type, entity_id, event_type, actor, datos)
                 SELECT 'SCHEDULE', id, 'CONTENT_SCHEDULE_CREATED', 'admin',
-                       jsonb_build_object('programadaPara', programada_para, 'idioma', idioma)
+                       jsonb_build_object('programadaPara', programada_para, 'idioma', idioma,
+                                          'contentItemId', content_item_id)
                 FROM inserted
             )
             SELECT *, true AS nueva FROM inserted
-        `, [language, scheduledAt.toISOString(), SCHEDULE_STATES.PENDING, idempotencyKey]);
+        `, [language, scheduledAt.toISOString(), SCHEDULE_STATES.PENDING, idempotencyKey, contentId]);
         if (result.rows[0]) return { schedule: mapSchedule(result.rows[0]), alreadyExisted: false };
         return { schedule: await findScheduleByKey(idempotencyKey, db), alreadyExisted: true };
     } catch (error) {
+        if (error.code === "23503") throw schedulerValidationError("El contenido indicado no existe.");
         throw error;
     }
 }
@@ -231,10 +239,9 @@ async function executeClaimedSchedule(schedule, dependencies = {}) {
     const finishFn = dependencies.finishFn || finishSchedule;
     let result;
     try {
-        result = await publisher.publishSelectedContent({
-            idioma: schedule.idioma,
-            idempotencyKey: schedule.idempotencyKey
-        });
+        const input = { idioma: schedule.idioma, idempotencyKey: schedule.idempotencyKey };
+        if (schedule.contentId) input.contentId = schedule.contentId;
+        result = await publisher.publishSelectedContent(input);
     } catch (error) {
         result = { ok: false, code: "UNEXPECTED_ERROR", error: error.message };
     }

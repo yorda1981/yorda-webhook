@@ -54,7 +54,7 @@ test("endpoint de preview es autenticado, limitado y read-only", () => {
 
 test("interfaz solicita la preview al servidor y la muestra como texto seguro", () => {
     const html = fs.readFileSync(path.join(__dirname, "..", "public", "content-center.html"), "utf8");
-    assert.match(html, /Vista exacta en WhatsApp administrativo/);
+    assert.match(html, /Vista exacta en WhatsApp</);
     assert.match(html, /fetch\("\/admin\/content-library\/preview"/);
     assert.match(html, /previewBody"\)\.textContent = data\.preview\.renderedBody/);
     assert.doesNotMatch(html, /previewBody"\)\.innerHTML/);

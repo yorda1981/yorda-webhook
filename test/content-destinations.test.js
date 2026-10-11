@@ -8,8 +8,19 @@ const destinations = require("../src/services/content-destinations");
 const adapters = require("../src/services/content-output-adapters");
 const { preparePublication, publishSelectedContent } = require("../src/services/content-publisher");
 
-test("registra persistentemente un grupo validado y conserva su identificador", async () => {
-    let query;
+test("registrar un grupo lo convierte en el único destino activo, en una transacción", async () => {
+    const calls = [];
+    const client = {
+        async query(sql, params = []) {
+            const compact = String(sql).replace(/\s+/g, " ").trim();
+            calls.push({ sql: compact, params });
+            if (compact.includes("CONTENT_DESTINATION_VALIDATED")) {
+                return { rows: [{ id: "7", tipo: "WHATSAPP_GROUP", external_id: params[1], nombre: params[2], activo: true, validado_at: "2026-10-11" }] };
+            }
+            return { rows: [] };
+        },
+        release() { calls.push({ sql: "RELEASE" }); }
+    };
     const destination = await destinations.registerWhatsAppGroup(
         { groupId: "120363019502650977-group" },
         {
@@ -19,15 +30,74 @@ test("registra persistentemente un grupo validado y conserva su identificador", 
                 participants: [{ phone: "5511999999999", isAdmin: false }]
             }),
             getDevice: async () => ({ phone: "5511999999999" }),
-            pool: { query: async (sql, params) => {
-                query = { sql, params };
-                return { rows: [{ id: "7", tipo: "WHATSAPP_GROUP", external_id: params[1], nombre: params[2], activo: true, validado_at: "2026-10-11" }] };
-            } }
+            pool: { connect: async () => client }
         }
     );
     assert.equal(destination.destinationId, 7);
     assert.equal(destination.externalId, "120363019502650977-group");
-    assert.match(query.sql, /CONTENT_DESTINATION_VALIDATED/);
+    const sqls = calls.map((call) => call.sql);
+    assert.equal(sqls[0], "BEGIN");
+    assert.match(sqls[1], /LOCK TABLE content_destinations/);
+    assert.match(sqls[2], /SET activo = FALSE[\s\S]*NOT \(tipo = \$1 AND external_id = \$2\)[\s\S]*CONTENT_DESTINATION_DEACTIVATED/);
+    assert.match(sqls[3], /CONTENT_DESTINATION_VALIDATED/);
+    assert.deepEqual(sqls.slice(4), ["COMMIT", "RELEASE"]);
+});
+
+test("si falla el registro no queda ningún destino desactivado a medias", async () => {
+    const calls = [];
+    const client = {
+        async query(sql) {
+            const compact = String(sql).replace(/\s+/g, " ").trim();
+            calls.push(compact);
+            if (compact.includes("CONTENT_DESTINATION_VALIDATED")) throw new Error("fallo de escritura");
+            return { rows: [] };
+        },
+        release() {}
+    };
+    await assert.rejects(destinations.registerWhatsAppGroup(
+        { groupId: "120363019502650977-group" },
+        {
+            validateGroup: async () => ({ phone: "120363019502650977-group", subject: "G", participants: [{ phone: "5511999999999" }] }),
+            getDevice: async () => ({ phone: "5511999999999" }),
+            pool: { connect: async () => client }
+        }
+    ), /fallo de escritura/);
+    assert.equal(calls.at(-1), "ROLLBACK");
+});
+
+test("sin destino explícito, el adaptador usa el destino activo del Motor", async () => {
+    const destination = await adapters.resolveOutputDestination(
+        { idioma: "es" },
+        { adminPhone: "5511999999999", getDefaultDestination: async () => ({ type: "WHATSAPP_GROUP", externalId: "120363019502650977-group" }) }
+    );
+    assert.deepEqual(destination, {
+        type: "WHATSAPP_GROUP", channel: "whatsapp_group",
+        reference: "120363019502650977-group", address: "120363019502650977-group"
+    });
+});
+
+test("sin destino activo no hay destino: nunca se redirige al WhatsApp administrativo", async () => {
+    const destination = await adapters.resolveOutputDestination(
+        {},
+        { adminPhone: "5511999999999", getDefaultDestination: async () => null }
+    );
+    assert.equal(destination, null);
+    const source = fs.readFileSync(path.join(__dirname, "..", "src", "services", "content-output-adapters.js"), "utf8");
+    assert.doesNotMatch(source, /getAdminPhone|ADMIN_PHONE|whatsapp_admin/);
+});
+
+test("publicar sin destino activo no envía ni crea la publicación", async () => {
+    const result = await publishSelectedContent(
+        { idempotencyKey: "library-10-now", contentId: 10 },
+        {
+            pool: {},
+            selector: { normalizeLanguage: (value) => value || "es" },
+            getDefaultDestination: async () => null,
+            prepareFn: async () => assert.fail("no debe registrar la publicación"),
+            sendDestinationFn: async () => assert.fail("no debe enviar")
+        }
+    );
+    assert.equal(result.code, "DESTINATION_NOT_FOUND");
 });
 
 test("rechaza un grupo que el proveedor no puede validar", async () => {

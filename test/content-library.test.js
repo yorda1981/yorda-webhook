@@ -128,13 +128,20 @@ test("rutas de biblioteca usan límites y autenticación administrativos", () =>
     assert.doesNotMatch(routes, /publicar|programar|enviarMensaje|zapi/i);
 });
 
-test("la interfaz presenta una biblioteca de activos sin adelantar funciones futuras", () => {
+test("la interfaz publica y programa el activo guardado en el destino activo, sin elegir grupo", () => {
     const html = fs.readFileSync(path.join(__dirname, "..", "public", "content-center.html"), "utf8");
     assert.match(html, /Biblioteca de Contenido/);
     assert.match(html, /Activos de contenido/);
     assert.match(html, /Guardar en la biblioteca/);
     assert.match(html, /Cada guardado conserva una revisión/);
-    assert.doesNotMatch(html, /Publicar ahora|Programar publicación|Audiencia|Campaña|Plantilla/);
+    assert.match(html, /Publicar ahora/);
+    assert.match(html, /Programar publicación/);
+    assert.match(html, /fetch\("\/admin\/content-library\/publish"/);
+    assert.match(html, /requestJson\("\/admin\/content-library\/schedules"/);
+    // El destino lo resuelve el servidor: el cuerpo solo lleva el activo y la clave.
+    assert.match(html, /body:JSON\.stringify\(\{ contentId:asset\.id, idempotencyKey:idempotencyKey\(asset, "now"\) \}\)/);
+    assert.match(html, /contentId:asset\.id,\s*programadaPara:new Date\(when\)\.toISOString\(\),\s*idempotencyKey:idempotencyKey\(asset, "schedule"\)\s*\}/);
+    assert.doesNotMatch(html, /etapa posterior|Destino futuro|Audiencia|Campaña|Plantilla/);
 });
 
 test("index registra la API modular y la página independiente", () => {

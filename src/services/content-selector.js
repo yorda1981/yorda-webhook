@@ -18,6 +18,17 @@ function normalizeLanguage(value) {
     return language;
 }
 
+// Opcional: restringe la selección a un activo concreto (p. ej. publicar
+// desde la Biblioteca). Sin contentId se mantiene la selección automática.
+function normalizeContentId(value) {
+    if (value === undefined || value === null || value === "") return null;
+    const id = Number(value);
+    if (!Number.isSafeInteger(id) || id <= 0) {
+        throw selectorValidationError("Identificador de contenido inválido.");
+    }
+    return id;
+}
+
 function mapSelection(row) {
     if (!row) return null;
     return {
@@ -36,6 +47,9 @@ function mapSelection(row) {
 
 async function selectContent(criteria = {}, db = pool) {
     const language = normalizeLanguage(criteria.idioma);
+    const contentId = normalizeContentId(criteria.contentId);
+    // Un activo concreto se publica en su propio idioma; el idioma solo filtra la selección automática.
+    const filter = contentId ? "ci.id = $1" : "ci.idioma = $1";
     const result = await db.query(`
         SELECT ci.id, ci.titulo, ci.estado, ci.idioma, ci.prioridad,
                ci.ultima_utilizacion_at,
@@ -49,19 +63,20 @@ async function selectContent(criteria = {}, db = pool) {
             LIMIT 1
         ) cr ON TRUE
         WHERE ci.estado = 'ACTIVO'
-          AND ci.idioma = $1
+          AND ${filter}
         ORDER BY
           ci.prioridad DESC,
           ci.ultima_utilizacion_at ASC NULLS FIRST,
           ci.id ASC
         LIMIT 1
-    `, [language]);
+    `, [contentId || language]);
     return mapSelection(result.rows[0]);
 }
 
 module.exports = {
     SUPPORTED_LANGUAGES,
     normalizeLanguage,
+    normalizeContentId,
     mapSelection,
     selectContent
 };

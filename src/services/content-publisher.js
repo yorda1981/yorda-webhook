@@ -49,7 +49,7 @@ async function findByIdempotencyKey(key, db = pool) {
     return mapPublication(result.rows[0]);
 }
 
-async function preparePublication({ idioma, idempotencyKey, selector, destination }, db) {
+async function preparePublication({ idioma, idempotencyKey, selector, destination, contentId }, db) {
     const client = await db.connect();
     try {
         await client.query("BEGIN");
@@ -59,7 +59,7 @@ async function preparePublication({ idioma, idempotencyKey, selector, destinatio
             return { existing };
         }
 
-        const selected = await selector.selectContent({ idioma }, client);
+        const selected = await selector.selectContent(contentId ? { idioma, contentId } : { idioma }, client);
         if (!selected) {
             await client.query("ROLLBACK");
             return { selected: null };
@@ -261,7 +261,7 @@ async function publishSelectedContent(input, dependencies = {}) {
 
     let prepared;
     try {
-        prepared = await prepareFn({ idioma, idempotencyKey, selector, destination }, db);
+        prepared = await prepareFn({ idioma, idempotencyKey, selector, destination, contentId: input?.contentId }, db);
     } catch (error) {
         if (error.code === "23505") {
             const existing = await findFn(idempotencyKey, db);

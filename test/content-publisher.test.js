@@ -8,6 +8,7 @@ const path = require("node:path");
 const {
     normalizeIdempotencyKey,
     finishPublication,
+    preparePublication,
     publishSelectedContent
 } = require("../src/services/content-publisher");
 
@@ -179,4 +180,24 @@ test("endpoint de publicación es escritura autenticada y no existe una pantalla
     assert.match(routes, /router\.post\("\/publish", adminWriteLimiter, verificarToken/);
     const publicFiles = fs.readdirSync(path.join(__dirname, "..", "public"));
     assert.equal(publicFiles.filter((name) => /publish|publicacion/i.test(name)).length, 0);
+});
+
+test("publicar desde la Biblioteca pasa el activo al selector dentro del mismo flujo", async () => {
+    let criteria;
+    const client = {
+        async query(sql) {
+            const compact = String(sql).replace(/\s+/g, " ").trim();
+            if (compact.startsWith("SELECT id, content_item_id")) return { rows: [] };
+            return { rows: [] };
+        },
+        release() {}
+    };
+    await preparePublication({
+        idioma: "es",
+        idempotencyKey: "library-10-now",
+        contentId: 10,
+        selector: { selectContent: async (received) => { criteria = received; return null; } },
+        destination: { channel: "whatsapp_group", reference: "120363019502650977-group" }
+    }, { connect: async () => client });
+    assert.deepEqual(criteria, { idioma: "es", contentId: 10 });
 });

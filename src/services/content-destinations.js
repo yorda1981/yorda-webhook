@@ -148,22 +148,48 @@ async function registerWhatsAppGroup(input, dependencies = {}) {
     const name = String(metadata.subject || "").trim().slice(0, 160);
     if (!name) throw destinationError("No fue posible obtener el nombre del grupo.");
 
-    const result = await db.query(`
-        WITH saved AS (
-            INSERT INTO content_destinations (tipo, external_id, nombre, validado_at)
-            VALUES ($1, $2, $3, NOW())
-            ON CONFLICT (tipo, external_id) DO UPDATE
-            SET nombre = EXCLUDED.nombre, activo = TRUE,
-                validado_at = NOW(), actualizado_at = NOW()
-            RETURNING *
-        ), event AS (
+    // Un único destino activo: activar un grupo reemplaza al anterior en la
+    // misma transacción (garantizado también por uq_content_destinations_single_active).
+    const client = await db.connect();
+    let result;
+    try {
+        await client.query("BEGIN");
+        await client.query("LOCK TABLE content_destinations IN SHARE ROW EXCLUSIVE MODE");
+        await client.query(`
+            WITH replaced AS (
+                UPDATE content_destinations
+                SET activo = FALSE, actualizado_at = NOW()
+                WHERE activo = TRUE AND NOT (tipo = $1 AND external_id = $2)
+                RETURNING *
+            )
             INSERT INTO content_events (entity_type, entity_id, event_type, actor, datos)
-            SELECT 'DESTINATION', id, 'CONTENT_DESTINATION_VALIDATED', 'admin',
-                   jsonb_build_object('type', tipo, 'externalId', external_id, 'botIsAdmin', $4::boolean)
-            FROM saved
-        )
-        SELECT * FROM saved
-    `, [DESTINATION_TYPES.WHATSAPP_GROUP, groupId, name, membership.botIsAdmin]);
+            SELECT 'DESTINATION', id, 'CONTENT_DESTINATION_DEACTIVATED', 'admin',
+                   jsonb_build_object('type', tipo, 'externalId', external_id, 'replacedBy', $2::text)
+            FROM replaced
+        `, [DESTINATION_TYPES.WHATSAPP_GROUP, groupId]);
+        result = await client.query(`
+            WITH saved AS (
+                INSERT INTO content_destinations (tipo, external_id, nombre, validado_at)
+                VALUES ($1, $2, $3, NOW())
+                ON CONFLICT (tipo, external_id) DO UPDATE
+                SET nombre = EXCLUDED.nombre, activo = TRUE,
+                    validado_at = NOW(), actualizado_at = NOW()
+                RETURNING *
+            ), event AS (
+                INSERT INTO content_events (entity_type, entity_id, event_type, actor, datos)
+                SELECT 'DESTINATION', id, 'CONTENT_DESTINATION_VALIDATED', 'admin',
+                       jsonb_build_object('type', tipo, 'externalId', external_id, 'botIsAdmin', $4::boolean)
+                FROM saved
+            )
+            SELECT * FROM saved
+        `, [DESTINATION_TYPES.WHATSAPP_GROUP, groupId, name, membership.botIsAdmin]);
+        await client.query("COMMIT");
+    } catch (error) {
+        try { await client.query("ROLLBACK"); } catch (_) {}
+        throw error;
+    } finally {
+        client.release();
+    }
     return mapDestination(result.rows[0]);
 }
 
@@ -186,6 +212,14 @@ async function deactivateDestination(rawId, db = pool) {
     return mapDestination(result.rows[0]);
 }
 
+// Destino que usan automáticamente todas las publicaciones sin destino explícito.
+async function getDefaultDestination(db = pool) {
+    const result = await db.query(`
+        SELECT * FROM content_destinations WHERE activo = TRUE ORDER BY id LIMIT 1
+    `);
+    return mapDestination(result.rows[0]);
+}
+
 async function getActiveDestination(rawId, db = pool) {
     const id = normalizeDestinationId(rawId);
     const result = await db.query(`
@@ -203,6 +237,7 @@ module.exports = {
     discoverWhatsAppGroups,
     registerWhatsAppGroup,
     deactivateDestination,
+    getDefaultDestination,
     getActiveDestination
 };
 
