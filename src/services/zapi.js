@@ -50,6 +50,42 @@ async function obtenerMetadataGrupo(groupId) {
   }
 }
 
+// Lista los chats de grupo de la instancia (paginado por Z-API).
+// Devuelve null si el proveedor falla, para distinguirlo de "sin grupos".
+async function listarGrupos({ page = 1, pageSize = 100 } = {}) {
+  try {
+    const response = await axios({
+      method: "get",
+      url: `https://api.z-api.io/instances/${ZAPI_INSTANCE}/token/${ZAPI_TOKEN}/groups`,
+      params: { page, pageSize },
+      headers: { "Client-Token": ZAPI_CLIENT_TOKEN },
+      timeout: 15000
+    });
+    return Array.isArray(response.data) ? response.data : [];
+  } catch (e) {
+    logger("error", "ZAPI_GROUP_LIST_ERROR", { err: e.message });
+    log("EXTERNAL_API_ERROR", { origen: "zapi.listarGrupos", error: e.message });
+    return null;
+  }
+}
+
+// Datos del número conectado a la instancia (phone, name, ...).
+async function obtenerDispositivo() {
+  try {
+    const response = await axios({
+      method: "get",
+      url: `https://api.z-api.io/instances/${ZAPI_INSTANCE}/token/${ZAPI_TOKEN}/device`,
+      headers: { "Client-Token": ZAPI_CLIENT_TOKEN },
+      timeout: 15000
+    });
+    return response.data || null;
+  } catch (e) {
+    logger("error", "ZAPI_DEVICE_ERROR", { err: e.message });
+    log("EXTERNAL_API_ERROR", { origen: "zapi.obtenerDispositivo", error: e.message });
+    return null;
+  }
+}
+
 async function enviarImagen(phone, imageUrl, caption = "") {
   try {
     await axios({
@@ -120,6 +156,8 @@ async function enviarConDelay(phone, message, delayOverrideMs = null) {
 module.exports = {
     enviarMensaje,
     obtenerMetadataGrupo,
+    listarGrupos,
+    obtenerDispositivo,
     enviarImagen,
     enviarConDelay,
     mostrarEscribiendo,

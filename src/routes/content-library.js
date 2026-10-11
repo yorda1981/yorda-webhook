@@ -13,6 +13,7 @@ function sendError(res, error) {
     if (error?.code === "CONTENT_LIBRARY_VALIDATION" || error?.code === "CONTENT_SELECTOR_VALIDATION" || error?.code === "CONTENT_PUBLISHER_VALIDATION" || error?.code === "CONTENT_SCHEDULER_VALIDATION" || error?.code === "CONTENT_DESTINATION_VALIDATION") {
         return res.status(400).json({ error: error.message });
     }
+    if (error?.code === "CONTENT_DESTINATION_PROVIDER") return res.status(502).json({ error: error.message });
     console.error("❌ Content Library:", error.message);
     return res.status(500).json({ error: "No se pudo completar la operación." });
 }
@@ -57,6 +58,33 @@ function createContentLibraryRouter({ service = contentLibrary, selector = conte
                 : result.code === "SEND_FAILED" || result.code === "AMBIGUOUS_RESULT" ? 502
                 : 200;
             res.status(status).json(result);
+        } catch (error) {
+            sendError(res, error);
+        }
+    });
+
+    router.get("/destinations", adminReadLimiter, verificarToken, async (_req, res) => {
+        try {
+            res.json({ destinations: await destinations.listDestinations() });
+        } catch (error) {
+            sendError(res, error);
+        }
+    });
+
+    // Grupos donde está conectado el número del bot, según Z-API.
+    router.get("/destinations/whatsapp-groups/available", adminReadLimiter, verificarToken, async (_req, res) => {
+        try {
+            res.json({ groups: await destinations.discoverWhatsAppGroups() });
+        } catch (error) {
+            sendError(res, error);
+        }
+    });
+
+    router.post("/destinations/:id/deactivate", adminWriteLimiter, verificarToken, async (req, res) => {
+        try {
+            const destination = await destinations.deactivateDestination(req.params.id);
+            if (!destination) return res.status(404).json({ error: "Destino no encontrado o ya inactivo." });
+            res.json({ destination });
         } catch (error) {
             sendError(res, error);
         }

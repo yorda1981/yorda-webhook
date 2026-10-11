@@ -13,7 +13,12 @@ test("registra persistentemente un grupo validado y conserva su identificador", 
     const destination = await destinations.registerWhatsAppGroup(
         { groupId: "120363019502650977-group" },
         {
-            validateGroup: async () => ({ phone: "120363019502650977-group", subject: "Clientes YORDA" }),
+            validateGroup: async () => ({
+                phone: "120363019502650977-group",
+                subject: "Clientes YORDA",
+                participants: [{ phone: "5511999999999", isAdmin: false }]
+            }),
+            getDevice: async () => ({ phone: "5511999999999" }),
             pool: { query: async (sql, params) => {
                 query = { sql, params };
                 return { rows: [{ id: "7", tipo: "WHATSAPP_GROUP", external_id: params[1], nombre: params[2], activo: true, validado_at: "2026-10-11" }] };
@@ -29,10 +34,98 @@ test("rechaza un grupo que el proveedor no puede validar", async () => {
     await assert.rejects(
         destinations.registerWhatsAppGroup(
             { groupId: "120363019502650977-group" },
-            { validateGroup: async () => null, pool: { query: async () => assert.fail("no debe persistir") } }
+            { validateGroup: async () => null, getDevice: async () => ({ phone: "5511999999999" }), pool: { query: async () => assert.fail("no debe persistir") } }
         ),
         { code: "CONTENT_DESTINATION_VALIDATION" }
     );
+});
+
+const noPersist = { query: async () => assert.fail("no debe persistir") };
+
+test("rechaza un grupo donde el bot no es participante", async () => {
+    await assert.rejects(
+        destinations.registerWhatsAppGroup(
+            { groupId: "120363019502650977-group" },
+            {
+                validateGroup: async () => ({ phone: "120363019502650977-group", subject: "Otro", participants: [{ phone: "5511888888888" }] }),
+                getDevice: async () => ({ phone: "5511999999999" }),
+                pool: noPersist
+            }
+        ),
+        { code: "CONTENT_DESTINATION_VALIDATION", message: /no es participante/ }
+    );
+});
+
+test("rechaza un grupo de solo administradores si el bot no es admin", async () => {
+    await assert.rejects(
+        destinations.registerWhatsAppGroup(
+            { groupId: "120363019502650977-group" },
+            {
+                validateGroup: async () => ({ phone: "120363019502650977-group", subject: "Avisos", adminOnlyMessage: true, participants: [{ phone: "5511999999999", isAdmin: false }] }),
+                getDevice: async () => ({ phone: "5511999999999" }),
+                pool: noPersist
+            }
+        ),
+        { code: "CONTENT_DESTINATION_VALIDATION", message: /administradores/ }
+    );
+});
+
+test("si no se puede identificar el número del bot es error del proveedor, no del grupo", async () => {
+    await assert.rejects(
+        destinations.registerWhatsAppGroup(
+            { groupId: "120363019502650977-group" },
+            { validateGroup: async () => ({ phone: "120363019502650977-group" }), getDevice: async () => null, pool: noPersist }
+        ),
+        { code: "CONTENT_DESTINATION_PROVIDER" }
+    );
+});
+
+test("normaliza el JID @g.us al formato de Z-API y rechaza números de contacto", () => {
+    assert.equal(destinations.normalizeGroupId("120363019502650977@g.us"), "120363019502650977-group");
+    assert.equal(destinations.normalizeGroupId("5511999999999-1623281429"), "5511999999999-1623281429");
+    assert.throws(() => destinations.normalizeGroupId("5511999999999"), { code: "CONTENT_DESTINATION_VALIDATION" });
+});
+
+test("descubre grupos paginando Z-API y los cruza con destinos registrados", async () => {
+    const pages = [];
+    const firstPage = Array.from({ length: 100 }, (_, i) => ({ isGroup: true, name: `Grupo ${i}`, phone: `1203630000000${String(i).padStart(3, "0")}-group` }));
+    const groups = await destinations.discoverWhatsAppGroups({
+        listGroups: async ({ page, pageSize }) => {
+            pages.push({ page, pageSize });
+            return page === 1 ? firstPage : [
+                { isGroup: true, name: "Remesas nacional e internacional 🏦", phone: "120363019502650977-group" },
+                { isGroup: false, name: "Contacto", phone: "5511999999999" }
+            ];
+        },
+        pool: { query: async () => ({ rows: [{ id: "7", tipo: "WHATSAPP_GROUP", external_id: "120363019502650977-group", nombre: "Remesas", activo: true, validado_at: "2026-10-11" }] }) }
+    });
+    assert.deepEqual(pages.map(p => p.page), [1, 2]);
+    assert.equal(groups.length, 101);
+    const remesas = groups.find(g => g.groupId === "120363019502650977-group");
+    assert.equal(remesas.name, "Remesas nacional e internacional 🏦");
+    assert.equal(remesas.destinationId, 7);
+    assert.equal(remesas.active, true);
+    assert.equal(groups.find(g => g.groupId !== remesas.groupId).registered, false);
+});
+
+test("descubrimiento falla de forma explícita si Z-API no responde", async () => {
+    await assert.rejects(
+        destinations.discoverWhatsAppGroups({ listGroups: async () => null, pool: noPersist }),
+        { code: "CONTENT_DESTINATION_PROVIDER" }
+    );
+});
+
+test("desactivar un destino registra el evento", async () => {
+    let query;
+    const destination = await destinations.deactivateDestination("7", {
+        query: async (sql, params) => {
+            query = { sql, params };
+            return { rows: [{ id: "7", tipo: "WHATSAPP_GROUP", external_id: "120363019502650977-group", nombre: "Remesas", activo: false, validado_at: "2026-10-11" }] };
+        }
+    });
+    assert.equal(destination.active, false);
+    assert.deepEqual(query.params, [7]);
+    assert.match(query.sql, /CONTENT_DESTINATION_DEACTIVATED/);
 });
 
 test("adaptador resuelve un grupo activo y envía al identificador persistido", async () => {
@@ -113,4 +206,7 @@ test("migración y ruta mantienen persistencia, historial y autenticación", () 
     assert.match(migration, /UNIQUE \(tipo, external_id\)/);
     assert.match(migration, /'DESTINATION'/);
     assert.match(routes, /router\.post\("\/destinations\/whatsapp-groups", adminWriteLimiter, verificarToken/);
+    assert.match(routes, /router\.get\("\/destinations\/whatsapp-groups\/available", adminReadLimiter, verificarToken/);
+    assert.match(routes, /router\.post\("\/destinations\/:id\/deactivate", adminWriteLimiter, verificarToken/);
+    assert.ok(routes.indexOf('"/destinations"') < routes.indexOf('router.get("/:id"'), "las rutas de destinos deben ir antes de /:id");
 });

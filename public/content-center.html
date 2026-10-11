@@ -49,6 +49,12 @@
         .preview-label { color:#c4b5fd; text-transform:uppercase; letter-spacing:.08em; font-size:11px; font-weight:800; margin-bottom:10px; }
         .preview-body { white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.55; color:#f8fafc; }
         .preview-destination { color:var(--muted); font-size:11px; margin-top:12px; }
+        .destinations { margin-top:18px; }
+        .destinations[hidden] { display:none; }
+        .group-row { display:flex; justify-content:space-between; align-items:center; gap:14px; padding:14px 18px; border-bottom:1px solid var(--line); }
+        .group-name { font-weight:750; overflow-wrap:anywhere; }
+        .group-id { color:var(--muted); font-size:11px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; margin-top:4px; overflow-wrap:anywhere; }
+        .badge { font-size:11px; font-weight:800; color:var(--green); white-space:nowrap; }
         @media (max-width:800px) { .workspace{grid-template-columns:1fr}.topbar{align-items:flex-start;flex-direction:column}.auth{flex-direction:column} }
     </style>
 </head>
@@ -105,6 +111,14 @@
                 </div>
             </form>
         </section>
+    </section>
+
+    <section class="panel destinations" id="destinationsPanel" hidden>
+        <div class="panel-head">
+            <div><h2>Destinos del Motor de Marketing</h2><span class="count">Grupos de WhatsApp donde está el número del bot</span></div>
+            <button class="secondary" id="discoverButton" type="button">Buscar grupos</button>
+        </div>
+        <div id="groupList"><div class="empty">Pulsa «Buscar grupos» para consultar WhatsApp.</div></div>
     </section>
 </main>
 <script>
@@ -188,6 +202,7 @@
         if (!response.ok) throw new Error(data.error || "No se pudo abrir la biblioteca.");
         assets = data.assets || [];
         byId("workspace").hidden = false;
+        byId("destinationsPanel").hidden = false;
         renderList();
         setStatus("Biblioteca conectada.", "ok");
     }
@@ -196,10 +211,87 @@
         adminToken = byId("token").value.trim();
         if (!adminToken) return setStatus("Introduce el token administrativo.", "error");
         try { await loadLibrary(); }
-        catch (error) { byId("workspace").hidden = true; setStatus(error.message, "error"); }
+        catch (error) { byId("workspace").hidden = true; byId("destinationsPanel").hidden = true; setStatus(error.message, "error"); }
     });
 
     byId("newButton").addEventListener("click", resetEditor);
+
+    async function requestJson(url, options = {}) {
+        const response = await fetch(url, { ...options, headers: headers() });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "No se pudo completar la operación.");
+        return data;
+    }
+
+    function renderGroups(groups) {
+        const list = byId("groupList");
+        if (!groups.length) {
+            list.innerHTML = '<div class="empty">El número del bot no participa en ningún grupo.</div>';
+            return;
+        }
+        list.replaceChildren(...groups.map((group) => {
+            const row = document.createElement("div");
+            row.className = "group-row";
+            const info = document.createElement("div");
+            const name = document.createElement("div");
+            name.className = "group-name";
+            name.textContent = group.name;
+            const id = document.createElement("div");
+            id.className = "group-id";
+            id.textContent = group.groupId;
+            info.append(name, id);
+            const actions = document.createElement("div");
+            if (group.active) {
+                const badge = document.createElement("span");
+                badge.className = "badge";
+                badge.textContent = "Destino activo";
+                const off = document.createElement("button");
+                off.type = "button";
+                off.className = "secondary";
+                off.textContent = "Desactivar";
+                off.addEventListener("click", () => changeDestination(off, `/admin/content-library/destinations/${group.destinationId}/deactivate`, null, "Destino desactivado."));
+                actions.append(badge, " ", off);
+            } else {
+                const select = document.createElement("button");
+                select.type = "button";
+                select.textContent = group.registered ? "Reactivar" : "Usar como destino";
+                select.addEventListener("click", () => changeDestination(select, "/admin/content-library/destinations/whatsapp-groups", { groupId: group.groupId }, "Grupo validado y guardado como destino."));
+                actions.append(select);
+            }
+            row.append(info, actions);
+            return row;
+        }));
+    }
+
+    async function discoverGroups() {
+        const button = byId("discoverButton");
+        button.disabled = true;
+        setStatus("Consultando grupos en WhatsApp...");
+        try {
+            const data = await requestJson("/admin/content-library/destinations/whatsapp-groups/available");
+            renderGroups(data.groups || []);
+            setStatus(`${data.groups.length} grupos encontrados.`, "ok");
+        } catch (error) {
+            setStatus(error.message, "error");
+        } finally {
+            button.disabled = false;
+        }
+    }
+
+    async function changeDestination(button, url, body, okMessage) {
+        button.disabled = true;
+        setStatus("Validando con WhatsApp...");
+        try {
+            await requestJson(url, { method:"POST", body:JSON.stringify(body || {}) });
+            await discoverGroups();
+            setStatus(okMessage, "ok");
+        } catch (error) {
+            setStatus(error.message, "error");
+            button.disabled = false;
+        }
+    }
+
+    byId("discoverButton").addEventListener("click", discoverGroups);
 
     byId("previewButton").addEventListener("click", async () => {
         const button = byId("previewButton");
