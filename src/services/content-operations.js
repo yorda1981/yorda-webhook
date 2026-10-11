@@ -2,8 +2,37 @@
 
 const pool = require("../../db");
 const env = require("../config/env");
+const { SCHEMA_STATES } = require("./schema-status");
 
-async function getOperationsSnapshot(db = pool, { schedulerStarted = false } = {}) {
+const SCHEDULER_LABEL_BY_SCHEMA = Object.freeze({
+    [SCHEMA_STATES.VERIFICANDO]: "VERIFICANDO ESQUEMA",
+    [SCHEMA_STATES.PENDIENTE]: "ESQUEMA PENDIENTE",
+    [SCHEMA_STATES.NO_VERIFICADO]: "ESQUEMA NO VERIFICADO"
+});
+
+function publisherLabel() {
+    const zapiConfigured = Boolean(env.ZAPI_INSTANCE && env.ZAPI_TOKEN && env.ZAPI_CLIENT_TOKEN);
+    return zapiConfigured ? "CONFIGURADO" : "CONFIGURACIÓN INCOMPLETA";
+}
+
+// Sin esquema verificado no se consultan las tablas content_*: puede que no existan.
+function schemaBlockedSnapshot(schema) {
+    return {
+        counts: { programadas: 0, ejecutadas: 0, fallidas: 0, canceladas: 0 },
+        latestPublication: null,
+        nextSchedule: null,
+        events: [],
+        destinations: [],
+        schema,
+        services: {
+            scheduler: SCHEDULER_LABEL_BY_SCHEMA[schema.estado] || "ESQUEMA NO VERIFICADO",
+            publisher: publisherLabel()
+        }
+    };
+}
+
+async function getOperationsSnapshot(db = pool, { schedulerStarted = false, schema = null } = {}) {
+    if (schema && schema.estado !== SCHEMA_STATES.COMPLETO) return schemaBlockedSnapshot(schema);
     const [counts, latest, next, events, destinations] = await Promise.all([
         db.query(`
             SELECT
@@ -41,16 +70,16 @@ async function getOperationsSnapshot(db = pool, { schedulerStarted = false } = {
         `)
     ]);
 
-    const zapiConfigured = Boolean(env.ZAPI_INSTANCE && env.ZAPI_TOKEN && env.ZAPI_CLIENT_TOKEN);
     return {
         counts: counts.rows[0] || { programadas: 0, ejecutadas: 0, fallidas: 0, canceladas: 0 },
         latestPublication: latest.rows[0] || null,
         nextSchedule: next.rows[0] || null,
         events: events.rows,
         destinations: destinations.rows,
+        schema,
         services: {
             scheduler: schedulerStarted ? "INICIADO" : "NO INICIADO",
-            publisher: zapiConfigured ? "CONFIGURADO" : "CONFIGURACIÓN INCOMPLETA"
+            publisher: publisherLabel()
         }
     };
 }

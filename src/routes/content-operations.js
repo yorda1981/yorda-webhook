@@ -5,12 +5,13 @@ const operations = require("../services/content-operations");
 const { verificarToken } = require("../middleware/admin-auth");
 const { adminReadLimiter } = require("../middleware/admin-rate-limiters");
 
-function createContentOperationsRouter({ service = operations, getSchedulerStarted = () => false } = {}) {
+function createContentOperationsRouter({ service = operations, getSchedulerStarted = () => false, getSchemaStatus = () => null } = {}) {
     const router = express.Router();
     router.get("/", adminReadLimiter, verificarToken, async (_req, res) => {
         try {
             res.json({ operations: await service.getOperationsSnapshot(undefined, {
-                schedulerStarted: Boolean(getSchedulerStarted())
+                schedulerStarted: Boolean(getSchedulerStarted()),
+                schema: getSchemaStatus()
             }) });
         } catch (error) {
             console.error("❌ Content Operations:", error.message);

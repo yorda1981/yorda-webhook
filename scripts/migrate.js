@@ -4,9 +4,10 @@
 // ─────────────────────────────────────────────────────────
 // RUNNER DE MIGRACIONES — Fase 4
 //
-// Deliberadamente NO se ejecuta solo al arrancar index.js (a diferencia
-// del bloque IIFE que ya existe ahí). Es un comando manual, aparte, que
-// TÚ corres apuntando a la base que decidas — nunca se dispara solo.
+// Deliberadamente NO se ejecuta al arrancar index.js (a diferencia del
+// bloque IIFE que ya existe ahí). En producción lo ejecuta Railway como
+// pre-deploy (railway.json): si sale con código ≠ 0, la nueva versión no
+// se activa. También se puede correr a mano apuntando a otra base.
 //
 //   node scripts/migrate.js                 # aplica contra DATABASE_URL
 //   node scripts/migrate.js --dry-run        # solo muestra qué faltaría
@@ -18,14 +19,19 @@
 //
 // Idempotente: cada archivo de migrations/*.sql corre UNA sola vez,
 // registrado en la tabla schema_migrations. Volver a correr el comando
-// no repite nada ya aplicado.
+// no repite nada ya aplicado. Un pg_advisory_lock serializa ejecuciones
+// concurrentes: la segunda espera y luego no encuentra nada pendiente.
 // ─────────────────────────────────────────────────────────
 
 const fs = require("node:fs");
 const path = require("node:path");
 const { Client } = require("pg");
-
-const MIGRATIONS_DIR = path.join(__dirname, "..", "migrations");
+const {
+    MIGRATIONS_DIR,
+    MIGRATION_LOCK_KEY,
+    listMigrationFiles,
+    getPendingMigrations
+} = require("../src/services/schema-status");
 
 async function main() {
     const dryRun = process.argv.includes("--dry-run");
@@ -36,9 +42,7 @@ async function main() {
         process.exit(1);
     }
 
-    const archivos = fs.readdirSync(MIGRATIONS_DIR)
-        .filter((f) => f.endsWith(".sql"))
-        .sort(); // 0001_, 0002_, ... orden lexicográfico = orden de aplicación
+    const archivos = listMigrationFiles();
 
     // Mismo criterio que db.js para SSL, salvo que aquí además se detecta
     // una base local (localhost/127.0.0.1/socket unix con host=/...) para
@@ -52,6 +56,8 @@ async function main() {
 
     await client.connect();
     try {
+        // Se libera al cerrar la sesión (client.end en el finally), incluso si algo falla.
+        await client.query("SELECT pg_advisory_lock($1)", [MIGRATION_LOCK_KEY]);
         await client.query(`
             CREATE TABLE IF NOT EXISTS schema_migrations (
                 id SERIAL PRIMARY KEY,
@@ -60,10 +66,7 @@ async function main() {
             )
         `);
 
-        const { rows } = await client.query("SELECT name FROM schema_migrations");
-        const aplicadas = new Set(rows.map((r) => r.name));
-
-        const pendientes = archivos.filter((f) => !aplicadas.has(f));
+        const pendientes = await getPendingMigrations(client, archivos);
 
         if (pendientes.length === 0) {
             console.log("✅ Nada pendiente. La base ya tiene todas las migraciones conocidas.");
@@ -100,6 +103,6 @@ async function main() {
 }
 
 main().catch((e) => {
-    console.error("❌ migrate.js falló:", e.message);
+    console.error("❌ migrate.js falló:", e.message || e.code || String(e));
     process.exit(1);
 });

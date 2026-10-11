@@ -53,8 +53,9 @@ periódicas (ver "Jobs periódicos" más abajo).
 index.js                    Entry point: rutas, migración legacy al arrancar, jobs periódicos
 db.js                        Pool único de pg — nunca se instancia otro en ningún archivo
 docs/database-schema.md      Esquema de base de datos documentado (ver sección Base de datos)
-migrations/                  Migraciones versionadas (0001-0008), ver sección Base de datos
-scripts/migrate.js           Runner de migraciones — manual, nunca automático
+migrations/                  Migraciones versionadas, ver sección Base de datos
+scripts/migrate.js           Runner de migraciones — Railway lo ejecuta como pre-deploy
+railway.json                 Config de Railway (pre-deploy de migraciones)
 src/
   config/env.js              Único punto que lee process.env para el resto del código
   services/                  zapi, openai (OCR/asistente vive en flows/imagen-flow.js),
@@ -125,6 +126,9 @@ Al arrancar corre automáticamente el mecanismo **legacy** de migración
 (bloques `ALTER TABLE ... IF NOT EXISTS` dentro de `index.js` y
 `src/services/crm.js`) — esto sigue existiendo tal cual, por
 compatibilidad, y no se reemplazó (ver "Base de datos").
+Las migraciones versionadas **no** se aplican al arrancar: corre antes
+`node scripts/migrate.js` contra tu base local. Si falta alguna, el
+Content Scheduler no se inicia y se registra `SCHEMA_PENDING`.
 
 ## Tests
 
@@ -145,19 +149,38 @@ El esquema real está documentado en **[docs/database-schema.md](docs/database-s
 (qué tiene DDL real en el repo vs. qué se reconstruyó leyendo el código
 porque nunca tuvo un `CREATE TABLE` versionado).
 
-### Dos mecanismos de migración conviven, a propósito
+### Dos mecanismos de migración conviven
 
 1. **Legacy (sigue activo):** el IIFE al inicio de `index.js` y
    `crm.migrarColumnasCRM()` — corren automáticamente cada vez que
    arranca el proceso, con `ADD COLUMN IF NOT EXISTS`. **No se tocó ni
    se va a reemplazar de golpe** — es lo que ha mantenido la base de
    producción funcionando hasta ahora.
-2. **Nuevo, versionado, manual (`migrations/` + `scripts/migrate.js`):**
-   para cualquier cambio de esquema *futuro*. Nunca se ejecuta solo —
-   es un comando aparte que vos corrés cuando decidís, apuntando a la
-   base que elijas.
+2. **Versionado (`migrations/` + `scripts/migrate.js`):** para cualquier
+   cambio de esquema nuevo. En producción lo ejecuta Railway como
+   **pre-deploy** (ver "Migraciones en el despliegue"). `index.js` nunca
+   lo ejecuta.
 
-### Cómo correr las migraciones nuevas
+### Migraciones en el despliegue
+
+- `railway.json` define `deploy.preDeployCommand: ["node scripts/migrate.js"]`.
+  Railway lo corre en un contenedor aparte, con las variables del
+  servicio, **antes** de activar la nueva versión. Si sale con código
+  ≠ 0, el despliegue no continúa y sigue sirviendo la versión anterior:
+  nunca entra en producción código cuyo esquema no existe.
+- `migrate.js` toma un `pg_advisory_lock` antes de leer
+  `schema_migrations`: dos ejecuciones simultáneas se serializan y la
+  segunda no encuentra nada pendiente.
+- Al arrancar, `src/services/schema-status.js` compara `migrations/*.sql`
+  con `schema_migrations`. Los servicios que dependen del esquema (hoy,
+  el Content Scheduler) **solo se inician si no falta ninguna
+  migración**. Si faltan, se registra un único `SCHEMA_PENDING` con la
+  lista, el Centro de Operaciones (`/content-operations`) muestra
+  "ESQUEMA PENDIENTE" y se vuelve a comprobar cada 30 s; en cuanto se
+  aplican, el scheduler arranca sin reiniciar el proceso. Si la base no
+  responde, el estado es "ESQUEMA NO VERIFICADO" (también un único error).
+
+### Cómo correr las migraciones a mano (otras bases o diagnóstico)
 
 ```bash
 # Ver qué falta aplicar, sin tocar nada:
@@ -174,13 +197,12 @@ migrar). Probado localmente contra Postgres efímero, en dos escenarios
 (base vacía y una base "legacy" simulada con datos) — nunca contra
 producción.
 
-**Estado en producción (2026-09-21): las migraciones 0001-0009 ya se
-aplicaron contra la base real** (`railway run --service yorda-webhook --
+**Historial: el 2026-09-21 las migraciones 0001-0009 se aplicaron a mano
+contra la base real** (`railway run --service yorda-webhook --
 node scripts/migrate.js`), verificado con `--dry-run` devolviendo 0
 pendientes. `webhook_events` (dedup persistente) e `idempotency_keys`
-(idempotencia de entrega manual) están operativas. Cualquier migración
-*futura* (0010 en adelante) sigue siendo una decisión y una acción
-manual aparte, nunca automática.
+(idempotencia de entrega manual) están operativas. Desde 2026-10-11 las
+migraciones nuevas se aplican en el pre-deploy de Railway.
 
 ## Seguridad del webhook
 
@@ -312,15 +334,15 @@ rama de feature (ej. claude/harden-yorda-webhook)
    revisión (código + docs/database-schema.md si hay cambio de esquema)
         │
         ▼
-   migraciones controladas, si aplica
-   (node scripts/migrate.js --dry-run primero, luego sin --dry-run,
-    SIEMPRE contra un DATABASE_URL que vos elegís explícitamente)
+   si hay migraciones nuevas: revisar qué aplicará el pre-deploy
+   (railway run --service yorda-webhook -- node scripts/migrate.js --dry-run)
         │
         ▼
    merge a main
         │
         ▼
-   Railway auto-deploy
+   Railway: build → pre-deploy (node scripts/migrate.js) → activa la versión
+   (si el pre-deploy falla, el despliegue se aborta)
 ```
 
 **Rollback básico:** revertir el merge en `main` (o `git revert`) y

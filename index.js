@@ -35,6 +35,7 @@ const entregasCoordinator = require("./src/services/entregas-coordinator");
 const { createContentLibraryRouter } = require("./src/routes/content-library");
 const { createContentOperationsRouter } = require("./src/routes/content-operations");
 const { startPersistentScheduler } = require("./src/services/content-scheduler");
+const { createSchemaGate } = require("./src/services/schema-status");
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -207,8 +208,18 @@ app.use(express.static(path.join(__dirname, "public")));
 // etapa solo crea, edita y lista activos con revisiones persistentes.
 app.use("/admin/content-library", createContentLibraryRouter());
 let marketingSchedulerStarted = false;
+// El scheduler depende de las migraciones versionadas: solo arranca cuando
+// schema_migrations confirma que no falta ninguna (ver schema-status.js).
+const schemaGate = createSchemaGate({
+    db: pool,
+    start: () => {
+        startPersistentScheduler();
+        marketingSchedulerStarted = true;
+    }
+});
 app.use("/admin/content-operations", createContentOperationsRouter({
-    getSchedulerStarted: () => marketingSchedulerStarted
+    getSchedulerStarted: () => marketingSchedulerStarted,
+    getSchemaStatus: () => schemaGate.getStatus()
 }));
 
 // ==========================================
@@ -936,8 +947,8 @@ app.listen(PORT, () => console.log(`🚀 Servidor en puerto ${PORT}`));
 
 // Scheduler persistente del Content Center. La tabla decide qué está pendiente;
 // este timer solo despierta el servicio y no contiene reglas de publicación.
-startPersistentScheduler();
-marketingSchedulerStarted = true;
+// Se inicia a través de schemaGate, nunca antes de verificar el esquema.
+schemaGate.begin();
 
 // ══════════════════════════════════════
 // CRM — RECORDATORIOS AUTOMÁTICOS

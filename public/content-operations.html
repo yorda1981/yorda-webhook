@@ -39,7 +39,9 @@ function render(data){for(const [key,id] of [["programadas","scheduled"],["ejecu
     const latest=data.latestPublication;replace("latest",latest?[row(latest.titulo,`${date(latest.publicada_at)} · ${latest.canal} · ${latest.destino_ref}`)]:[],"Todavía no hay publicaciones ejecutadas.");
     const next=data.nextSchedule;replace("next",next?[row(`Idioma ${next.idioma}`,`${date(next.programada_para)} · el contenido se seleccionará al ejecutar`)]:[],"No hay publicaciones pendientes.");
     replace("events",data.events.map(e=>row(e.event_type,`${e.entity_type} #${e.entity_id} · ${date(e.ocurrido_at)} · ${e.actor}`)),"No hay eventos registrados.");
-    replace("services",Object.entries(data.services).map(([key,value])=>row(key==="scheduler"?"Scheduler · proceso":"Publicador · credenciales",value)),"Estado no disponible.");
+    const services=Object.entries(data.services).map(([key,value])=>row(key==="scheduler"?"Scheduler · proceso":"Publicador · credenciales",value));
+    if(data.schema?.pendientes?.length)services.push(row("Migraciones pendientes",`${data.schema.pendientes.join(", ")} · se aplican con node scripts/migrate.js`));
+    replace("services",services,"Estado no disponible.");
     replace("destinations",data.destinations.map(d=>row(d.nombre,`${d.tipo} · ${d.external_id} · ${d.activo?"Activo":"Inactivo"} · validado ${date(d.validado_at)}`)),"No hay destinos registrados.");
 }
 byId("connect").addEventListener("click",async()=>{const token=byId("token").value.trim();if(!token){byId("status").textContent="Introduce el token administrativo.";return}byId("status").textContent="Cargando estado...";try{const response=await fetch("/admin/content-operations",{headers:{Authorization:`Bearer ${token}`}});const data=await response.json();if(!response.ok)throw new Error(data.error||"No se pudo cargar el estado.");render(data.operations);byId("panel").hidden=false;byId("status").textContent=`Actualizado ${date(new Date())}.`;}catch(error){byId("panel").hidden=true;byId("status").textContent=error.message}});
