@@ -32,6 +32,9 @@ const operatorBalances = require("./src/services/operator-balances");
 const operatorReports = require("./src/services/operator-reports");
 const entregasAvisos = require("./src/services/entregas-avisos");
 const entregasCoordinator = require("./src/services/entregas-coordinator");
+const { createContentLibraryRouter } = require("./src/routes/content-library");
+const { createContentOperationsRouter } = require("./src/routes/content-operations");
+const { startPersistentScheduler } = require("./src/services/content-scheduler");
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -199,6 +202,14 @@ app.use(express.static(path.join(__dirname, "public")));
 // src/middleware/admin-auth.js — ya incluyen su propia protección contra
 // intentos de token inválido (src/middleware/auth-attempt-limiter.js),
 // aplicada por-ruta en vez de globalmente con app.use("/admin", ...).
+
+// Biblioteca de Contenido: módulo administrativo independiente. En esta
+// etapa solo crea, edita y lista activos con revisiones persistentes.
+app.use("/admin/content-library", createContentLibraryRouter());
+let marketingSchedulerStarted = false;
+app.use("/admin/content-operations", createContentOperationsRouter({
+    getSchedulerStarted: () => marketingSchedulerStarted
+}));
 
 // ==========================================
 // WEBHOOK
@@ -821,6 +832,14 @@ app.get("/dashboard", (req, res) =>
     res.sendFile(path.join(__dirname, "public", "dashboard.html"))
 );
 
+app.get("/content-center", (req, res) =>
+    res.sendFile(path.join(__dirname, "public", "content-center.html"))
+);
+
+app.get("/content-operations", (req, res) =>
+    res.sendFile(path.join(__dirname, "public", "content-operations.html"))
+);
+
 // Panel reducido, solo para el CRM de Entregas — pensado para compartir con
 // alguien que no debe ver tasas, VIP ni ofertas. Usa ENTREGAS_TOKEN (o el
 // ADMIN_TOKEN normal) contra los mismos endpoints /admin/entregas...
@@ -914,6 +933,11 @@ app.get("/api/pix-info", (req, res) => {
 app.get("/", (req, res) => res.send("YordaBot Online ✅"));
 
 app.listen(PORT, () => console.log(`🚀 Servidor en puerto ${PORT}`));
+
+// Scheduler persistente del Content Center. La tabla decide qué está pendiente;
+// este timer solo despierta el servicio y no contiene reglas de publicación.
+startPersistentScheduler();
+marketingSchedulerStarted = true;
 
 // ══════════════════════════════════════
 // CRM — RECORDATORIOS AUTOMÁTICOS

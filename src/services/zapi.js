@@ -8,6 +8,7 @@ const {
 
 const logger = require("../utils/logger");
 const { log } = require("../utils/structured-logger");
+const { renderWhatsAppText } = require("./content-renderer");
 
 async function enviarMensaje(phone, message) {
   try {
@@ -20,7 +21,7 @@ async function enviarMensaje(phone, message) {
       },
       data: {
         phone,
-        message: String(message).replace(/\*/g, "").trim(),
+        message: renderWhatsAppText(message),
         checkContact: false
       },
       timeout: 15000
@@ -30,6 +31,22 @@ async function enviarMensaje(phone, message) {
     logger("error", "ZAPI_SEND_ERROR", { err: e.message });
     log("EXTERNAL_API_ERROR", { origen: "zapi.enviarMensaje", error: e.message });
     return false;
+  }
+}
+
+async function obtenerMetadataGrupo(groupId) {
+  try {
+    const response = await axios({
+      method: "get",
+      url: `https://api.z-api.io/instances/${ZAPI_INSTANCE}/token/${ZAPI_TOKEN}/light-group-metadata/${encodeURIComponent(groupId)}`,
+      headers: { "Client-Token": ZAPI_CLIENT_TOKEN },
+      timeout: 15000
+    });
+    return response.data || null;
+  } catch (e) {
+    logger("error", "ZAPI_GROUP_VALIDATION_ERROR", { err: e.message });
+    log("EXTERNAL_API_ERROR", { origen: "zapi.obtenerMetadataGrupo", error: e.message });
+    return null;
   }
 }
 
@@ -102,6 +119,7 @@ async function enviarConDelay(phone, message, delayOverrideMs = null) {
 
 module.exports = {
     enviarMensaje,
+    obtenerMetadataGrupo,
     enviarImagen,
     enviarConDelay,
     mostrarEscribiendo,

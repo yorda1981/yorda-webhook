@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Biblioteca de Contenido · YORDA</title>
+    <style>
+        :root { --bg:#090d18; --panel:#11182a; --panel2:#0c1220; --line:#26314b; --text:#eef2ff; --muted:#94a3b8; --brand:#8b5cf6; --brand2:#ec4899; --green:#4ade80; --danger:#fb7185; }
+        * { box-sizing:border-box; }
+        body { margin:0; min-height:100vh; background:radial-gradient(circle at top left,#1a1640 0,transparent 34%),var(--bg); color:var(--text); font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+        button,input,textarea { font:inherit; }
+        .shell { width:min(1180px,calc(100% - 32px)); margin:0 auto; padding:28px 0 56px; }
+        .topbar { display:flex; justify-content:space-between; align-items:center; gap:18px; margin-bottom:28px; }
+        .eyebrow { color:#c4b5fd; font-size:12px; font-weight:800; letter-spacing:.14em; text-transform:uppercase; }
+        h1 { margin:6px 0 4px; font-size:clamp(28px,4vw,44px); letter-spacing:-.04em; }
+        .intro { color:var(--muted); margin:0; max-width:700px; line-height:1.55; }
+        .back { color:#c4b5fd; text-decoration:none; border:1px solid var(--line); padding:10px 14px; border-radius:10px; white-space:nowrap; }
+        .auth { display:flex; gap:10px; padding:14px; border:1px solid var(--line); background:rgba(17,24,42,.86); border-radius:14px; margin-bottom:18px; }
+        .auth input { flex:1; }
+        input,textarea { width:100%; color:var(--text); background:var(--panel2); border:1px solid var(--line); border-radius:10px; padding:12px 13px; outline:none; }
+        input:focus,textarea:focus { border-color:var(--brand); box-shadow:0 0 0 3px rgba(139,92,246,.12); }
+        textarea { min-height:250px; resize:vertical; line-height:1.55; }
+        button { border:0; border-radius:10px; padding:11px 16px; color:white; background:linear-gradient(135deg,var(--brand),var(--brand2)); font-weight:750; cursor:pointer; }
+        button.secondary { background:#202a40; color:#dbe4f5; }
+        button:disabled { opacity:.55; cursor:not-allowed; }
+        .status { min-height:22px; margin:0 0 12px; font-size:13px; color:var(--muted); }
+        .status.error { color:var(--danger); }
+        .status.ok { color:var(--green); }
+        .workspace { display:grid; grid-template-columns:minmax(280px,.9fr) minmax(420px,1.4fr); gap:18px; align-items:start; }
+        .panel { background:rgba(17,24,42,.93); border:1px solid var(--line); border-radius:16px; overflow:hidden; box-shadow:0 18px 55px rgba(0,0,0,.22); }
+        .panel-head { padding:18px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; align-items:center; gap:12px; }
+        .panel-head h2 { margin:0; font-size:17px; }
+        .count { color:var(--muted); font-size:12px; }
+        .asset-list { max-height:640px; overflow:auto; }
+        .empty { padding:34px 20px; color:var(--muted); text-align:center; line-height:1.5; }
+        .asset { width:100%; text-align:left; background:transparent; border-radius:0; border-bottom:1px solid var(--line); padding:16px 18px; }
+        .asset:hover,.asset.active { background:#18213a; }
+        .asset-title { display:block; font-weight:750; color:var(--text); margin-bottom:7px; }
+        .asset-meta { display:flex; justify-content:space-between; gap:8px; color:var(--muted); font-size:11px; }
+        .editor { padding:20px; }
+        .field { margin-bottom:16px; }
+        label { display:block; font-size:12px; font-weight:800; color:#cbd5e1; margin-bottom:7px; text-transform:uppercase; letter-spacing:.06em; }
+        .helper { color:var(--muted); font-size:12px; margin-top:7px; }
+        .editor-actions { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:18px; }
+        .editor-buttons { display:flex; gap:10px; flex-wrap:wrap; justify-content:flex-end; }
+        .revision { color:var(--muted); font-size:12px; }
+        .preview { margin-top:18px; padding:17px; background:#090e1a; border:1px solid var(--line); border-radius:12px; }
+        .preview[hidden] { display:none; }
+        .preview-label { color:#c4b5fd; text-transform:uppercase; letter-spacing:.08em; font-size:11px; font-weight:800; margin-bottom:10px; }
+        .preview-body { white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.55; color:#f8fafc; }
+        .preview-destination { color:var(--muted); font-size:11px; margin-top:12px; }
+        @media (max-width:800px) { .workspace{grid-template-columns:1fr}.topbar{align-items:flex-start;flex-direction:column}.auth{flex-direction:column} }
+    </style>
+</head>
+<body>
+<main class="shell">
+    <header class="topbar">
+        <div>
+            <div class="eyebrow">Content Center</div>
+            <h1>Biblioteca de Contenido</h1>
+            <p class="intro">Construye activos comerciales reutilizables para YORDA. Cada guardado conserva una revisión y prepara la biblioteca para futuras publicaciones.</p>
+        </div>
+        <a class="back" href="/dashboard">Volver al dashboard</a>
+    </header>
+
+    <section class="auth" id="authPanel">
+        <input id="token" type="password" autocomplete="current-password" placeholder="ADMIN_TOKEN">
+        <button id="connectButton" type="button">Abrir biblioteca</button>
+    </section>
+    <p class="status" id="status" role="status"></p>
+
+    <section class="workspace" id="workspace" hidden>
+        <aside class="panel">
+            <div class="panel-head">
+                <div><h2>Activos de contenido</h2><span class="count" id="count">0 contenidos</span></div>
+                <button class="secondary" id="newButton" type="button">+ Nuevo</button>
+            </div>
+            <div class="asset-list" id="assetList"></div>
+        </aside>
+
+        <section class="panel">
+            <div class="panel-head"><h2 id="editorTitle">Nuevo activo</h2><span class="revision" id="revision"></span></div>
+            <form class="editor" id="editorForm">
+                <div class="field">
+                    <label for="title">Título interno</label>
+                    <input id="title" maxlength="160" required placeholder="Ej: Confianza en entregas de efectivo">
+                    <div class="helper">Sirve para reconocer el activo. No forma parte del mensaje.</div>
+                </div>
+                <div class="field">
+                    <label for="body">Contenido</label>
+                    <textarea id="body" maxlength="20000" required placeholder="Escribe el contenido que YORDA podrá reutilizar..."></textarea>
+                    <div class="helper">En esta etapa guardamos el texto y sus revisiones. La publicación se habilitará en una etapa posterior.</div>
+                </div>
+                <section class="preview" id="preview" hidden aria-live="polite">
+                    <div class="preview-label">Vista exacta en WhatsApp administrativo</div>
+                    <div class="preview-body" id="previewBody"></div>
+                    <div class="preview-destination">Destino futuro de V1: ADMIN_PHONE</div>
+                </section>
+                <div class="editor-actions">
+                    <span class="revision" id="lastUpdate">Sin guardar</span>
+                    <div class="editor-buttons">
+                        <button class="secondary" id="previewButton" type="button">Vista previa</button>
+                        <button id="saveButton" type="submit">Guardar en la biblioteca</button>
+                    </div>
+                </div>
+            </form>
+        </section>
+    </section>
+</main>
+<script>
+    "use strict";
+    let adminToken = "";
+    let assets = [];
+    let selectedId = null;
+
+    const byId = (id) => document.getElementById(id);
+    const statusEl = byId("status");
+
+    function setStatus(message, type = "") {
+        statusEl.textContent = message || "";
+        statusEl.className = `status ${type}`.trim();
+    }
+
+    function headers() {
+        return { Authorization: `Bearer ${adminToken}`, "Content-Type": "application/json" };
+    }
+
+    function formatDate(value) {
+        if (!value) return "";
+        return new Intl.DateTimeFormat("es", { dateStyle:"medium", timeStyle:"short", timeZone:"America/Sao_Paulo" }).format(new Date(value));
+    }
+
+    function resetEditor() {
+        selectedId = null;
+        byId("editorTitle").textContent = "Nuevo activo";
+        byId("revision").textContent = "";
+        byId("title").value = "";
+        byId("body").value = "";
+        byId("lastUpdate").textContent = "Sin guardar";
+        byId("preview").hidden = true;
+        renderList();
+        byId("title").focus();
+    }
+
+    function selectAsset(id) {
+        const asset = assets.find((item) => item.id === id);
+        if (!asset) return;
+        selectedId = id;
+        byId("editorTitle").textContent = "Editar activo";
+        byId("revision").textContent = `Revisión ${asset.revision}`;
+        byId("title").value = asset.titulo;
+        byId("body").value = asset.cuerpo;
+        byId("lastUpdate").textContent = `Actualizado ${formatDate(asset.actualizadoAt)}`;
+        byId("preview").hidden = true;
+        renderList();
+    }
+
+    function renderList() {
+        const list = byId("assetList");
+        byId("count").textContent = `${assets.length} ${assets.length === 1 ? "contenido" : "contenidos"}`;
+        if (!assets.length) {
+            list.innerHTML = '<div class="empty">Tu biblioteca está vacía.<br>Crea el primer activo comercial de YORDA.</div>';
+            return;
+        }
+        list.replaceChildren(...assets.map((asset) => {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = `asset${asset.id === selectedId ? " active" : ""}`;
+            const title = document.createElement("span");
+            title.className = "asset-title";
+            title.textContent = asset.titulo;
+            const meta = document.createElement("span");
+            meta.className = "asset-meta";
+            const revision = document.createElement("span");
+            revision.textContent = `Revisión ${asset.revision}`;
+            const updated = document.createElement("span");
+            updated.textContent = formatDate(asset.actualizadoAt);
+            meta.append(revision, updated);
+            button.append(title, meta);
+            button.addEventListener("click", () => selectAsset(asset.id));
+            return button;
+        }));
+    }
+
+    async function loadLibrary() {
+        const response = await fetch("/admin/content-library", { headers: headers() });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "No se pudo abrir la biblioteca.");
+        assets = data.assets || [];
+        byId("workspace").hidden = false;
+        renderList();
+        setStatus("Biblioteca conectada.", "ok");
+    }
+
+    byId("connectButton").addEventListener("click", async () => {
+        adminToken = byId("token").value.trim();
+        if (!adminToken) return setStatus("Introduce el token administrativo.", "error");
+        try { await loadLibrary(); }
+        catch (error) { byId("workspace").hidden = true; setStatus(error.message, "error"); }
+    });
+
+    byId("newButton").addEventListener("click", resetEditor);
+
+    byId("previewButton").addEventListener("click", async () => {
+        const button = byId("previewButton");
+        button.disabled = true;
+        setStatus("Generando vista exacta...");
+        try {
+            const response = await fetch("/admin/content-library/preview", {
+                method:"POST",
+                headers:headers(),
+                body:JSON.stringify({ cuerpo:byId("body").value })
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || "No se pudo generar la vista previa.");
+            byId("previewBody").textContent = data.preview.renderedBody;
+            byId("preview").hidden = false;
+            setStatus("Vista previa actualizada.", "ok");
+        } catch (error) {
+            byId("preview").hidden = true;
+            setStatus(error.message, "error");
+        } finally {
+            button.disabled = false;
+        }
+    });
+
+    byId("editorForm").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const saveButton = byId("saveButton");
+        saveButton.disabled = true;
+        setStatus("Guardando activo...");
+        try {
+            const endpoint = selectedId ? `/admin/content-library/${selectedId}` : "/admin/content-library";
+            const response = await fetch(endpoint, {
+                method:"POST",
+                headers:headers(),
+                body:JSON.stringify({ titulo:byId("title").value, cuerpo:byId("body").value })
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || "No se pudo guardar el contenido.");
+            const index = assets.findIndex((asset) => asset.id === data.asset.id);
+            if (index >= 0) assets[index] = data.asset;
+            else assets.unshift(data.asset);
+            assets.sort((a, b) => new Date(b.actualizadoAt) - new Date(a.actualizadoAt));
+            selectAsset(data.asset.id);
+            setStatus("Activo guardado en la biblioteca.", "ok");
+        } catch (error) {
+            setStatus(error.message, "error");
+        } finally {
+            saveButton.disabled = false;
+        }
+    });
+</script>
+</body>
+</html>

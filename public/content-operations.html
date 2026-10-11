@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Centro de Operaciones · YORDA</title>
+    <style>
+        :root{--bg:#090d18;--panel:#11182a;--line:#26314b;--text:#eef2ff;--muted:#94a3b8;--green:#4ade80;--red:#fb7185;--amber:#fbbf24}
+        *{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at top left,#1a1640 0,transparent 34%),var(--bg);color:var(--text);font-family:Inter,system-ui,sans-serif}.shell{width:min(1200px,calc(100% - 32px));margin:auto;padding:28px 0 56px}.top{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:24px}.eyebrow{color:#c4b5fd;font-size:12px;font-weight:800;letter-spacing:.14em;text-transform:uppercase}h1{margin:6px 0;font-size:clamp(28px,4vw,42px);letter-spacing:-.04em}.muted{color:var(--muted)}a{color:#c4b5fd;text-decoration:none;border:1px solid var(--line);border-radius:10px;padding:10px 14px}.auth,.panel,.metric{background:rgba(17,24,42,.94);border:1px solid var(--line);border-radius:14px}.auth{display:flex;gap:10px;padding:14px;margin-bottom:18px}input,button{font:inherit;color:var(--text);background:#0c1220;border:1px solid var(--line);border-radius:9px;padding:11px 13px}input{flex:1}button{cursor:pointer;background:linear-gradient(135deg,#8b5cf6,#ec4899);border:0;font-weight:750}.status{min-height:22px;color:var(--muted);font-size:13px}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:18px 0}.metric{padding:18px}.metric span{display:block;color:var(--muted);font-size:12px}.metric strong{display:block;font-size:30px;margin-top:8px}.columns{display:grid;grid-template-columns:1.1fr .9fr;gap:14px}.panel{overflow:hidden;margin-bottom:14px}.panel h2{font-size:16px;margin:0;padding:16px 18px;border-bottom:1px solid var(--line)}.content{padding:16px 18px}.row{padding:12px 0;border-bottom:1px solid var(--line)}.row:last-child{border-bottom:0}.title{font-weight:750}.small{font-size:12px;color:var(--muted);margin-top:5px;overflow-wrap:anywhere}.empty{color:var(--muted);padding:10px 0}@media(max-width:760px){.grid{grid-template-columns:repeat(2,1fr)}.columns{grid-template-columns:1fr}.top{align-items:flex-start;flex-direction:column}.auth{flex-direction:column}}
+    </style>
+</head>
+<body>
+<main class="shell">
+    <header class="top"><div><div class="eyebrow">Motor de Marketing</div><h1>Centro de Operaciones</h1><div class="muted">Estado de publicaciones y servicios</div></div><a href="/dashboard">Volver al dashboard</a></header>
+    <section class="auth"><input id="token" type="password" autocomplete="current-password" placeholder="ADMIN_TOKEN"><button id="connect" type="button">Conectar</button></section>
+    <div class="status" id="status" role="status"></div>
+    <section id="panel" hidden>
+        <div class="grid"><article class="metric"><span>Programadas</span><strong id="scheduled">0</strong></article><article class="metric"><span>Ejecutadas</span><strong id="executed">0</strong></article><article class="metric"><span>Fallidas</span><strong id="failed">0</strong></article><article class="metric"><span>Canceladas</span><strong id="canceled">0</strong></article></div>
+        <div class="columns">
+            <div>
+                <section class="panel"><h2>Último contenido publicado</h2><div class="content" id="latest"></div></section>
+                <section class="panel"><h2>Próxima programación</h2><div class="content" id="next"></div></section>
+                <section class="panel"><h2>Últimos eventos</h2><div class="content" id="events"></div></section>
+            </div>
+            <div>
+                <section class="panel"><h2>Servicios</h2><div class="content" id="services"></div></section>
+                <section class="panel"><h2>Destinos configurados</h2><div class="content" id="destinations"></div></section>
+            </div>
+        </div>
+    </section>
+</main>
+<script>
+"use strict";
+const byId=id=>document.getElementById(id);
+const date=value=>value?new Intl.DateTimeFormat("es",{dateStyle:"medium",timeStyle:"short",timeZone:"America/Sao_Paulo"}).format(new Date(value)):"—";
+function row(title,detail=""){const el=document.createElement("div");el.className="row";const h=document.createElement("div");h.className="title";h.textContent=title;el.append(h);if(detail){const d=document.createElement("div");d.className="small";d.textContent=detail;el.append(d)}return el}
+function replace(id,children,empty){const el=byId(id);el.replaceChildren(...children);if(!children.length){const item=document.createElement("div");item.className="empty";item.textContent=empty;el.append(item)}}
+function render(data){for(const [key,id] of [["programadas","scheduled"],["ejecutadas","executed"],["fallidas","failed"],["canceladas","canceled"]])byId(id).textContent=data.counts[key]??0;
+    const latest=data.latestPublication;replace("latest",latest?[row(latest.titulo,`${date(latest.publicada_at)} · ${latest.canal} · ${latest.destino_ref}`)]:[],"Todavía no hay publicaciones ejecutadas.");
+    const next=data.nextSchedule;replace("next",next?[row(`Idioma ${next.idioma}`,`${date(next.programada_para)} · el contenido se seleccionará al ejecutar`)]:[],"No hay publicaciones pendientes.");
+    replace("events",data.events.map(e=>row(e.event_type,`${e.entity_type} #${e.entity_id} · ${date(e.ocurrido_at)} · ${e.actor}`)),"No hay eventos registrados.");
+    replace("services",Object.entries(data.services).map(([key,value])=>row(key==="scheduler"?"Scheduler · proceso":"Publicador · credenciales",value)),"Estado no disponible.");
+    replace("destinations",data.destinations.map(d=>row(d.nombre,`${d.tipo} · ${d.external_id} · ${d.activo?"Activo":"Inactivo"} · validado ${date(d.validado_at)}`)),"No hay destinos registrados.");
+}
+byId("connect").addEventListener("click",async()=>{const token=byId("token").value.trim();if(!token){byId("status").textContent="Introduce el token administrativo.";return}byId("status").textContent="Cargando estado...";try{const response=await fetch("/admin/content-operations",{headers:{Authorization:`Bearer ${token}`}});const data=await response.json();if(!response.ok)throw new Error(data.error||"No se pudo cargar el estado.");render(data.operations);byId("panel").hidden=false;byId("status").textContent=`Actualizado ${date(new Date())}.`;}catch(error){byId("panel").hidden=true;byId("status").textContent=error.message}});
+</script>
+</body>
+</html>
