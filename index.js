@@ -17,7 +17,7 @@ const recuperacionEnvios = require("./src/services/recuperacion-envios");
 const entregasService = require("./src/services/entregas");
 const { leerTasas } = require("./src/flows/cotizacion-flow");
 const { esPedidoWeb, procesarPedidoWeb, crearEntregaManual, cotizarTransferenciaManual, crearTransferenciaManual } = require("./src/flows/pedido-web-flow");
-const { enviarSeguro, getAdminPhone, getPIXKey, getPIXHolder, getPIXBank, getPIXImage } = require("./src/flows/shared");
+const { enviarSeguro, getAdminPhone, getPIXKey, getPIXHolder, getPIXBank, getPIXImage, limpiarSesion } = require("./src/flows/shared");
 const { yaFueProcesado, activarPausaHumana, enPausaHumana, limpiarWebhookEventsViejos } = require("./src/services/webhook-guard");
 const { verificarSecretoWebhook, validarPayloadWebhook } = require("./src/middleware/webhook-security");
 const { conLockExclusivo } = require("./src/services/job-lock");
@@ -601,6 +601,12 @@ app.post("/admin/confirmar-operacion/:id", adminWriteLimiter, verificarToken, as
             console.error(`⚠️ Error notificando operadores de la operación #${operacion.id}:`, e.message);
         }
 
+        try {
+            await crm.actualizarEstadoCRM(operacion.phone, "confirmada");
+        } catch (e) {
+            console.error("⚠️ Error actualizando estado CRM tras confirmar:", e.message);
+        }
+
         res.json({ success: true, notificado });
     } catch (e) {
         res.status(500).json({ success: false, error: e.message });
@@ -644,6 +650,13 @@ app.post("/admin/completar-operacion/:id", adminWriteLimiter, verificarToken, as
             }
         } catch (e) {
             console.error("⚠️ Error recalculando nivel VIP:", e.message);
+        }
+
+        try {
+            await crm.actualizarEstadoCRM(operacion.phone, "completado");
+            await limpiarSesion(operacion.phone);
+        } catch (e) {
+            console.error("⚠️ Error cerrando estado CRM tras completar:", e.message);
         }
 
         res.json({ success: true, notificado });
