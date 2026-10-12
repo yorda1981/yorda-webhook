@@ -36,6 +36,7 @@ const { createContentLibraryRouter } = require("./src/routes/content-library");
 const { createContentOperationsRouter } = require("./src/routes/content-operations");
 const { startPersistentScheduler } = require("./src/services/content-scheduler");
 const { createSchemaGate } = require("./src/services/schema-status");
+const communityPulse = require("./src/services/community-pulse");
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -215,6 +216,7 @@ const schemaGate = createSchemaGate({
     start: () => {
         startPersistentScheduler();
         marketingSchedulerStarted = true;
+        communityPulse.startCommunityPulse();
     }
 });
 app.use("/admin/content-operations", createContentOperationsRouter({
@@ -239,6 +241,13 @@ app.post("/webhook", verificarSecretoWebhook, webhookLimiter, validarPayloadWebh
             mapaLidATelefono.set(body.chatLid, body.phone);
         }
 
+        // Altas y bajas del grupo del Motor de Marketing (Pulso). El resto de
+        // mensajes de grupos se sigue ignorando: el bot nunca conversa en grupos.
+        if (body.isGroup && body.notification) {
+            communityPulse.recordGroupNotification(body)
+                .catch(e => console.error("❌ Pulso del grupo (evento):", e.message));
+            return;
+        }
         if (body.isGroup || String(phoneRaw).includes("-group")) return;
         if (body.isNewsletter) return;
 
@@ -283,6 +292,11 @@ app.post("/webhook", verificarSecretoWebhook, webhookLimiter, validarPayloadWebh
             console.log(`🚫 Número bloqueado, sin respuesta: ${phoneRaw}`);
             return;
         }
+
+        // Pulso: solo teléfono, tipo y hora, para medir cuántos mensajes
+        // necesita un cliente hasta crear su operación. Nunca el contenido.
+        communityPulse.recordInboundMessage(phoneRaw, communityPulse.inboundMessageType(body))
+            .catch(e => console.error("❌ Pulso del grupo (mensaje):", e.message));
 
         const pushName = body.senderName || "Cliente";
 

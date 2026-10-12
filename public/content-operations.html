@@ -18,6 +18,8 @@
         <div class="grid"><article class="metric"><span>Programadas</span><strong id="scheduled">0</strong></article><article class="metric"><span>Ejecutadas</span><strong id="executed">0</strong></article><article class="metric"><span>Fallidas</span><strong id="failed">0</strong></article><article class="metric"><span>Canceladas</span><strong id="canceled">0</strong></article></div>
         <div class="columns">
             <div>
+                <section class="panel"><h2>Pulso del grupo</h2><div class="content" id="pulse"></div></section>
+                <section class="panel"><h2>Bajas tras cada publicación (24 h)</h2><div class="content" id="pulseLeaves"></div></section>
                 <section class="panel"><h2>Último contenido publicado</h2><div class="content" id="latest"></div></section>
                 <section class="panel"><h2>Próxima programación</h2><div class="content" id="next"></div></section>
                 <section class="panel"><h2>Últimos eventos</h2><div class="content" id="events"></div></section>
@@ -35,7 +37,20 @@ const byId=id=>document.getElementById(id);
 const date=value=>value?new Intl.DateTimeFormat("es",{dateStyle:"medium",timeStyle:"short",timeZone:"America/Sao_Paulo"}).format(new Date(value)):"—";
 function row(title,detail=""){const el=document.createElement("div");el.className="row";const h=document.createElement("div");h.className="title";h.textContent=title;el.append(h);if(detail){const d=document.createElement("div");d.className="small";d.textContent=detail;el.append(d)}return el}
 function replace(id,children,empty){const el=byId(id);el.replaceChildren(...children);if(!children.length){const item=document.createElement("div");item.className="empty";item.textContent=empty;el.append(item)}}
-function render(data){for(const [key,id] of [["programadas","scheduled"],["ejecutadas","executed"],["fallidas","failed"],["canceladas","canceled"]])byId(id).textContent=data.counts[key]??0;
+const median=v=>v===null||v===undefined?"—":String(Math.round(v*10)/10).replace(".",",");
+function renderPulse(p){
+    if(!p||!p.groupId){replace("pulse",[],"Sin datos: no hay un grupo activo o el esquema está pendiente.");replace("pulseLeaves",[],"Sin datos.");return}
+    const prep=p.preparacion,perm=p.permanencia30;
+    replace("pulse",[
+        row(`${p.clientesNuevosMes} clientes nuevos del grupo este mes`,"Métrica Norte: miembros que completaron su primera operación"),
+        row(`${p.miembros} miembros · ${p.consolidados} consolidados`,`Últimos 7 días: ${p.altas7d} altas, ${p.bajas7d} bajas`),
+        row(`Mediana de ${median(prep.mediana)} mensajes por operación`,`Miembros del grupo: ${median(prep.medianaMiembros)} · resto: ${median(prep.medianaNoMiembros)} · ${prep.operaciones} operaciones medidas en 30 días`),
+        row(perm.porcentaje===null?"Permanencia a 30 días: aún sin cohorte":`Permanencia a 30 días: ${perm.porcentaje} %`,`${perm.retenidos} de ${perm.cohorte} miembros que entraron hace 30–60 días`),
+        row("Lecturas del grupo",p.lecturas.desde?`Desde ${p.lecturas.desde.slice(0,10)} · última ${p.lecturas.ultima.slice(0,10)}`:"Todavía no hay lecturas")
+    ],"Sin datos.");
+    replace("pulseLeaves",p.bajasPorPublicacion.map(x=>row(`${x.bajas} ${x.bajas===1?"baja":"bajas"} · ${x.titulo}`,date(x.publicadaAt))),"Todavía no hay publicaciones en el grupo.");
+}
+function render(data){renderPulse(data.pulse);for(const [key,id] of [["programadas","scheduled"],["ejecutadas","executed"],["fallidas","failed"],["canceladas","canceled"]])byId(id).textContent=data.counts[key]??0;
     const latest=data.latestPublication;replace("latest",latest?[row(latest.titulo,`${date(latest.publicada_at)} · ${latest.canal} · ${latest.destino_ref}`)]:[],"Todavía no hay publicaciones ejecutadas.");
     const next=data.nextSchedule;replace("next",next?[row(`Idioma ${next.idioma}`,`${date(next.programada_para)} · el contenido se seleccionará al ejecutar`)]:[],"No hay publicaciones pendientes.");
     replace("events",data.events.map(e=>row(e.event_type,`${e.entity_type} #${e.entity_id} · ${date(e.ocurrido_at)} · ${e.actor}`)),"No hay eventos registrados.");
