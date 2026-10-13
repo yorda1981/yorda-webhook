@@ -37,6 +37,8 @@ const { createContentOperationsRouter } = require("./src/routes/content-operatio
 const { startPersistentScheduler } = require("./src/services/content-scheduler");
 const { createSchemaGate } = require("./src/services/schema-status");
 const communityPulse = require("./src/services/community-pulse");
+const contentDirector = require("./src/services/director/content-director");
+const bestDecision = require("./src/services/director/best-decision");
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -217,6 +219,8 @@ const schemaGate = createSchemaGate({
         startPersistentScheduler();
         marketingSchedulerStarted = true;
         communityPulse.startCommunityPulse();
+        contentDirector.startContentDirector();
+        bestDecision.startBestDecision();
     }
 });
 app.use("/admin/content-operations", createContentOperationsRouter({

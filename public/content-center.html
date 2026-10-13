@@ -55,13 +55,46 @@
         .publish-destination.missing { color:var(--danger); }
         .publish-row { display:flex; gap:10px; margin-bottom:10px; }
         .publish-row input { flex:1; }
+        .director { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:14px 18px; border:1px solid var(--line); background:rgba(17,24,42,.86); border-radius:14px; margin-bottom:18px; }
+        .director[hidden] { display:none; }
+        .director-status { color:var(--muted); font-size:13px; margin-top:4px; }
+        .tag { color:#fbbf24; font-weight:800; }
+        .draft { margin:0 0 16px; padding:14px; border:1px solid #fbbf24; border-radius:12px; background:rgba(251,191,36,.06); }
+        .draft[hidden] { display:none; }
+        .draft ul { margin:10px 0 0; padding-left:18px; color:var(--muted); font-size:13px; line-height:1.5; }
+        .draft a { color:#c4b5fd; overflow-wrap:anywhere; }
+        .draft-actions { display:flex; gap:10px; margin-top:12px; }
+        .draft-aporte { font-size:13px; line-height:1.5; margin:8px 0; }
+        .director-alert { color:var(--danger); font-size:13px; margin-top:6px; }
+        .director-alert:empty { display:none; }
+        .best-decision { margin-bottom:18px; padding:18px; border-color:#7c3aed; background:linear-gradient(145deg,rgba(124,58,237,.13),rgba(17,24,42,.96)); }
+        .best-decision[hidden] { display:none; }
+        .decision-head { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; }
+        .decision-head h2 { margin:4px 0 0; font-size:22px; }
+        .decision-time { color:var(--muted); font-size:11px; white-space:nowrap; }
+        .decision-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px 20px; margin-top:18px; }
+        .decision-block { min-width:0; }
+        .decision-block.full { grid-column:1/-1; }
+        .decision-label { color:#c4b5fd; font-size:11px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; margin-bottom:5px; }
+        .decision-text { margin:0; color:#e2e8f0; line-height:1.5; white-space:pre-wrap; }
+        .decision-evidence { margin:0; padding-left:19px; color:#e2e8f0; line-height:1.55; }
+        .decision-actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:18px; }
+        .decision-actions[hidden] { display:none; }
+        .decision-score { color:#fbbf24; font-weight:800; }
+        .config { margin-bottom:18px; padding:14px 18px; }
+        .config[hidden] { display:none; }
+        .config summary { cursor:pointer; font-weight:800; }
+        .config-grid { display:grid; grid-template-columns:repeat(5, minmax(0,1fr)); gap:10px; margin-top:14px; }
+        .config-grid label { margin-bottom:4px; }
+        .config textarea { min-height:70px; margin-top:10px; }
+        @media (max-width:800px) { .config-grid { grid-template-columns:repeat(2, minmax(0,1fr)); } }
         .destinations { margin-top:18px; }
         .destinations[hidden] { display:none; }
         .group-row { display:flex; justify-content:space-between; align-items:center; gap:14px; padding:14px 18px; border-bottom:1px solid var(--line); }
         .group-name { font-weight:750; overflow-wrap:anywhere; }
         .group-id { color:var(--muted); font-size:11px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; margin-top:4px; overflow-wrap:anywhere; }
         .badge { font-size:11px; font-weight:800; color:var(--green); white-space:nowrap; }
-        @media (max-width:800px) { .workspace{grid-template-columns:1fr}.topbar{align-items:flex-start;flex-direction:column}.auth{flex-direction:column} }
+        @media (max-width:800px) { .workspace{grid-template-columns:1fr}.topbar{align-items:flex-start;flex-direction:column}.auth{flex-direction:column}.decision-grid{grid-template-columns:1fr}.decision-block.full{grid-column:auto} }
     </style>
 </head>
 <body>
@@ -81,6 +114,49 @@
     </section>
     <p class="status" id="status" role="status"></p>
 
+    <section class="director" id="directorPanel" hidden>
+        <div><strong>Director IA</strong><div class="director-status" id="directorStatus">Sin ejecuciones todavía.</div><div class="director-alert" id="directorAlert" role="alert"></div></div>
+        <button class="secondary" id="directorRunButton" type="button">Generar borradores ahora</button>
+    </section>
+
+    <section class="panel best-decision" id="bestDecisionPanel" hidden>
+        <div class="decision-head">
+            <div><div class="eyebrow">Mejor Decisión Disponible</div><h2 id="decisionTitle">Sin decisión vigente</h2></div>
+            <div class="decision-time" id="decisionTime"></div>
+        </div>
+        <div id="decisionEmpty" class="empty">El Director todavía no encontró evidencia suficiente para recomendar una acción.</div>
+        <div id="decisionContent" hidden>
+            <div class="decision-grid">
+                <div class="decision-block"><div class="decision-label">Qué detectó</div><p class="decision-text" id="decisionProblem"></p></div>
+                <div class="decision-block"><div class="decision-label">Por qué es la prioridad</div><p class="decision-text" id="decisionWhy"></p></div>
+                <div class="decision-block full"><div class="decision-label">Evidencia</div><ul class="decision-evidence" id="decisionEvidence"></ul></div>
+                <div class="decision-block"><div class="decision-label">Qué hacer ahora</div><p class="decision-text" id="decisionAction"></p></div>
+                <div class="decision-block"><div class="decision-label">Resultado esperado</div><p class="decision-text" id="decisionExpected"></p></div>
+                <div class="decision-block full" id="decisionChangeBlock" hidden><div class="decision-label">Por qué cambió la prioridad</div><p class="decision-text" id="decisionChange"></p></div>
+            </div>
+            <div class="decision-actions">
+                <button id="decisionRefreshButton" type="button">Reevaluar ahora</button>
+                <button class="secondary" id="decisionExecuteButton" type="button">Marcar como ejecutada</button>
+                <button class="secondary" id="decisionDiscardButton" type="button">Descartar</button>
+            </div>
+        </div>
+        <div class="decision-actions" id="decisionEmptyActions"><button id="decisionFirstRefreshButton" type="button">Buscar la mejor decisión ahora</button></div>
+    </section>
+
+    <details class="panel config" id="directorConfigPanel" hidden>
+        <summary id="configSummary">Criterio comercial del Director</summary>
+        <div class="helper" id="configCurrent"></div>
+        <div class="config-grid">
+            <div><label for="mixActualidad">Actualidad %</label><input id="mixActualidad" type="number" min="0" max="100"></div>
+            <div><label for="mixEducacion">Educación %</label><input id="mixEducacion" type="number" min="0" max="100"></div>
+            <div><label for="mixConfianza">Confianza %</label><input id="mixConfianza" type="number" min="0" max="100"></div>
+            <div><label for="configThreshold">Umbral de impacto</label><input id="configThreshold" type="number" min="0" max="100"></div>
+            <div><label for="configMax">Máximo diario</label><input id="configMax" type="number" min="1" max="10"></div>
+        </div>
+        <textarea id="configReason" maxlength="1000" placeholder="Motivo del cambio: qué resultado lo justifica (por ejemplo, las guías de pago generaron más cotizaciones que las noticias en el último mes)."></textarea>
+        <div class="draft-actions"><button id="configSaveButton" type="button">Guardar nueva versión</button></div>
+    </details>
+
     <section class="workspace" id="workspace" hidden>
         <aside class="panel">
             <div class="panel-head">
@@ -93,6 +169,17 @@
         <section class="panel">
             <div class="panel-head"><h2 id="editorTitle">Nuevo activo</h2><span class="revision" id="revision"></span></div>
             <form class="editor" id="editorForm">
+                <section class="draft" id="draftPanel" hidden>
+                    <div class="preview-label">Borrador del Director IA · <span id="draftCategory"></span></div>
+                    <div class="draft-aporte"><strong>Impacto comercial:</strong> <span id="draftImpact"></span></div>
+                    <div class="draft-aporte"><strong>Cómo ayuda a conseguir clientes:</strong> <span id="draftAporte"></span></div>
+                    <div class="helper">Revisa el texto con sus fuentes. Puedes editarlo y guardarlo antes de aprobarlo; solo un contenido aprobado se puede publicar.</div>
+                    <ul id="draftSources"></ul>
+                    <div class="draft-actions">
+                        <button id="approveButton" type="button">Aprobar</button>
+                        <button class="secondary" id="discardButton" type="button">Descartar</button>
+                    </div>
+                </section>
                 <div class="field">
                     <label for="title">Título interno</label>
                     <input id="title" maxlength="160" required placeholder="Ej: Confianza en entregas de efectivo">
@@ -143,6 +230,13 @@
     let assets = [];
     let selectedId = null;
     let activeDestination = null;
+    let directorPoll = null;
+    let currentDecision = null;
+    const CATEGORY_LABELS = {
+        noticias:"Noticias de Cuba", tasas:"Tasas de cambio", economia:"Economía", bancos:"Bancos", remesas:"Remesas", vuelos:"Vuelos", apagones:"Apagones", oficial:"Cambios oficiales",
+        "como-funciona":"Cómo funciona", "usar-bot":"Usar el bot", pago:"Pago y comprobante", entrega:"Entrega", datos:"Datos necesarios", errores:"Errores frecuentes", preguntas:"Preguntas frecuentes", seguridad:"Seguridad", monedas:"CUP, USD y MLC", problemas:"Si algo falla"
+    };
+    const GROUP_LABELS = { actualidad:"Actualidad", permanente:"Permanente" };
 
     const byId = (id) => document.getElementById(id);
     const statusEl = byId("status");
@@ -170,6 +264,7 @@
         byId("lastUpdate").textContent = "Sin guardar";
         byId("preview").hidden = true;
         renderList();
+        renderDraftPanel();
         renderPublishPanel();
         byId("title").focus();
     }
@@ -185,6 +280,7 @@
         byId("lastUpdate").textContent = `Actualizado ${formatDate(asset.actualizadoAt)}`;
         byId("preview").hidden = true;
         renderList();
+        renderDraftPanel();
         renderPublishPanel();
     }
 
@@ -205,7 +301,14 @@
             const meta = document.createElement("span");
             meta.className = "asset-meta";
             const revision = document.createElement("span");
-            revision.textContent = `Revisión ${asset.revision}`;
+            if (asset.estado === "BORRADOR") {
+                revision.className = "tag";
+                revision.textContent = `Borrador IA · ${GROUP_LABELS[asset.grupo] || ""} · ${CATEGORY_LABELS[asset.categoria] || "sin categoría"}${asset.impacto ? ` · ${asset.impacto.total}/100` : ""}`;
+            } else if (asset.estado === "INACTIVO") {
+                revision.textContent = "Descartado";
+            } else {
+                revision.textContent = `Revisión ${asset.revision}`;
+            }
             const updated = document.createElement("span");
             updated.textContent = formatDate(asset.actualizadoAt);
             meta.append(revision, updated);
@@ -222,6 +325,12 @@
         assets = data.assets || [];
         byId("workspace").hidden = false;
         byId("destinationsPanel").hidden = false;
+        byId("directorPanel").hidden = false;
+        byId("bestDecisionPanel").hidden = false;
+        byId("directorConfigPanel").hidden = false;
+        loadBestDecision().catch(() => {});
+        loadDirectorConfig().catch(() => {});
+        loadDirectorStatus().catch(() => {});
         await loadActiveDestination();
         renderList();
         setStatus("Biblioteca conectada.", "ok");
@@ -312,6 +421,197 @@
         }
     }
 
+    function renderDraftPanel() {
+        const asset = selectedAsset();
+        const isDraft = Boolean(asset && asset.estado === "BORRADOR");
+        byId("draftPanel").hidden = !isDraft;
+        if (!isDraft) return;
+        byId("draftCategory").textContent = `${GROUP_LABELS[asset.grupo] || ""} · ${CATEGORY_LABELS[asset.categoria] || "sin categoría"}`;
+        byId("draftAporte").textContent = asset.aporte || "—";
+        const impacto = asset.impacto;
+        byId("draftImpact").textContent = impacto
+            ? `${impacto.total}/100${impacto.ajuste ? ` (base ${impacto.base}, equilibrio ${impacto.ajuste > 0 ? "+" : ""}${impacto.ajuste}: ${(impacto.motivos || []).join("; ")})` : ""} · cercanía a la remesa ${impacto.dimensiones.cercania} · objeción ${impacto.dimensiones.objecion} · confianza ${impacto.dimensiones.confianza} · alcance ${impacto.dimensiones.alcance} · oportunidad ${impacto.dimensiones.oportunidad} (cada una de 0 a 3)`
+            : "sin evaluar";
+        byId("draftSources").replaceChildren(...(asset.fuentes || []).map((fuente) => {
+            const item = document.createElement("li");
+            if (!/^https?:\/\//.test(fuente.url || "")) {
+                item.textContent = `${fuente.nombre}${fuente.titulo ? ` · ${fuente.titulo}` : ""}`;
+                return item;
+            }
+            const link = document.createElement("a");
+            link.href = fuente.url;
+            link.target = "_blank";
+            link.rel = "noopener noreferrer";
+            link.textContent = fuente.titulo || fuente.url;
+            item.append(`${fuente.nombre}: `, link);
+            return item;
+        }));
+    }
+
+    async function resolveDraft(action, okMessage) {
+        const asset = selectedAsset();
+        if (!asset) return;
+        if (byId("title").value.trim() !== asset.titulo || byId("body").value.trim() !== asset.cuerpo) {
+            return setStatus("Guarda los cambios antes de aprobar o descartar.", "error");
+        }
+        const buttons = [byId("approveButton"), byId("discardButton")];
+        buttons.forEach((button) => { button.disabled = true; });
+        try {
+            const data = await requestJson(`/admin/content-library/${asset.id}/${action}`, { method:"POST", body:"{}" });
+            const index = assets.findIndex((item) => item.id === data.asset.id);
+            if (index >= 0) assets[index] = data.asset;
+            selectAsset(data.asset.id);
+            setStatus(okMessage, "ok");
+        } catch (error) {
+            setStatus(error.message, "error");
+        } finally {
+            buttons.forEach((button) => { button.disabled = false; });
+        }
+    }
+
+    byId("approveButton").addEventListener("click", () => resolveDraft("approve", "Borrador aprobado. Ya puedes publicarlo o programarlo."));
+    byId("discardButton").addEventListener("click", () => resolveDraft("discard", "Borrador descartado."));
+
+    function describeRun(run) {
+        if (!run) return "Sin ejecuciones todavía.";
+        const when = formatDate(run.iniciado_at);
+        if (run.estado === "EN_CURSO") return `Trabajando desde ${when}: leyendo fuentes y redactando…`;
+        if (run.estado === "FALLIDO") return `Última ejecución ${when}: falló (${run.error || "error desconocido"}).`;
+        const detalle = run.detalle || {};
+        if (!run.borradores && detalle.explicacion) return `Última ejecución ${when}: ${detalle.explicacion}`;
+        return `Última ejecución ${when}: ${run.borradores} ${run.borradores === 1 ? "borrador" : "borradores"} (${detalle.actualidad || 0} de actualidad, ${detalle.permanentes || 0} permanentes) a partir de ${run.candidatos} noticias nuevas; ${run.descartados} descartados por verificación.`;
+    }
+
+    function renderBestDecision() {
+        const hasDecision = Boolean(currentDecision);
+        byId("decisionEmpty").hidden = hasDecision;
+        byId("decisionContent").hidden = !hasDecision;
+        byId("decisionEmptyActions").hidden = hasDecision;
+        if (!hasDecision) {
+            byId("decisionTitle").textContent = "Sin decisión vigente";
+            byId("decisionTime").textContent = "";
+            return;
+        }
+        byId("decisionTitle").textContent = currentDecision.decision;
+        byId("decisionTime").textContent = `Evaluada ${formatDate(currentDecision.evaluadaAt)}`;
+        byId("decisionProblem").textContent = currentDecision.problema;
+        byId("decisionWhy").textContent = `${currentDecision.justificacion}\n\nImpacto ${currentDecision.impacto}/100 · confianza ${currentDecision.confianza}/100`;
+        byId("decisionAction").textContent = currentDecision.accionRecomendada;
+        byId("decisionExpected").textContent = currentDecision.resultadoEsperado;
+        byId("decisionEvidence").replaceChildren(...(currentDecision.evidencia || []).map((fact) => {
+            const item = document.createElement("li");
+            item.textContent = fact.dato;
+            return item;
+        }));
+        const changed = Boolean(currentDecision.sustituyeId && currentDecision.explicacionCambio);
+        byId("decisionChangeBlock").hidden = !changed;
+        byId("decisionChange").textContent = changed ? currentDecision.explicacionCambio : "";
+    }
+
+    async function loadBestDecision() {
+        const data = await requestJson("/admin/content-library/director/decision");
+        currentDecision = data.decision || null;
+        renderBestDecision();
+    }
+
+    async function refreshBestDecision() {
+        const buttons = [byId("decisionRefreshButton"), byId("decisionFirstRefreshButton")];
+        buttons.forEach(button => { button.disabled = true; });
+        setStatus("El Director está evaluando la mejor decisión disponible...");
+        try {
+            const data = await requestJson("/admin/content-library/director/decision/refresh", { method:"POST", body:"{}" });
+            currentDecision = data.decision || null;
+            renderBestDecision();
+            const message = data.changed ? "La prioridad comercial fue actualizada." : "La decisión vigente sigue siendo la mejor opción disponible.";
+            setStatus(message, "ok");
+        } catch (error) {
+            setStatus(error.message, "error");
+        } finally {
+            buttons.forEach(button => { button.disabled = false; });
+        }
+    }
+
+    async function closeBestDecision(action) {
+        if (!currentDecision) return;
+        const id = currentDecision.id;
+        try {
+            await requestJson(`/admin/content-library/director/decision/${id}/${action}`, { method:"POST", body:"{}" });
+            currentDecision = null;
+            renderBestDecision();
+            setStatus(action === "execute" ? "Decisión marcada como ejecutada." : "Decisión descartada.", "ok");
+        } catch (error) {
+            setStatus(error.message, "error");
+        }
+    }
+
+    byId("decisionRefreshButton").addEventListener("click", refreshBestDecision);
+    byId("decisionFirstRefreshButton").addEventListener("click", refreshBestDecision);
+    byId("decisionExecuteButton").addEventListener("click", () => closeBestDecision("execute"));
+    byId("decisionDiscardButton").addEventListener("click", () => closeBestDecision("discard"));
+
+    async function loadDirectorStatus() {
+        const data = await requestJson("/admin/content-library/director/status");
+        const last = (data.runs || [])[0];
+        byId("directorStatus").textContent = data.enabled ? describeRun(last) : "Desactivado (DIRECTOR_ENABLED=false).";
+        byId("directorAlert").textContent = data.alerta || "";
+        const running = Boolean(last && last.estado === "EN_CURSO");
+        byId("directorRunButton").disabled = !data.enabled || running;
+        clearTimeout(directorPoll);
+        if (running) {
+            directorPoll = setTimeout(async () => {
+                await loadDirectorStatus().catch(() => {});
+                const latest = await requestJson("/admin/content-library").catch(() => null);
+                if (latest) { assets = latest.assets || []; renderList(); }
+            }, 10000);
+        }
+    }
+
+    async function loadDirectorConfig() {
+        const { config } = await requestJson("/admin/content-library/director/config");
+        byId("configSummary").textContent = `Criterio comercial del Director · versión ${config.version}`;
+        byId("configCurrent").textContent = `Vigente desde ${formatDate(config.creadoAt) || "el inicio"} (${config.creadoPor}): ${config.motivo} Ventana de equilibrio: ${config.ventanaDias} días.`;
+        byId("mixActualidad").value = config.mezcla.actualidad;
+        byId("mixEducacion").value = config.mezcla.educacion;
+        byId("mixConfianza").value = config.mezcla.confianza;
+        byId("configThreshold").value = config.umbralImpacto;
+        byId("configMax").value = config.maxBorradores;
+    }
+
+    byId("configSaveButton").addEventListener("click", async () => {
+        const button = byId("configSaveButton");
+        button.disabled = true;
+        try {
+            await requestJson("/admin/content-library/director/config", {
+                method:"POST",
+                body:JSON.stringify({
+                    mezcla:{ actualidad:Number(byId("mixActualidad").value), educacion:Number(byId("mixEducacion").value), confianza:Number(byId("mixConfianza").value) },
+                    umbralImpacto:Number(byId("configThreshold").value),
+                    maxBorradores:Number(byId("configMax").value),
+                    motivo:byId("configReason").value
+                })
+            });
+            byId("configReason").value = "";
+            await loadDirectorConfig();
+            setStatus("Nueva versión del criterio comercial guardada.", "ok");
+        } catch (error) {
+            setStatus(error.message, "error");
+        } finally {
+            button.disabled = false;
+        }
+    });
+
+    byId("directorRunButton").addEventListener("click", async () => {
+        byId("directorRunButton").disabled = true;
+        try {
+            await requestJson("/admin/content-library/director/run", { method:"POST", body:"{}" });
+            setStatus("El Director IA está leyendo las fuentes. Los borradores aparecerán en la lista.", "ok");
+        } catch (error) {
+            setStatus(error.message, "error");
+        }
+        // La ejecución arranca en segundo plano: se consulta tras un momento para empezar a seguirla.
+        setTimeout(() => loadDirectorStatus().catch(() => {}), 2000);
+    });
+
     byId("discoverButton").addEventListener("click", discoverGroups);
 
     function destinationLabel() {
@@ -331,7 +631,7 @@
 
     function renderPublishPanel() {
         const asset = selectedAsset();
-        byId("publishPanel").hidden = !asset;
+        byId("publishPanel").hidden = !asset || asset.estado !== "ACTIVO";
         if (!asset) return;
         const label = byId("publishDestination");
         label.textContent = destinationLabel();

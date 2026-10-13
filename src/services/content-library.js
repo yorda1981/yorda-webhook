@@ -58,6 +58,13 @@ function mapAsset(row) {
         cuerpo: row.cuerpo,
         revisionId: Number(row.revision_id),
         revision: Number(row.revision_numero),
+        estado: row.estado || "ACTIVO",
+        origen: row.origen || "operador",
+        grupo: row.grupo || null,
+        categoria: row.categoria || null,
+        aporte: row.aporte || null,
+        impacto: row.impacto || null,
+        fuentes: Array.isArray(row.fuentes) ? row.fuentes : [],
         creadoAt: row.creado_at,
         actualizadoAt: row.actualizado_at
     };
@@ -65,6 +72,7 @@ function mapAsset(row) {
 
 const SELECT_ASSET = `
     SELECT ci.id, ci.titulo, ci.creado_at, ci.actualizado_at,
+           ci.estado, ci.origen, ci.grupo, ci.categoria, ci.aporte, ci.impacto, ci.fuentes,
            cr.id AS revision_id, cr.numero AS revision_numero, cr.cuerpo
     FROM content_items ci
     JOIN LATERAL (
@@ -199,6 +207,84 @@ async function updateContentAsset(rawId, input, db = pool) {
     }
 }
 
+const DRAFT_ACTIONS = Object.freeze({
+    approve: { estado: "ACTIVO", evento: "CONTENT_ASSET_APPROVED" },
+    discard: { estado: "INACTIVO", evento: "CONTENT_ASSET_DISCARDED" }
+});
+
+function normalizeSources(fuentes) {
+    if (!Array.isArray(fuentes) || !fuentes.length) throw validationError("Un borrador del Director necesita al menos una fuente.");
+    return fuentes.map(fuente => ({
+        nombre: String(fuente?.nombre || "").slice(0, 80),
+        titulo: String(fuente?.titulo || "").slice(0, 300),
+        url: String(fuente?.url || "").slice(0, 1000),
+        publicadoAt: fuente?.publicadoAt || null
+    }));
+}
+
+// Borrador escrito por el Director IA: queda en BORRADOR, fuera del alcance
+// del selector automático, hasta que el operador lo apruebe.
+async function createDirectorDraft(input, db = pool) {
+    const title = normalizeTitle(input?.titulo);
+    const body = normalizeBody(input?.cuerpo);
+    const categoria = String(input?.categoria || "").slice(0, 40) || null;
+    const grupo = ["actualidad", "permanente"].includes(input?.grupo) ? input.grupo : null;
+    if (!grupo) throw validationError("Un borrador del Director debe ser de actualidad o permanente.");
+    const aporte = String(input?.aporte || "").trim().slice(0, 600);
+    if (aporte.length < 20) throw validationError("Un borrador del Director debe explicar cómo genera confianza, clientes o remesas.");
+    const fuentes = normalizeSources(input?.fuentes);
+    const impacto = input?.impacto && typeof input.impacto === "object" ? input.impacto : null;
+    const client = await db.connect();
+    try {
+        await client.query("BEGIN");
+        const itemResult = await client.query(`
+            INSERT INTO content_items (titulo, creado_por, estado, origen, grupo, categoria, aporte, impacto, fuentes)
+            VALUES ($1, 'director', 'BORRADOR', 'director', $2, $3, $4, $5::jsonb, $6::jsonb)
+            RETURNING id, titulo, creado_at, actualizado_at, estado, origen, grupo, categoria, aporte, impacto, fuentes
+        `, [title, grupo, categoria, aporte, impacto ? JSON.stringify(impacto) : null, JSON.stringify(fuentes)]);
+        const item = itemResult.rows[0];
+        const revisionResult = await client.query(`
+            INSERT INTO content_revisions (content_item_id, numero, cuerpo, creado_por)
+            VALUES ($1, 1, $2, 'director')
+            RETURNING id, numero, cuerpo
+        `, [item.id, body]);
+        const revision = revisionResult.rows[0];
+        await client.query(`
+            INSERT INTO content_events (entity_type, entity_id, event_type, actor, datos)
+            VALUES ('CONTENT_ITEM', $1, 'CONTENT_ASSET_CREATED', 'director', $2::jsonb),
+                   ('REVISION', $3, 'CONTENT_REVISION_CREATED', 'director', $4::jsonb)
+        `, [item.id, JSON.stringify({ revisionId: revision.id, origen: "director", grupo, categoria, fuentes: fuentes.map(f => f.url) }),
+            revision.id, JSON.stringify({ contentItemId: item.id, revision: 1 })]);
+        await client.query("COMMIT");
+        return mapAsset({ ...item, cuerpo: revision.cuerpo, revision_id: revision.id, revision_numero: revision.numero });
+    } catch (error) {
+        try { await client.query("ROLLBACK"); } catch (_) {}
+        throw error;
+    } finally {
+        client.release();
+    }
+}
+
+// Aprobar (BORRADOR → ACTIVO) o descartar (BORRADOR → INACTIVO) un borrador.
+async function resolveDraft(rawId, action, db = pool) {
+    const id = normalizeId(rawId);
+    const target = DRAFT_ACTIONS[action];
+    if (!target) throw validationError("Acción de borrador inválida.");
+    const result = await db.query(`
+        WITH updated AS (
+            UPDATE content_items SET estado = $2, actualizado_at = NOW()
+            WHERE id = $1 AND estado = 'BORRADOR'
+            RETURNING id
+        ), event AS (
+            INSERT INTO content_events (entity_type, entity_id, event_type, actor, datos)
+            SELECT 'CONTENT_ITEM', id, $3, 'admin', '{}'::jsonb FROM updated
+        )
+        SELECT id FROM updated
+    `, [id, target.estado, target.evento]);
+    const asset = await getContentAsset(id, db);
+    return { asset, changed: Boolean(result.rows[0]) };
+}
+
 module.exports = {
     TITLE_MAX,
     BODY_MAX,
@@ -210,5 +296,7 @@ module.exports = {
     listContentAssets,
     getContentAsset,
     createContentAsset,
-    updateContentAsset
+    updateContentAsset,
+    createDirectorDraft,
+    resolveDraft
 };

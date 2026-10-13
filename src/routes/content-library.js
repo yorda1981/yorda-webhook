@@ -6,11 +6,14 @@ const contentSelector = require("../services/content-selector");
 const contentPublisher = require("../services/content-publisher");
 const contentScheduler = require("../services/content-scheduler");
 const contentDestinations = require("../services/content-destinations");
+const contentDirector = require("../services/director/content-director");
+const directorConfig = require("../services/director/director-config");
+const bestDecision = require("../services/director/best-decision");
 const { verificarToken } = require("../middleware/admin-auth");
 const { adminReadLimiter, adminWriteLimiter } = require("../middleware/admin-rate-limiters");
 
 function sendError(res, error) {
-    if (error?.code === "CONTENT_LIBRARY_VALIDATION" || error?.code === "CONTENT_SELECTOR_VALIDATION" || error?.code === "CONTENT_PUBLISHER_VALIDATION" || error?.code === "CONTENT_SCHEDULER_VALIDATION" || error?.code === "CONTENT_DESTINATION_VALIDATION") {
+    if (error?.code === "CONTENT_LIBRARY_VALIDATION" || error?.code === "CONTENT_SELECTOR_VALIDATION" || error?.code === "CONTENT_PUBLISHER_VALIDATION" || error?.code === "CONTENT_SCHEDULER_VALIDATION" || error?.code === "CONTENT_DESTINATION_VALIDATION" || error?.code === "CONTENT_DIRECTOR_VALIDATION") {
         return res.status(400).json({ error: error.message });
     }
     if (error?.code === "CONTENT_DESTINATION_PROVIDER") return res.status(502).json({ error: error.message });
@@ -18,7 +21,7 @@ function sendError(res, error) {
     return res.status(500).json({ error: "No se pudo completar la operación." });
 }
 
-function createContentLibraryRouter({ service = contentLibrary, selector = contentSelector, publisher = contentPublisher, scheduler = contentScheduler, destinations = contentDestinations } = {}) {
+function createContentLibraryRouter({ service = contentLibrary, selector = contentSelector, publisher = contentPublisher, scheduler = contentScheduler, destinations = contentDestinations, director = contentDirector, config = directorConfig, decision = bestDecision } = {}) {
     const router = express.Router();
 
     router.get("/", adminReadLimiter, verificarToken, async (req, res) => {
@@ -58,6 +61,74 @@ function createContentLibraryRouter({ service = contentLibrary, selector = conte
                 : result.code === "SEND_FAILED" || result.code === "AMBIGUOUS_RESULT" ? 502
                 : 200;
             res.status(status).json(result);
+        } catch (error) {
+            sendError(res, error);
+        }
+    });
+
+    // Director IA: últimas ejecuciones y ejecución a demanda (solo crea borradores).
+    router.get("/director/status", adminReadLimiter, verificarToken, async (_req, res) => {
+        try {
+            res.json(await director.getDirectorStatus());
+        } catch (error) {
+            sendError(res, error);
+        }
+    });
+
+    // Configuración comercial versionada: cada cambio guarda su motivo.
+    router.get("/director/config", adminReadLimiter, verificarToken, async (_req, res) => {
+        try {
+            res.json({ config: await config.getActiveConfig(), history: await config.getConfigHistory(), familias: config.FAMILIES });
+        } catch (error) {
+            sendError(res, error);
+        }
+    });
+
+    router.post("/director/config", adminWriteLimiter, verificarToken, async (req, res) => {
+        try {
+            res.status(201).json({ config: await config.saveConfig(req.body || {}) });
+        } catch (error) {
+            sendError(res, error);
+        }
+    });
+
+    router.post("/director/run", adminWriteLimiter, verificarToken, async (_req, res) => {
+        try {
+            const result = await director.requestManualRun();
+            if (!result.started) {
+                const message = result.reason === "DISABLED" ? "El Director IA está desactivado." : "El Director IA ya está trabajando.";
+                return res.status(409).json({ error: message, reason: result.reason });
+            }
+            res.status(202).json(result);
+        } catch (error) {
+            sendError(res, error);
+        }
+    });
+
+    router.get("/director/decision", adminReadLimiter, verificarToken, async (_req, res) => {
+        try {
+            res.json({ decision: await decision.getBestDecision() });
+        } catch (error) {
+            sendError(res, error);
+        }
+    });
+
+    router.post("/director/decision/refresh", adminWriteLimiter, verificarToken, async (_req, res) => {
+        try {
+            // La petición del operador debe devolver cualquier fallo real. El
+            // job horario usa el lock entre instancias y puede saltarse en
+            // silencio; una acción manual no debe aparentar que reevaluó.
+            res.json(await decision.evaluateBestDecision());
+        } catch (error) {
+            sendError(res, error);
+        }
+    });
+
+    router.post("/director/decision/:id/:action", adminWriteLimiter, verificarToken, async (req, res) => {
+        try {
+            const closed = await decision.closeDecision(req.params.id, req.params.action);
+            if (!closed) return res.status(404).json({ error: "La decisión ya no está vigente." });
+            res.json({ decision: closed });
         } catch (error) {
             sendError(res, error);
         }
@@ -114,6 +185,28 @@ function createContentLibraryRouter({ service = contentLibrary, selector = conte
             if (!result.schedule) return res.status(404).json({ error: "Programación no encontrada." });
             if (!result.canceled) return res.status(409).json(result);
             res.json(result);
+        } catch (error) {
+            sendError(res, error);
+        }
+    });
+
+    router.post("/:id/approve", adminWriteLimiter, verificarToken, async (req, res) => {
+        try {
+            const result = await service.resolveDraft(req.params.id, "approve");
+            if (!result.asset) return res.status(404).json({ error: "Contenido no encontrado." });
+            if (!result.changed) return res.status(409).json({ error: "Este contenido no es un borrador.", asset: result.asset });
+            res.json({ asset: result.asset });
+        } catch (error) {
+            sendError(res, error);
+        }
+    });
+
+    router.post("/:id/discard", adminWriteLimiter, verificarToken, async (req, res) => {
+        try {
+            const result = await service.resolveDraft(req.params.id, "discard");
+            if (!result.asset) return res.status(404).json({ error: "Contenido no encontrado." });
+            if (!result.changed) return res.status(409).json({ error: "Este contenido no es un borrador.", asset: result.asset });
+            res.json({ asset: result.asset });
         } catch (error) {
             sendError(res, error);
         }
