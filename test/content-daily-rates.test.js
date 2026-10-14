@@ -30,6 +30,7 @@ test("fecha y hora del trabajo diario se interpretan en la zona del grupo", () =
 
 test("programa una sola publicación diaria usando la cola persistente existente", async () => {
     const calls = [];
+    let insertParams;
     const db = {
         async query(sql) {
             calls.push(String(sql));
@@ -48,7 +49,7 @@ test("programa una sola publicación diaria usando la cola persistente existente
                     if (/SELECT \* FROM rates/.test(sql)) return { rows: [RATES] };
                     if (/SELECT id FROM content_items WHERE origen_sistema/.test(sql)) return { rows: [{ id: "12" }] };
                     if (/SELECT numero, cuerpo FROM content_revisions/.test(sql)) return { rows: [{ numero: 3, cuerpo: "antiguo" }] };
-                    if (/INSERT INTO content_schedules/.test(sql)) return { rows: [{ id: "48" }] };
+                    if (/INSERT INTO content_schedules/.test(sql)) { insertParams = params; return { rows: [{ id: "48" }] }; }
                     return { rows: [] };
                 },
                 release() { calls.push("release"); }
@@ -60,6 +61,7 @@ test("programa una sola publicación diaria usando la cola persistente existente
     assert.equal(result.scheduleId, 48);
     assert.ok(calls.some(sql => /INSERT INTO content_schedules/.test(sql)));
     assert.ok(calls.some(sql => /INSERT INTO content_events/.test(sql)));
+    assert.equal(new Date(insertParams[0]).toISOString(), "2026-10-15T12:00:00.000Z");
 });
 
 test("no crea ni envía la programación diaria fuera del minuto configurado", async () => {

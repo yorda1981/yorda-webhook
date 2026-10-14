@@ -166,7 +166,8 @@ async function ensureDailyRatesSchedule({ db = pool, now = new Date() } = {}) {
                 error = String(ratesError.message || ratesError).slice(0, 1000);
             }
         }
-        const scheduledAt = new Date(now.getTime() - (nowMinutes - targetMinutes) * 60_000);
+        const secondsIntoMinute = now.getUTCSeconds() * 1000 + now.getUTCMilliseconds();
+        const scheduledAt = new Date(now.getTime() - (nowMinutes - targetMinutes) * 60_000 - secondsIntoMinute);
         const inserted = await client.query(`
             INSERT INTO content_schedules
                 (idioma, programada_para, estado, idempotency_key, content_item_id, result_code, error,
