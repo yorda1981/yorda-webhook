@@ -203,10 +203,48 @@ async function obtenerCandidatoRecuperablePorTelefono(phone, executor = pool) {
     }
 }
 
+async function obtenerMotivoExclusion(phone, executor = pool) {
+    const r = await executor.query(`
+        SELECT CASE
+            WHEN cu.phone IS NULL THEN 'El registro del cliente ya no existe.'
+            WHEN COALESCE(cu.marketing_opt_out, false) THEN 'El cliente pidió no recibir comunicaciones comerciales.'
+            WHEN cu.tipo_favorito IS NULL THEN 'No hay un servicio previo confirmado para personalizar el contacto.'
+            WHEN EXISTS (SELECT 1 FROM blocked_numbers b WHERE b.phone = cu.phone) THEN 'El número está bloqueado.'
+            WHEN cu.pausa_hasta > NOW() THEN 'La conversación está bajo pausa humana.'
+            WHEN EXISTS (
+                SELECT 1 FROM operations o WHERE o.phone = cu.phone
+                  AND o.status IN ('pendiente','confirmada','completada')
+                  AND (o.created_at > COALESCE(cu.fecha_estado,cu.fecha_cotizacion)
+                    OR o.confirmed_at > COALESCE(cu.fecha_estado,cu.fecha_cotizacion)
+                    OR (o.confirmed_at IS NULL AND o.completed_at > COALESCE(cu.fecha_estado,cu.fecha_cotizacion)))
+            ) THEN 'Existe una operación posterior o en curso.'
+            WHEN EXISTS (
+                SELECT 1 FROM recuperacion_envios re WHERE re.phone = cu.phone
+                  AND re.estado IN ('ENVIANDO','ENVIADO')
+                  AND COALESCE(re.enviado_at,re.creado_at) >= COALESCE(cu.fecha_estado,cu.fecha_cotizacion)
+            ) THEN 'Ya existe un intento de recuperación para esta cotización.'
+            WHEN EXISTS (
+                SELECT 1 FROM commercial_contact_events ce WHERE ce.phone = cu.phone
+                  AND ce.occurred_at >= COALESCE(cu.fecha_estado,cu.fecha_cotizacion)
+                  AND ce.provider_status IN ('SENDING','SENT','UNKNOWN')
+            ) THEN 'Ya recibió un contacto comercial después de esta cotización.'
+            WHEN cu.estado NOT IN ('aguardando_comprovante','cotizacion_realizada')
+              OR COALESCE(cu.fecha_estado,cu.fecha_cotizacion) IS NULL
+              OR COALESCE(cu.fecha_estado,cu.fecha_cotizacion) >= NOW() - INTERVAL '2 hours'
+                THEN 'La cotización dejó de ser una oportunidad recuperable.'
+            ELSE 'No cumple los criterios vigentes de elegibilidad.'
+        END AS motivo
+        FROM (SELECT $1::varchar AS phone) input
+        LEFT JOIN customers cu ON cu.phone = input.phone
+    `, [phone]);
+    return r.rows[0]?.motivo || 'No cumple los criterios vigentes de elegibilidad.';
+}
+
 module.exports = {
     obtenerCandidatosRecuperacion,
     obtenerCandidatoRecuperablePorTelefono,
     etiquetaServicio,
     prioridadDeEstado,
-    antiguedadDe
+    antiguedadDe,
+    obtenerMotivoExclusion
 };

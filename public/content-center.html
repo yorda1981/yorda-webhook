@@ -744,6 +744,7 @@
             include.type = "checkbox";
             include.checked = client.incluido !== false;
             include.dataset.packagePhone = client.phone;
+            if (client.motivoExclusion) include.dataset.eligibilityBlocked = "true";
             include.className = "package-client-include";
             include.setAttribute("aria-label", `Incluir ${client.nombre || client.phone}`);
             const person = document.createElement("div");
@@ -752,7 +753,10 @@
             const phone = document.createElement("div");
             phone.className = "helper";
             phone.textContent = client.phone;
-            person.append(name, phone);
+            const exclusion = document.createElement("div");
+            exclusion.className = "helper";
+            exclusion.textContent = client.motivoExclusion ? `Excluido: ${client.motivoExclusion}` : "";
+            person.append(name, phone, exclusion);
             const segment = document.createElement("div");
             segment.innerHTML = `<span class="package-badge"></span><div class="helper"></div>`;
             segment.querySelector("span").textContent = client.segmento;
@@ -768,6 +772,7 @@
         ["packageObjective", "packageWindowOne", "packageWindowTwo", "packageCampaignName", "packageCampaignDraft"]
             .forEach(id => { byId(id).disabled = !editable; });
         byId("packageClients").querySelectorAll("input,textarea").forEach(element => { element.disabled = !editable; });
+        byId("packageClients").querySelectorAll('[data-eligibility-blocked="true"]').forEach(element => { element.disabled = true; });
         byId("packageSaveButton").hidden = !editable;
         byId("packageApproveButton").hidden = !editable;
         byId("packageCancelButton").hidden = !editable;

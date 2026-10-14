@@ -55,6 +55,29 @@ test("los mensajes quedan determinados por decisión y cliente para no cambiar e
     assert.deepEqual(one.clientes.map(client => client.mensaje), two.clientes.map(client => client.mensaje));
 });
 
+test("al abrir un borrador, reconcilia elegibilidad, reemplaza mensajes viejos y explica exclusiones", async () => {
+    const oldContent = service.buildPackageContent(decision, candidates);
+    const packageRow = { id: 4, decision_id: 12, tipo: service.PACKAGE_TYPE, estado: "BORRADOR", contenido: oldContent, actualizado_at: new Date("2026-10-14T10:00:00Z") };
+    const db = { async query(sql, params = []) {
+        if (/SELECT \* FROM director_execution_packages WHERE decision_id/.test(sql)) return { rows: [packageRow] };
+        if (/UPDATE director_execution_packages SET contenido/.test(sql)) {
+            packageRow.contenido = JSON.parse(params[1]);
+            return { rows: [{ ...packageRow, actualizado_at: new Date() }] };
+        }
+        return { rows: [] };
+    }};
+    const result = await service.getPackageForDecision(12, db, {
+        getCandidates: async () => [candidates[0]],
+        getExclusionReason: async phone => phone === candidates[1].phone ? "Ya existe un intento de recuperación para esta cotización." : "No elegible."
+    });
+    assert.equal(result.contenido.segmento.total, 1);
+    assert.equal(result.contenido.clientes.length, 2);
+    assert.equal(result.contenido.clientes[0].incluido, true);
+    assert.match(result.contenido.clientes[0].mensaje, /consultaste un envío a CUP/);
+    assert.equal(result.contenido.clientes[1].incluido, false);
+    assert.match(result.contenido.clientes[1].motivoExclusion, /intento de recuperación/);
+});
+
 test("ensure crea una sola vez el paquete usando los candidatos existentes", async () => {
     const calls = [];
     const db = { query: async (sql, params) => {

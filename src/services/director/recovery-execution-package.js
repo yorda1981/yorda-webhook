@@ -86,7 +86,7 @@ function buildPackageContent(decision, candidates, now = new Date()) {
             "El cliente llegó a cotización o quedó esperando comprobante hace más de 2 horas.",
             "No está bloqueado ni bajo pausa humana.",
             "No tiene una operación pendiente, confirmada o completada posterior al intento.",
-            "No recibió una recuperación exitosa durante las últimas 24 horas."
+            "No recibió un contacto comercial ni un intento de recuperación posterior a esta cotización."
         ],
         clientes: clients,
         mensajes: {
@@ -260,11 +260,68 @@ async function ensureCommercialPackage(decision, db = pool, dependencies = {}) {
     return result.rows[0] ? mapPackage(result.rows[0]) : getPackageForDecision(decision.id, db);
 }
 
-async function getPackageForDecision(decisionId, db = pool) {
+async function reconciliarBorradorRecuperacion(row, db, dependencies = {}) {
+    if (!row || row.estado !== "BORRADOR" || row.tipo !== PACKAGE_TYPE) return row;
+    const previous = row.contenido || {};
+    const getCandidates = dependencies.getCandidates || recuperacion.obtenerCandidatosRecuperacion;
+    const candidates = await getCandidates(db, { throwOnError: true });
+    const generated = buildPackageContent({ id: Number(row.decision_id), resultadoEsperado: previous.resultadoEsperado }, candidates);
+    const newByPhone = new Map(generated.clientes.map(client => [client.phone, client]));
+    const oldByPhone = new Map((previous.clientes || []).map(client => [client.phone, client]));
+    const clients = [];
+
+    for (const fresh of generated.clientes) {
+        const old = oldByPhone.get(fresh.phone);
+        clients.push({
+            ...fresh,
+            incluido: old ? old.incluido !== false : true,
+            ...(old?.mensajeEditado && old.tipoFavorito === fresh.tipoFavorito
+                ? { mensaje: old.mensaje, mensajeEditado: true } : {}),
+            motivoExclusion: null
+        });
+    }
+    for (const old of previous.clientes || []) {
+        if (newByPhone.has(old.phone)) continue;
+        const getReason = dependencies.getExclusionReason || recuperacion.obtenerMotivoExclusion;
+        const motivoExclusion = await getReason(old.phone, db);
+        clients.push({ ...old, incluido: false, motivoExclusion });
+    }
+
+    const included = clients.filter(client => client.incluido !== false);
+    const high = included.filter(client => client.prioridad === "alta").length;
+    const content = {
+        ...previous,
+        segmento: {
+            ...(previous.segmento || {}), total: included.length, altaPrioridad: high,
+            prioridadMedia: included.length - high,
+            porSegmento: countsBy(included, client => client.segmento),
+            porServicio: countsBy(included, client => client.servicio)
+        },
+        clientes: clients,
+        mensajes: { ...(previous.mensajes || {}), totalPreparados: included.length },
+        campana: { ...(previous.campana || {}), borrador: campaignDraft(included.length, high, included.length - high) },
+        metricas: (previous.metricas || []).map(metric => metric.nombre === "Clientes elegibles"
+            ? { ...metric, base: candidates.length, medicion: "Clientes que cumplen los criterios actuales al abrir el paquete" }
+            : metric)
+    };
+
+    if (JSON.stringify(content) === JSON.stringify(previous)) return row;
+    const updated = await db.query(`
+        UPDATE director_execution_packages SET contenido = $2::jsonb, actualizado_at = NOW()
+        WHERE id = $1 AND estado = 'BORRADOR' AND actualizado_at IS NOT DISTINCT FROM $3
+        RETURNING *
+    `, [row.id, JSON.stringify(content), row.actualizado_at]);
+    if (updated.rows[0]) return updated.rows[0];
+    const latest = await db.query("SELECT * FROM director_execution_packages WHERE id = $1", [row.id]);
+    return latest.rows[0] || row;
+}
+
+async function getPackageForDecision(decisionId, db = pool, dependencies = {}) {
     const id = Number(decisionId);
     if (!Number.isSafeInteger(id) || id <= 0) throw validationError("Decisión inválida.");
     const result = await db.query("SELECT * FROM director_execution_packages WHERE decision_id = $1", [id]);
-    return mapPackage(result.rows[0]);
+    const row = await reconciliarBorradorRecuperacion(result.rows[0], db, dependencies);
+    return mapPackage(row);
 }
 
 async function ensureRecoveryPackage(decision, db = pool, dependencies = {}) {
@@ -322,7 +379,8 @@ function normalizeEditableContent(input, current) {
             if (!change) return client;
             const message = String(change.mensaje ?? client.mensaje).trim().slice(0, 2000);
             if (!message) throw validationError(`El mensaje de ${client.phone} no puede quedar vacío.`);
-            return { ...client, incluido: change.incluido !== false, mensaje: message };
+            return { ...client, incluido: change.incluido !== false, mensaje: message,
+                ...(change.mensaje !== undefined && message !== client.mensaje ? { mensajeEditado: true } : {}) };
         });
         const included = content.clientes.filter(client => client.incluido !== false);
         content.mensajes.totalPreparados = included.length;
@@ -487,7 +545,7 @@ async function resolvePackage(rawId, action, db = pool, dependencies = {}) {
 }
 
 module.exports = {
-    PACKAGE_TYPE, isRecoveryDecision, seededRng, segmentName, campaignDraft, buildPackageContent,
+    PACKAGE_TYPE, isRecoveryDecision, seededRng, segmentName, campaignDraft, buildPackageContent, reconciliarBorradorRecuperacion,
     refreshOfferSimulation, refreshCommercialAlternatives, buildInitiativeContent, getPackageForDecision, ensureRecoveryPackage, ensureCommercialPackage,
     normalizeEditableContent, updatePackage, resolvePackage
 };
