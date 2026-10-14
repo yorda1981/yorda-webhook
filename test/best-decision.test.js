@@ -41,7 +41,7 @@ function proposal(overrides = {}) {
             resultadoEsperado:"Más cotizaciones", impacto:55, viabilidad:70, riesgo:15, confianza:60,
             costo:{ tipo:"DESCONOCIDO", explicacion:"Costo operativo no medido" }, ejecutable:true, pasos:["Revisar conversaciones"] },
         { id:"S3", nombre:"Activar referidos", mecanismo:"Adquisición por recomendación", problema:"Captación",
-            evidenciaIds:["F1"], justificacion:"Explorar referidos", accionRecomendada:"Diseñar piloto sin incentivo económico",
+            evidenciaIds:["F1"], justificacion:"Explorar referidos", accionRecomendada:"Diseñar piloto de recomendación boca a boca sin pago",
             resultadoEsperado:"Nuevos clientes", impacto:60, viabilidad:60, riesgo:20, confianza:55,
             costo:{ tipo:"DESCONOCIDO", explicacion:"No hay costos de incentivos disponibles" }, ejecutable:true, pasos:["Validar propuesta"] }
     ];
@@ -63,6 +63,18 @@ test("la prioridad exige tres mecanismos comerciales distintos y no inventa cost
     assert.equal(normalized.alternatives[2].ejecutable, true);
     const repetitive = service.normalizeProposal(proposal({ alternativas: proposal().alternativas.map(item => ({ ...item, mecanismo:"Mensaje promocional" })) }), facts);
     assert.equal(repetitive.alternativesValid, false);
+});
+
+test("rechaza costos afirmados por el modelo y no elige ofertas sin rentabilidad verificada", () => {
+    const alternatives = proposal().alternativas.map(item => ({ ...item }));
+    alternatives[0] = { ...alternatives[0], accionRecomendada: "Ofrecer un descuento de R$ 20", costo: {
+        tipo: "SIN_COSTO", estimacion: 0, baseVerificada: true, explicacion: "modelo dice verificado"
+    } };
+    const normalized = service.normalizeProposal(proposal({ alternativas: alternatives, estrategiaElegidaId: "S1" }), facts);
+    assert.equal(normalized.alternatives[0].costo.baseVerificada, false);
+    assert.equal(normalized.alternatives[0].costo.estimacion, null);
+    assert.equal(normalized.alternatives[0].ejecutable, false);
+    assert.equal(normalized.selectedStrategy.id, "S2");
 });
 
 test("registra variaciones comerciales observadas sin presentarlas como causalidad", () => {

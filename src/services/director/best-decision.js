@@ -192,10 +192,15 @@ function normalizeProposal(data, facts) {
         const evidence = ids.map(id => factMap.get(id)).filter(Boolean);
         const costType = ["SIN_COSTO", "OPERATIVO", "ECONOMICO", "DESCONOCIDO"].includes(item?.costo?.tipo)
             ? item.costo.tipo : "DESCONOCIDO";
-        const verifiedCost = Boolean(item?.costo?.baseVerificada) && evidence.length > 0
-            && Number.isFinite(Number(item?.costo?.estimacion));
-        const requiresMoney = Boolean(item?.requiereCompromisoEconomico)
-            || costType === "ECONOMICO" || (costType === "DESCONOCIDO" && item?.ejecutable === false);
+        // No hay una fuente estructurada de costos en los datos actuales. Una
+        // afirmación del modelo o una cita de actividad comercial no verifica un costo.
+        const verifiedCost = false;
+        const strategyText = [item?.nombre, item?.accionRecomendada, item?.justificacion,
+            ...(Array.isArray(item?.pasos) ? item.pasos : []),
+            ...(Array.isArray(item?.materiales) ? item.materiales.map(material => `${material?.titulo || ""} ${material?.contenido || ""}`) : [])]
+            .join(" ");
+        const economicLanguage = /\b(descuento|bono|bonificación|tasa preferencial|entrega gratis|gratis|crédito|cashback|incentivo|premio|regalo|promoción económica)\b|(?:R\$|\$)\s?\d/i.test(strategyText);
+        const requiresMoney = Boolean(item?.requiereCompromisoEconomico) || economicLanguage || costType === "ECONOMICO";
         const costPenalty = costType === "SIN_COSTO" ? 0
             : costType === "OPERATIVO" ? 8
                 : verifiedCost ? 12 : 22;
@@ -233,7 +238,9 @@ function normalizeProposal(data, facts) {
     const selectedId = clean(data?.estrategiaElegidaId, 12);
     const ranked = [...alternatives].sort((a, b) => Number(b.ejecutable) - Number(a.ejecutable)
         || b.puntuacionComercial - a.puntuacionComercial);
-    const selectedStrategy = alternatives.find(item => item.id === selectedId) || ranked[0] || null;
+    const modelSelected = alternatives.find(item => item.id === selectedId) || null;
+    const selectedStrategy = (modelSelected?.ejecutable ? modelSelected : null)
+        || ranked.find(item => item.ejecutable) || modelSelected || ranked[0] || null;
     const decisionData = selectedStrategy || data;
     return {
         action,
