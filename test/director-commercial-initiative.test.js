@@ -67,3 +67,21 @@ test("iniciativa sin integración operativa identifica la capacidad faltante", (
     assert.equal(content.ejecucion.listaParaAprobar, false);
     assert.match(content.capacidadesFaltantes.join(" "), /adaptador operativo/);
 });
+
+test("ediciones del operador se conservan como señal para siguientes decisiones", async () => {
+    const row = { id: 19, estado: "BORRADOR", contenido: {
+        objetivo: "Objetivo inicial", alternativas: [], estrategiaElegida: { materiales: [] }, materiales: []
+    } };
+    let updated;
+    const db = { query: async (sql, params) => {
+        if (sql.includes("SELECT * FROM director_execution_packages")) return { rows: [row] };
+        if (sql.includes("UPDATE director_execution_packages")) {
+            updated = JSON.parse(params[1]);
+            return { rows: [{ ...row, contenido: updated }] };
+        }
+        throw new Error("consulta inesperada");
+    } };
+    await packageService.updatePackage(19, { objetivo: "Objetivo modificado por operador", materiales: [] }, db);
+    assert.deepEqual(updated.señalesOperador[0].campos, ["objetivo"]);
+    assert.equal(updated.señalesOperador[0].tipo, "EDITADO");
+});

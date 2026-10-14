@@ -653,7 +653,8 @@
         }
         if (isInitiative) {
             const winner = content.estrategiaElegida || {};
-            byId("initiativeWinner").textContent = `${winner.justificacion || "Sin justificación"} ${winner.accion || ""}`;
+            const recipients = content.destinatarios || {};
+            byId("initiativeWinner").textContent = `${winner.justificacion || "Sin justificación"} Acción: ${winner.accionRecomendada || "No especificada"} Resultado esperado: ${content.resultadoEsperado || "No especificado"} Destinatarios: ${recipients.criterio || "No segmentados"} Recursos: ${(winner.recursos || []).join(", ") || "No especificados"}`;
             byId("initiativeObjective").value = content.objetivo || "";
             listItems("initiativePlan", content.plan || [], step => typeof step === "string" ? step : `${step.orden || ""}. ${step.accion || step.descripcion || JSON.stringify(step)}`);
             byId("initiativeMaterials").replaceChildren(...(content.materiales || []).map((material, index) => {
@@ -676,7 +677,7 @@
             }));
             const costs = content.costos || {};
             const economic = Boolean(winner.requiereCompromisoEconomico) || costs.tipo === "ECONOMICO";
-            byId("initiativeEconomics").textContent = `${costs.baseVerificada ? "Costo con base verificada" : "Ganancia no verificable"}: ${costs.explicacion || "No hay costos reales registrados."}${economic && !costs.baseVerificada ? " · No se autoriza oferta económica." : ""}`;
+            byId("initiativeEconomics").textContent = `${costs.baseVerificada ? `Costo verificado ${costs.estimacion ?? ""}` : "Ganancia no verificable"}: ${costs.explicacion || "No hay costos reales registrados."}${economic && !costs.baseVerificada ? " · No se autoriza oferta económica." : ""}`;
             listItems("initiativeGaps", content.capacidadesFaltantes || [], item => item);
             listItems("initiativeMetrics", content.metricas || [], metric => typeof metric === "string" ? metric : `${metric.nombre}: ${metric.medicion || "medición pendiente"}`);
             const ready = Boolean(content.ejecucion?.listaParaAprobar);

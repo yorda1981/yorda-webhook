@@ -327,7 +327,15 @@ async function evaluateBestDecision(dependencies = {}) {
     const snapshot = await collectCommercialSnapshot(db);
     const facts = snapshotFacts(snapshot);
     const current = await getBestDecision(db);
-    const user = `HECHOS DISPONIBLES:\n${facts.map(f => `${f.id}. ${f.dato}`).join("\n")}\n\nDECISIÓN VIGENTE:\n${current ? JSON.stringify(current) : "No existe."}`;
+    const executionPackage = current ? await executionPackages.getPackageForDecision(current.id, db) : null;
+    const executionFeedback = executionPackage ? {
+        tipo: executionPackage.tipo, estado: executionPackage.estado,
+        señalesOperador: executionPackage.contenido?.señalesOperador || [],
+        resultados: executionPackage.contenido?.ejecucion?.resultados || [],
+        remesasOContactosEjecutados: executionPackage.contenido?.ejecucion?.completados ?? null,
+        activosBibliotecaCreados: executionPackage.contenido?.ejecucion?.activosBiblioteca || []
+    } : null;
+    const user = `HECHOS DISPONIBLES:\n${facts.map(f => `${f.id}. ${f.dato}`).join("\n")}\n\nDECISIÓN VIGENTE Y MÉTRICAS OBSERVADAS:\n${current ? JSON.stringify(current) : "No existe."}\n\nSEÑALES DE REVISIÓN/EJECUCIÓN DEL OPERADOR:\n${JSON.stringify(executionFeedback)}`;
     const { data } = await llm.completeJson({ tarea: "decision", system: DECISION_SYSTEM, user, temperature: 0.1 });
     const proposal = normalizeProposal(data, facts);
     const result = await applyProposal(db, current, proposal, snapshot);

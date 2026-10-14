@@ -142,6 +142,9 @@ function buildInitiativeContent(decision, now = new Date()) {
     const libraryMaterials = materials.filter(item => item.tipo === "biblioteca" && item.titulo && item.contenido);
     const recovery = isRecoveryDecision(decision);
     const missing = [...(winner?.capacidadesFaltantes || [])];
+    for (const material of materials.filter(item => item.tipo !== "biblioteca")) {
+        missing.push(`No hay un adaptador operativo para ejecutar material tipo ${material.tipo || "sin tipo"}; requiere acción manual revisada.`);
+    }
     if (!recovery && !libraryMaterials.length) {
         missing.push("No existe todavía un adaptador operativo para ejecutar esta estrategia desde YORDA.");
     }
@@ -176,7 +179,9 @@ async function ensureCommercialPackage(decision, db = pool, dependencies = {}) {
         const content = existing.contenido || {};
         const withAlternatives = { ...content, alternativas: decision.alternativas || content.alternativas || [],
             estrategiaElegida: decision.estrategiaElegida || content.estrategiaElegida || null };
-        if (withAlternatives.alternativas.length && JSON.stringify(content.alternativas || []) !== JSON.stringify(withAlternatives.alternativas)) {
+        if (existing.estado === "BORRADOR" && withAlternatives.alternativas.length
+            && (JSON.stringify(content.alternativas || []) !== JSON.stringify(withAlternatives.alternativas)
+                || JSON.stringify(content.estrategiaElegida || null) !== JSON.stringify(withAlternatives.estrategiaElegida))) {
             const updated = await db.query("UPDATE director_execution_packages SET contenido = $2::jsonb, actualizado_at = NOW() WHERE id = $1 RETURNING *",
                 [existing.id, JSON.stringify(withAlternatives)]);
             return mapPackage(updated.rows[0]);
@@ -287,6 +292,19 @@ async function updatePackage(rawId, input, db = pool) {
     if (!row) return null;
     if (row.estado !== "BORRADOR") throw validationError("Solo se puede modificar un paquete en borrador.");
     const content = normalizeEditableContent(input || {}, row.contenido);
+    const previous = row.contenido || {};
+    const changedFields = [];
+    if (previous.objetivo !== content.objetivo) changedFields.push("objetivo");
+    if (Array.isArray(content.alternativas)) {
+        if (JSON.stringify(previous.materiales) !== JSON.stringify(content.materiales)) changedFields.push("materiales");
+    } else {
+        if (JSON.stringify(previous.clientes) !== JSON.stringify(content.clientes)) changedFields.push("destinatarios_o_mensajes");
+        if (JSON.stringify(previous.campana) !== JSON.stringify(content.campana)) changedFields.push("campana");
+        if (JSON.stringify(previous.horario) !== JSON.stringify(content.horario)) changedFields.push("secuencia_u_horario");
+    }
+    if (changedFields.length) content.señalesOperador = [...(previous.señalesOperador || []), {
+        tipo: "EDITADO", campos: changedFields, ocurridoAt: new Date().toISOString()
+    }].slice(-20);
     const result = await db.query(`UPDATE director_execution_packages SET contenido = $2::jsonb, actualizado_at = NOW()
                                    WHERE id = $1 AND estado = 'BORRADOR' RETURNING *`, [id, JSON.stringify(content)]);
     return mapPackage(result.rows[0]);
@@ -300,6 +318,9 @@ async function resolvePackage(rawId, action, db = pool, dependencies = {}) {
     const row = current.rows[0];
     if (!row) return null;
     const content = row.contenido || {};
+    content.señalesOperador = [...(content.señalesOperador || []), {
+        tipo: action === "approve" ? "APROBADO" : "CANCELADO", ocurridoAt: new Date().toISOString()
+    }].slice(-20);
     if (action === "approve" && row.tipo === "RECUPERACION_ABANDONOS") {
         const results = [];
         for (const client of content.clientes || []) {
