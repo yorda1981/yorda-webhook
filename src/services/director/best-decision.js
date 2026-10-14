@@ -3,6 +3,7 @@
 const pool = require("../../../db");
 const env = require("../../config/env");
 const llmGateway = require("./llm");
+const executionPackages = require("./recovery-execution-package");
 const { conLockExclusivo } = require("../job-lock");
 
 const REVIEW_INTERVAL_MS = 60 * 60 * 1000;
@@ -232,7 +233,11 @@ async function evaluateBestDecision(dependencies = {}) {
     const user = `HECHOS DISPONIBLES:\n${facts.map(f => `${f.id}. ${f.dato}`).join("\n")}\n\nDECISIÓN VIGENTE:\n${current ? JSON.stringify(current) : "No existe."}`;
     const { data } = await llm.completeJson({ tarea: "decision", system: DECISION_SYSTEM, user, temperature: 0.1 });
     const proposal = normalizeProposal(data, facts);
-    return applyProposal(db, current, proposal, snapshot);
+    const result = await applyProposal(db, current, proposal, snapshot);
+    if (result.decision) {
+        result.executionPackage = await executionPackages.ensureRecoveryPackage(result.decision, db, dependencies);
+    }
+    return result;
 }
 
 async function refreshBestDecision(dependencies = {}) {

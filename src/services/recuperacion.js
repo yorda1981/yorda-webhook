@@ -157,9 +157,9 @@ function mapearFilaCandidato(row) {
 // SQL -- el backend nunca devuelve un candidato que el frontend tenga que
 // terminar de filtrar (ver punto D del pedido: "no confiar en datos
 // calculados por frontend").
-async function obtenerCandidatosRecuperacion() {
+async function obtenerCandidatosRecuperacion(executor = pool, options = {}) {
     try {
-        const r = await pool.query(`
+        const r = await executor.query(`
             ${SELECT_CANDIDATO}
             WHERE ${PREDICADO_CANDIDATO}
             ORDER BY COALESCE(cu.fecha_estado, cu.fecha_cotizacion) ASC
@@ -167,6 +167,7 @@ async function obtenerCandidatosRecuperacion() {
         return r.rows.map(mapearFilaCandidato);
     } catch (e) {
         console.error("❌ Error obteniendo candidatos de recuperación:", e.message);
+        if (options.throwOnError) throw e;
         return [];
     }
 }

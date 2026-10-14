@@ -9,6 +9,7 @@ const contentDestinations = require("../services/content-destinations");
 const contentDirector = require("../services/director/content-director");
 const directorConfig = require("../services/director/director-config");
 const bestDecision = require("../services/director/best-decision");
+const recoveryExecutionPackage = require("../services/director/recovery-execution-package");
 const { verificarToken } = require("../middleware/admin-auth");
 const { adminReadLimiter, adminWriteLimiter } = require("../middleware/admin-rate-limiters");
 
@@ -21,7 +22,7 @@ function sendError(res, error) {
     return res.status(500).json({ error: "No se pudo completar la operación." });
 }
 
-function createContentLibraryRouter({ service = contentLibrary, selector = contentSelector, publisher = contentPublisher, scheduler = contentScheduler, destinations = contentDestinations, director = contentDirector, config = directorConfig, decision = bestDecision } = {}) {
+function createContentLibraryRouter({ service = contentLibrary, selector = contentSelector, publisher = contentPublisher, scheduler = contentScheduler, destinations = contentDestinations, director = contentDirector, config = directorConfig, decision = bestDecision, executionPackage = recoveryExecutionPackage } = {}) {
     const router = express.Router();
 
     router.get("/", adminReadLimiter, verificarToken, async (req, res) => {
@@ -129,6 +130,37 @@ function createContentLibraryRouter({ service = contentLibrary, selector = conte
             const closed = await decision.closeDecision(req.params.id, req.params.action);
             if (!closed) return res.status(404).json({ error: "La decisión ya no está vigente." });
             res.json({ decision: closed });
+        } catch (error) {
+            sendError(res, error);
+        }
+    });
+
+    router.get("/director/decision/:id/package", adminReadLimiter, verificarToken, async (req, res) => {
+        try {
+            const current = await decision.getBestDecision();
+            if (!current || current.id !== Number(req.params.id)) return res.status(404).json({ error: "La decisión ya no está vigente." });
+            const packageReady = await executionPackage.ensureRecoveryPackage(current);
+            res.json({ package: packageReady });
+        } catch (error) {
+            sendError(res, error);
+        }
+    });
+
+    router.post("/director/execution-package/:id", adminWriteLimiter, verificarToken, async (req, res) => {
+        try {
+            const packageReady = await executionPackage.updatePackage(req.params.id, req.body || {});
+            if (!packageReady) return res.status(404).json({ error: "Paquete no encontrado." });
+            res.json({ package: packageReady });
+        } catch (error) {
+            sendError(res, error);
+        }
+    });
+
+    router.post("/director/execution-package/:id/:action", adminWriteLimiter, verificarToken, async (req, res) => {
+        try {
+            const packageReady = await executionPackage.resolvePackage(req.params.id, req.params.action);
+            if (!packageReady) return res.status(409).json({ error: "El paquete ya fue resuelto." });
+            res.json({ package: packageReady });
         } catch (error) {
             sendError(res, error);
         }

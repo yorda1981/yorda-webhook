@@ -81,6 +81,21 @@
         .decision-actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:18px; }
         .decision-actions[hidden] { display:none; }
         .decision-score { color:#fbbf24; font-weight:800; }
+        .execution-package { margin:-2px 0 18px; padding:20px; }
+        .execution-package[hidden] { display:none; }
+        .package-summary { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin:16px 0; }
+        .package-stat { padding:12px; border:1px solid var(--line); background:var(--panel2); border-radius:10px; }
+        .package-stat strong { display:block; font-size:22px; margin-bottom:2px; }
+        .package-section { padding:16px 0; border-top:1px solid var(--line); }
+        .package-section h3 { margin:0 0 10px; font-size:15px; }
+        .package-section textarea { min-height:88px; }
+        .package-clients { max-height:320px; overflow:auto; border:1px solid var(--line); border-radius:10px; }
+        .package-client { display:grid; grid-template-columns:auto 1fr .75fr 2fr; gap:12px; padding:12px; border-bottom:1px solid var(--line); font-size:12px; align-items:start; }
+        .package-client:last-child { border-bottom:0; }
+        .package-client-message { min-height:78px; padding:9px; font-size:12px; }
+        .package-badge { color:#fbbf24; font-weight:800; }
+        .package-actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:16px; }
+        .package-list { margin:0; padding-left:20px; color:#dbe4f5; line-height:1.55; }
         .config { margin-bottom:18px; padding:14px 18px; }
         .config[hidden] { display:none; }
         .config summary { cursor:pointer; font-weight:800; }
@@ -94,7 +109,7 @@
         .group-name { font-weight:750; overflow-wrap:anywhere; }
         .group-id { color:var(--muted); font-size:11px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; margin-top:4px; overflow-wrap:anywhere; }
         .badge { font-size:11px; font-weight:800; color:var(--green); white-space:nowrap; }
-        @media (max-width:800px) { .workspace{grid-template-columns:1fr}.topbar{align-items:flex-start;flex-direction:column}.auth{flex-direction:column}.decision-grid{grid-template-columns:1fr}.decision-block.full{grid-column:auto} }
+        @media (max-width:800px) { .workspace{grid-template-columns:1fr}.topbar{align-items:flex-start;flex-direction:column}.auth{flex-direction:column}.decision-grid{grid-template-columns:1fr}.decision-block.full{grid-column:auto}.package-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.package-client{grid-template-columns:1fr} }
     </style>
 </head>
 <body>
@@ -111,6 +126,38 @@
     <section class="auth" id="authPanel">
         <input id="token" type="password" autocomplete="current-password" placeholder="ADMIN_TOKEN">
         <button id="connectButton" type="button">Abrir biblioteca</button>
+    </section>
+
+    <section class="panel execution-package" id="executionPackagePanel" hidden>
+        <div class="decision-head">
+            <div><div class="eyebrow">Paquete de ejecución</div><h2 id="packageTitle">Recuperación de abandonos</h2></div>
+            <div class="package-badge" id="packageState">BORRADOR</div>
+        </div>
+        <div class="package-summary">
+            <div class="package-stat"><strong id="packageTotal">0</strong>clientes preparados</div>
+            <div class="package-stat"><strong id="packageHigh">0</strong>alta prioridad</div>
+            <div class="package-stat"><strong id="packageMedium">0</strong>prioridad media</div>
+            <div class="package-stat"><strong id="packageMessages">0</strong>mensajes listos</div>
+        </div>
+        <div class="package-section"><h3>Objetivo</h3><textarea id="packageObjective" maxlength="2000"></textarea></div>
+        <div class="package-section"><h3>Criterios de selección</h3><ul class="package-list" id="packageCriteria"></ul></div>
+        <div class="package-section">
+            <h3>Horario y secuencia</h3>
+            <div class="config-grid">
+                <div><label for="packageWindowOne">Primera ventana</label><input id="packageWindowOne" maxlength="80"></div>
+                <div><label for="packageWindowTwo">Segunda ventana</label><input id="packageWindowTwo" maxlength="80"></div>
+            </div>
+            <ul class="package-list" id="packageSequence"></ul>
+        </div>
+        <div class="package-section"><h3>Borrador de campaña</h3><input id="packageCampaignName" maxlength="200"><textarea id="packageCampaignDraft" maxlength="4000"></textarea></div>
+        <div class="package-section"><h3>Publicaciones</h3><p class="decision-text" id="packagePublications"></p></div>
+        <div class="package-section"><h3>Métricas preparadas</h3><ul class="package-list" id="packageMetrics"></ul></div>
+        <div class="package-section"><h3>Clientes y mensajes preparados</h3><div class="package-clients" id="packageClients"></div></div>
+        <div class="package-actions">
+            <button class="secondary" id="packageSaveButton" type="button">Guardar cambios</button>
+            <button id="packageApproveButton" type="button">Aprobar paquete</button>
+            <button class="secondary" id="packageCancelButton" type="button">Cancelar</button>
+        </div>
     </section>
     <p class="status" id="status" role="status"></p>
 
@@ -232,6 +279,7 @@
     let activeDestination = null;
     let directorPoll = null;
     let currentDecision = null;
+    let currentExecutionPackage = null;
     const CATEGORY_LABELS = {
         noticias:"Noticias de Cuba", tasas:"Tasas de cambio", economia:"Economía", bancos:"Bancos", remesas:"Remesas", vuelos:"Vuelos", apagones:"Apagones", oficial:"Cambios oficiales",
         "como-funciona":"Cómo funciona", "usar-bot":"Usar el bot", pago:"Pago y comprobante", entrega:"Entrega", datos:"Datos necesarios", errores:"Errores frecuentes", preguntas:"Preguntas frecuentes", seguridad:"Seguridad", monedas:"CUP, USD y MLC", problemas:"Si algo falla"
@@ -240,6 +288,7 @@
 
     const byId = (id) => document.getElementById(id);
     const statusEl = byId("status");
+    byId("bestDecisionPanel").insertAdjacentElement("afterend", byId("executionPackagePanel"));
 
     function setStatus(message, type = "") {
         statusEl.textContent = message || "";
@@ -512,6 +561,7 @@
         const data = await requestJson("/admin/content-library/director/decision");
         currentDecision = data.decision || null;
         renderBestDecision();
+        await loadExecutionPackage();
     }
 
     async function refreshBestDecision() {
@@ -521,7 +571,10 @@
         try {
             const data = await requestJson("/admin/content-library/director/decision/refresh", { method:"POST", body:"{}" });
             currentDecision = data.decision || null;
+            currentExecutionPackage = data.executionPackage || null;
             renderBestDecision();
+            if (!currentExecutionPackage) await loadExecutionPackage();
+            else renderExecutionPackage();
             const message = data.changed ? "La prioridad comercial fue actualizada." : "La decisión vigente sigue siendo la mejor opción disponible.";
             setStatus(message, "ok");
         } catch (error) {
@@ -537,7 +590,9 @@
         try {
             await requestJson(`/admin/content-library/director/decision/${id}/${action}`, { method:"POST", body:"{}" });
             currentDecision = null;
+            currentExecutionPackage = null;
             renderBestDecision();
+            renderExecutionPackage();
             setStatus(action === "execute" ? "Decisión marcada como ejecutada." : "Decisión descartada.", "ok");
         } catch (error) {
             setStatus(error.message, "error");
@@ -548,6 +603,118 @@
     byId("decisionFirstRefreshButton").addEventListener("click", refreshBestDecision);
     byId("decisionExecuteButton").addEventListener("click", () => closeBestDecision("execute"));
     byId("decisionDiscardButton").addEventListener("click", () => closeBestDecision("discard"));
+
+    function listItems(elementId, values, formatter) {
+        byId(elementId).replaceChildren(...(values || []).map((value) => {
+            const item = document.createElement("li");
+            item.textContent = formatter ? formatter(value) : String(value);
+            return item;
+        }));
+    }
+
+    function renderExecutionPackage() {
+        const panel = byId("executionPackagePanel");
+        panel.hidden = !currentExecutionPackage;
+        if (!currentExecutionPackage) return;
+        const content = currentExecutionPackage.contenido;
+        byId("packageState").textContent = currentExecutionPackage.estado;
+        byId("packageTitle").textContent = content.campana.nombre;
+        byId("packageTotal").textContent = content.segmento.total;
+        byId("packageHigh").textContent = content.segmento.altaPrioridad;
+        byId("packageMedium").textContent = content.segmento.prioridadMedia;
+        byId("packageMessages").textContent = content.mensajes.totalPreparados;
+        byId("packageObjective").value = content.objetivo;
+        byId("packageWindowOne").value = content.horario.primeraVentana;
+        byId("packageWindowTwo").value = content.horario.segundaVentana;
+        byId("packageCampaignName").value = content.campana.nombre;
+        byId("packageCampaignDraft").value = content.campana.borrador;
+        byId("packagePublications").textContent = content.publicaciones.necesarias
+            ? `${content.publicaciones.borradores.length} publicaciones preparadas.`
+            : `No se recomienda publicar en el grupo. ${content.publicaciones.motivo}`;
+        listItems("packageCriteria", content.criterios);
+        listItems("packageSequence", content.secuencia, step => `${step.orden}. ${step.segmento}: ${step.accion} · ${step.momento}`);
+        listItems("packageMetrics", content.metricas, metric => `${metric.nombre}: ${metric.medicion} (base ${metric.base})`);
+        byId("packageClients").replaceChildren(...(content.clientes || []).map((client) => {
+            const row = document.createElement("div");
+            row.className = "package-client";
+            const include = document.createElement("input");
+            include.type = "checkbox";
+            include.checked = client.incluido !== false;
+            include.dataset.packagePhone = client.phone;
+            include.className = "package-client-include";
+            include.setAttribute("aria-label", `Incluir ${client.nombre || client.phone}`);
+            const person = document.createElement("div");
+            const name = document.createElement("strong");
+            name.textContent = client.nombre || "Cliente";
+            const phone = document.createElement("div");
+            phone.className = "helper";
+            phone.textContent = client.phone;
+            person.append(name, phone);
+            const segment = document.createElement("div");
+            segment.innerHTML = `<span class="package-badge"></span><div class="helper"></div>`;
+            segment.querySelector("span").textContent = client.segmento;
+            segment.querySelector("div").textContent = client.servicio;
+            const message = document.createElement("textarea");
+            message.className = "package-client-message";
+            message.value = client.mensaje;
+            message.dataset.packageMessagePhone = client.phone;
+            row.append(include, person, segment, message);
+            return row;
+        }));
+        const editable = currentExecutionPackage.estado === "BORRADOR";
+        ["packageObjective", "packageWindowOne", "packageWindowTwo", "packageCampaignName", "packageCampaignDraft"]
+            .forEach(id => { byId(id).disabled = !editable; });
+        byId("packageClients").querySelectorAll("input,textarea").forEach(element => { element.disabled = !editable; });
+        byId("packageSaveButton").hidden = !editable;
+        byId("packageApproveButton").hidden = !editable;
+        byId("packageCancelButton").hidden = !editable;
+    }
+
+    async function loadExecutionPackage() {
+        if (!currentDecision) {
+            currentExecutionPackage = null;
+            return renderExecutionPackage();
+        }
+        const data = await requestJson(`/admin/content-library/director/decision/${currentDecision.id}/package`);
+        currentExecutionPackage = data.package || null;
+        renderExecutionPackage();
+    }
+
+    async function saveExecutionPackage() {
+        if (!currentExecutionPackage) return;
+        try {
+            const data = await requestJson(`/admin/content-library/director/execution-package/${currentExecutionPackage.id}`, {
+                method:"POST",
+                body:JSON.stringify({
+                    objetivo:byId("packageObjective").value,
+                    campana:{ nombre:byId("packageCampaignName").value, borrador:byId("packageCampaignDraft").value },
+                    horario:{ primeraVentana:byId("packageWindowOne").value, segundaVentana:byId("packageWindowTwo").value },
+                    clientes:(currentExecutionPackage.contenido.clientes || []).map(client => ({
+                        phone:client.phone,
+                        incluido:byId("packageClients").querySelector(`[data-package-phone="${client.phone}"]`).checked,
+                        mensaje:byId("packageClients").querySelector(`[data-package-message-phone="${client.phone}"]`).value
+                    }))
+                })
+            });
+            currentExecutionPackage = data.package;
+            renderExecutionPackage();
+            setStatus("Cambios del paquete guardados.", "ok");
+        } catch (error) { setStatus(error.message, "error"); }
+    }
+
+    async function resolveExecutionPackage(action) {
+        if (!currentExecutionPackage) return;
+        try {
+            const data = await requestJson(`/admin/content-library/director/execution-package/${currentExecutionPackage.id}/${action}`, { method:"POST", body:"{}" });
+            currentExecutionPackage = data.package;
+            renderExecutionPackage();
+            setStatus(action === "approve" ? "Paquete aprobado y listo para ejecutar." : "Paquete cancelado.", "ok");
+        } catch (error) { setStatus(error.message, "error"); }
+    }
+
+    byId("packageSaveButton").addEventListener("click", saveExecutionPackage);
+    byId("packageApproveButton").addEventListener("click", () => resolveExecutionPackage("approve"));
+    byId("packageCancelButton").addEventListener("click", () => resolveExecutionPackage("cancel"));
 
     async function loadDirectorStatus() {
         const data = await requestJson("/admin/content-library/director/status");
