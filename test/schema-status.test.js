@@ -109,7 +109,8 @@ test("Railway ejecuta el migrador como pre-deploy y el migrador toma advisory lo
     const railway = JSON.parse(fs.readFileSync(path.join(root, "railway.json"), "utf8"));
     assert.deepEqual(railway.deploy.preDeployCommand, ["node scripts/migrate.js"]);
     const migrate = fs.readFileSync(path.join(root, "scripts", "migrate.js"), "utf8");
-    assert.match(migrate, /pg_advisory_lock\(\$1\)", \[MIGRATION_LOCK_KEY\]/);
+    assert.match(migrate, /pg_advisory_xact_lock\(\$1\)", \[MIGRATION_LOCK_KEY\]/);
+    assert.doesNotMatch(migrate, /pg_advisory_lock\(\$1\)", \[MIGRATION_LOCK_KEY\]/);
     assert.match(migrate, /process\.exit\(1\)/);
 });
 
@@ -120,4 +121,5 @@ test("index.js no migra y solo inicia el scheduler a través del schemaGate", ()
     assert.match(index, /start: \(\) => \{\s*startPersistentScheduler\(\);\s*marketingSchedulerStarted = true;/);
     assert.match(index, /schemaGate\.begin\(\);/);
     assert.match(index, /getSchemaStatus: \(\) => schemaGate\.getStatus\(\)/);
+    assert.doesNotMatch(index, /enviarTasasDiarias|ultimoEnvioTasas/);
 });

@@ -17,7 +17,10 @@ const path = require("node:path");
 
 const MIGRATIONS_DIR = path.join(__dirname, "..", "..", "migrations");
 // Clave fija de pg_advisory_lock compartida por todas las ejecuciones del migrador.
-const MIGRATION_LOCK_KEY = "7204202610110001";
+// Clave nueva: la anterior quedó retenida como lock de sesión en el pooler
+// de Neon por versiones previas del runner; las nuevas migraciones usan
+// exclusivamente pg_advisory_xact_lock y no dejan locks huérfanos.
+const MIGRATION_LOCK_KEY = "7204202610140033";
 const SCHEMA_CHECK_INTERVAL_MS = 30 * 1000;
 const UNDEFINED_TABLE = "42P01";
 

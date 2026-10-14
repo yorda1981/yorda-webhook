@@ -19,8 +19,8 @@
 //
 // Idempotente: cada archivo de migrations/*.sql corre UNA sola vez,
 // registrado en la tabla schema_migrations. Volver a correr el comando
-// no repite nada ya aplicado. Un pg_advisory_lock serializa ejecuciones
-// concurrentes: la segunda espera y luego no encuentra nada pendiente.
+// no repite nada ya aplicado. Los advisory locks son transaccionales: el
+// pooler de Neon puede reasignar sesiones y no debe retener locks de sesión.
 // ─────────────────────────────────────────────────────────
 
 const fs = require("node:fs");
@@ -56,8 +56,8 @@ async function main() {
 
     await client.connect();
     try {
-        // Se libera al cerrar la sesión (client.end en el finally), incluso si algo falla.
-        await client.query("SELECT pg_advisory_lock($1)", [MIGRATION_LOCK_KEY]);
+        await client.query("BEGIN");
+        await client.query("SELECT pg_advisory_xact_lock($1)", [MIGRATION_LOCK_KEY]);
         await client.query(`
             CREATE TABLE IF NOT EXISTS schema_migrations (
                 id SERIAL PRIMARY KEY,
@@ -65,6 +65,7 @@ async function main() {
                 applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
         `);
+        await client.query("COMMIT");
 
         const pendientes = await getPendingMigrations(client, archivos);
 
@@ -85,6 +86,16 @@ async function main() {
             console.log(`▶️  Aplicando ${archivo} ...`);
             try {
                 await client.query("BEGIN");
+                await client.query("SELECT pg_advisory_xact_lock($1)", [MIGRATION_LOCK_KEY]);
+                const yaAplicada = await client.query(
+                    "SELECT 1 FROM schema_migrations WHERE name = $1 LIMIT 1",
+                    [archivo]
+                );
+                if (yaAplicada.rows.length) {
+                    await client.query("COMMIT");
+                    console.log(`   ↪️  ${archivo} ya fue aplicada por otra ejecución`);
+                    continue;
+                }
                 await client.query(sql);
                 await client.query("INSERT INTO schema_migrations (name) VALUES ($1)", [archivo]);
                 await client.query("COMMIT");
