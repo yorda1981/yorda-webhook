@@ -86,6 +86,15 @@ test("una recompensa de referidos siempre queda como compromiso económico pendi
     assert.equal(normalized.alternatives[0].ejecutable, false);
 });
 
+test("una oferta con porcentaje incompleto queda pendiente sin romper la evaluación", () => {
+    const alternatives = proposal().alternativas.map(item => ({ ...item }));
+    alternatives[0] = { ...alternatives[0], oferta: { tipo: "DESCUENTO_TRANSFERENCIA", porcentaje: 0 },
+        accionRecomendada: "Evaluar una promoción económica pendiente" };
+    const normalized = service.normalizeProposal(proposal({ alternativas: alternatives }), facts, null);
+    assert.equal(normalized.alternatives[0].ejecutable, false);
+    assert.deepEqual(normalized.alternatives[0].simulacionPromocion, []);
+});
+
 test("reintenta si el modelo no compara oportunidades realmente distintas", async () => {
     const responses = [proposal({ alternativas: proposal().alternativas.slice(0, 1) }), proposal()];
     const users = [];

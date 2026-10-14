@@ -293,7 +293,7 @@ function normalizeProposal(data, facts, promotionContext = null) {
             ? String(item.oferta.tipo).toUpperCase() : "NINGUNA";
         const offerPercent = [1, 2].includes(Number(item?.oferta?.porcentaje)) ? Number(item.oferta.porcentaje) : 0;
         const offer = offerType === "NINGUNA" ? null : { tipo: offerType, porcentaje: offerPercent };
-        const promotionScenarios = offer ? promotionCalculator.findOfferScenario(promotionContext, offer) : [];
+        const promotionScenarios = offer ? (promotionCalculator.findOfferScenario(promotionContext, offer) || []) : [];
         const isRateOffer = Boolean(offer);
         const promotionCostEstimate = promotionScenarios.length
             ? promotionScenarios.map(scenario => ({ transferenciaBRL: scenario.importeTransferenciaBRL, costoBeneficioBRL: scenario.costoBeneficioBRL,
