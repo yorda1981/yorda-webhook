@@ -30,11 +30,12 @@ Reglas:
 7. Si existe una decisión vigente, protégela: una alternativa ligeramente mejor no la sustituye. Solo REEMPLAZAR por ventaja >=20/100 y mejora clara del impacto, o por EVIDENCIA_INVALIDA, NO_EJECUTABLE o CAMBIO_MATERIAL demostrados.
 8. SIN_DECISION solo cuando no exista evidencia suficiente; aun así, devuelve las estrategias exploradas y qué información falta.
 9. Usa el registro de métricas antes/después de la decisión vigente para aprender; las variaciones son señales observadas, no prueba causal de que la iniciativa las produjo.
+10. En CADA respuesta, también cuando la acción sea MANTENER, devuelve al menos tres alternativas comparables. Deben resolver la oportunidad por mecanismos sustancialmente distintos; cambiar el texto o el segmento de una misma campaña no las hace distintas.
 
 Devuelve JSON:
 {"accion":"CREAR|MANTENER|REEMPLAZAR|RETIRAR|SIN_DECISION","estrategiaElegidaId":"S1","alternativas":[{"id":"S1","nombre":"...","mecanismo":"...","problema":"...","evidenciaIds":["F1"],"causaProbable":"...","justificacion":"...","accionRecomendada":"...","resultadoEsperado":"...","impacto":0,"viabilidad":0,"riesgo":0,"confianza":0,"costo":{"tipo":"SIN_COSTO|OPERATIVO|ECONOMICO|DESCONOCIDO","estimacion":null,"baseVerificada":false,"explicacion":"..."},"requiereCompromisoEconomico":false,"ejecutable":true,"recursos":["..."],"pasos":["..."],"destinatarios":{"criterio":"...","basadoEnDatos":true},"materiales":[{"tipo":"biblioteca|whatsapp|bot|otro","titulo":"...","contenido":"..."}],"metricas":["remesas completadas", "ganancia neta"],"capacidadesFaltantes":[]}],"ventajaCambio":0,"motivoCambio":"OPORTUNIDAD_SUPERIOR|EVIDENCIA_INVALIDA|NO_EJECUTABLE|CAMBIO_MATERIAL|null","explicacionCambio":"..."}
 
-MANTENER no necesita repetir todos los textos. RETIRAR solo es válido si la decisión vigente perdió validez o dejó de ser ejecutable.`;
+RETIRAR solo es válido si la decisión vigente perdió validez o dejó de ser ejecutable.`;
 
 const n = value => Number(value) || 0;
 const round1 = value => Math.round(n(value) * 10) / 10;
@@ -160,6 +161,21 @@ async function getBestDecision(db = pool) {
 const clean = (value, max = 1200) => String(value || "").trim().slice(0, max);
 const score = value => Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
 
+function mechanismsAreDistinct(alternatives) {
+    const stopWords = new Set(["para", "con", "por", "del", "las", "los", "una", "uno", "desde", "mediante", "sobre", "the", "and"]);
+    const tokens = alternatives.map(item => new Set(clean(item.mecanismo, 240).toLowerCase()
+        .normalize("NFD").replace(/[\u0300-\u036f]/g, "").match(/[a-z0-9]+/g)
+        ?.filter(token => token.length > 2 && !stopWords.has(token)) || []));
+    for (let i = 0; i < tokens.length; i += 1) {
+        for (let j = i + 1; j < tokens.length; j += 1) {
+            const union = new Set([...tokens[i], ...tokens[j]]);
+            const intersection = [...tokens[i]].filter(token => tokens[j].has(token)).length;
+            if (!union.size || intersection / union.size >= 0.65) return false;
+        }
+    }
+    return true;
+}
+
 function commercialOutcomeMetrics(snapshot) {
     return {
         conversaciones24h: snapshot.conversaciones24h,
@@ -255,8 +271,18 @@ function normalizeProposal(data, facts) {
         motivoCambio: CHANGE_REASONS.has(data?.motivoCambio) ? data.motivoCambio : null,
         explicacionCambio: clean(data?.explicacionCambio, 1000),
         alternatives, selectedStrategy,
-        alternativesValid: alternatives.length >= 3 && new Set(alternatives.map(item => item.mecanismo.toLowerCase())).size >= 3
+        alternativesValid: alternatives.length >= 3 && mechanismsAreDistinct(alternatives)
     };
+}
+
+async function generateCommercialProposal(llm, user, facts) {
+    const first = await llm.completeJson({ tarea: "decision", system: DECISION_SYSTEM, user, temperature: 0.1 });
+    let proposal = normalizeProposal(first.data, facts);
+    if (proposal.alternativesValid) return proposal;
+    const retryUser = `${user}\n\nTU RESPUESTA ANTERIOR NO CUMPLIÓ EL CRITERIO DE COMPARACIÓN. Rehazla completa: entrega al menos tres mecanismos realmente distintos, cita evidencia disponible para cada uno y vuelve a elegir la mejor. No conviertas variaciones de copy o segmentos en estrategias distintas.`;
+    const retry = await llm.completeJson({ tarea: "decision", system: DECISION_SYSTEM, user: retryUser, temperature: 0.1 });
+    proposal = normalizeProposal(retry.data, facts);
+    return proposal;
 }
 
 function validNewDecision(proposal) {
@@ -343,8 +369,11 @@ async function evaluateBestDecision(dependencies = {}) {
         activosBibliotecaCreados: executionPackage.contenido?.ejecucion?.activosBiblioteca || []
     } : null;
     const user = `HECHOS DISPONIBLES:\n${facts.map(f => `${f.id}. ${f.dato}`).join("\n")}\n\nDECISIÓN VIGENTE Y MÉTRICAS OBSERVADAS:\n${current ? JSON.stringify(current) : "No existe."}\n\nSEÑALES DE REVISIÓN/EJECUCIÓN DEL OPERADOR:\n${JSON.stringify(executionFeedback)}`;
-    const { data } = await llm.completeJson({ tarea: "decision", system: DECISION_SYSTEM, user, temperature: 0.1 });
-    const proposal = normalizeProposal(data, facts);
+    const proposal = await generateCommercialProposal(llm, user, facts);
+    if (!proposal.alternativesValid) {
+        return { decision: current, changed: false, reason: "ALTERNATIVAS_INSUFICIENTES",
+            alternativas: proposal.alternatives, executionPackage };
+    }
     const result = await applyProposal(db, current, proposal, snapshot);
     if (result.decision) {
         result.executionPackage = await executionPackages.ensureCommercialPackage(result.decision, db, dependencies);
@@ -384,6 +413,7 @@ function startBestDecision(dependencies = {}) {
 
 module.exports = {
     DECISION_SYSTEM, MIN_CHANGE_ADVANTAGE, MIN_IMPACT_LEAD, collectCommercialSnapshot,
-    snapshotFacts, commercialOutcomeMetrics, withOutcomeObservation, normalizeProposal, replacementAllowed, applyProposal, getBestDecision, evaluateBestDecision,
+    snapshotFacts, commercialOutcomeMetrics, withOutcomeObservation, mechanismsAreDistinct, normalizeProposal,
+    generateCommercialProposal, replacementAllowed, applyProposal, getBestDecision, evaluateBestDecision,
     refreshBestDecision, closeDecision, startBestDecision
 };

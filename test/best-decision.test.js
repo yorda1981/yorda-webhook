@@ -77,6 +77,26 @@ test("rechaza costos afirmados por el modelo y no elige ofertas sin rentabilidad
     assert.equal(normalized.selectedStrategy.id, "S2");
 });
 
+test("reintenta si el modelo no compara oportunidades realmente distintas", async () => {
+    const responses = [proposal({ alternativas: proposal().alternativas.slice(0, 1) }), proposal()];
+    const users = [];
+    const result = await service.generateCommercialProposal({ completeJson: async input => {
+        users.push(input.user);
+        return { data: responses.shift() };
+    } }, "hechos comerciales", facts);
+    assert.equal(users.length, 2);
+    assert.match(users[1], /mecanismos realmente distintos/);
+    assert.equal(result.alternativesValid, true);
+});
+
+test("detecta alternativas que solo parafrasean el mismo mecanismo", () => {
+    assert.equal(service.mechanismsAreDistinct([
+        { mecanismo: "Campaña de mensajes para recuperar cotizaciones" },
+        { mecanismo: "Mensajes de campaña para recuperar las cotizaciones" },
+        { mecanismo: "Programa de referidos de clientes" }
+    ]), false);
+});
+
 test("registra variaciones comerciales observadas sin presentarlas como causalidad", () => {
     const before = { snapshot: { metricasBase: { conversaciones24h: 10, cotizaciones24h: 4, remesasCompletadas24h: 2 },
         observacionesResultado: [] } };
