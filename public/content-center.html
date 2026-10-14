@@ -135,6 +135,7 @@
         </div>
         <div id="initiativeExecution" hidden>
             <div class="package-section"><h3>Alternativas comerciales evaluadas</h3><div id="initiativeAlternatives" class="package-list"></div></div>
+            <div class="package-section"><h3>Ofertas calculadas con la tasa vigente</h3><div class="helper" id="initiativeRateOfferNote"></div><div class="package-list" id="initiativeRateOffers"></div></div>
             <div class="package-section initiative-only"><h3>Estrategia seleccionada</h3><div class="package-list" id="initiativeWinner"></div></div>
             <div class="package-section initiative-only"><h3>Objetivo y preparación</h3><textarea id="initiativeObjective" maxlength="2000"></textarea><div id="initiativePlan" class="package-list"></div></div>
             <div class="package-section initiative-only"><h3>Material listo para revisión</h3><div id="initiativeMaterials"></div></div>
@@ -621,6 +622,27 @@
         }));
     }
 
+    function renderRateScenarios(rateContext = {}) {
+        byId("initiativeRateOfferNote").textContent = rateContext.disponible
+            ? `Tasa de rates actualizada ${rateContext.updatedAt} (${rateContext.zonaHoraria}). ${rateContext.notaEscenarios || ""} Los escenarios usan el cotizador real; el nivel VIP está incluido. El margen del 5 % es referencia no verificada; ningún cálculo autoriza activar promociones.${rateContext.beneficiosExistentesConCostoDesconocido ? " Hay beneficios/ofertas acumulados cuyo costo no está cuantificado; el margen restante se muestra como pendiente." : ""} ${rateContext.conversionCostoNota || ""}`
+            : `Cálculo pendiente: ${rateContext.motivo || "no hay una tasa diaria válida"}${rateContext.updatedAt ? ` Última actualización registrada: ${rateContext.updatedAt}.` : ""}`;
+        const fmtBRL = value => value === null || value === undefined ? "pendiente" : `R$ ${Number(value).toFixed(2)}`;
+        const fmtCUP = value => `CUP ${Number(value).toLocaleString("es-ES")}`;
+        byId("initiativeRateOffers").replaceChildren(...(rateContext.escenarios || []).map(scenario => {
+            const box = document.createElement("article");
+            box.className = "package-item";
+            const heading = document.createElement("strong");
+            heading.textContent = `${fmtBRL(scenario.importeTransferenciaBRL)} · VIP nivel ${scenario.nivelVip} · normal: ${fmtCUP(scenario.normal.recibeCUP)} (tasa ${scenario.normal.tasa})`;
+            const lines = [];
+            for (const offer of scenario.descuentos || []) lines.push(`Descuento ${offer.porcentaje}% del importe: cliente paga ${fmtBRL(offer.pagaClienteBRL)}, recibe ${fmtCUP(offer.recibePromocionCUP)}; beneficio ${fmtBRL(offer.costoBeneficioBRL)}; margen restante teórico ${fmtBRL(offer.margenReferenciaRestanteBRL)} (${offer.margenReferenciaRestantePct}%).`);
+            for (const offer of scenario.mejorasTasa || []) lines.push(`Mejora de tasa ${offer.porcentaje}% (no ${offer.porcentaje} CUP): tasa ${Number(offer.tasaPromocional).toFixed(4)}, recibe ${fmtCUP(offer.recibePromocionCUP)} (+${fmtCUP(offer.beneficioCUP)}); costo equivalente ${fmtBRL(offer.costoBeneficioBRL)}; margen restante teórico ${fmtBRL(offer.margenReferenciaRestanteBRL)} (${offer.margenReferenciaRestantePct ?? "pendiente"}%).`);
+            const detail = document.createElement("p");
+            detail.textContent = lines.join(" ");
+            box.append(heading, detail);
+            return box;
+        }));
+    }
+
     function renderExecutionPackage() {
         const panel = byId("executionPackagePanel");
         panel.hidden = !currentExecutionPackage;
@@ -645,14 +667,22 @@
                 detail.textContent = `${alternative.mecanismo || "Mecanismo no especificado"} · puntuación ${alternative.puntuacionComercial ?? "—"}/100 · impacto ${alternative.impacto ?? "—"}/100 · viabilidad ${alternative.viabilidad ?? "—"}/100 · riesgo ${alternative.riesgo ?? "—"}/100 · ${alternative.ejecutable ? "PREPARABLE CON LOS RECURSOS ACTUALES" : "NO EJECUTABLE TODAVÍA"}`;
                 const cost = document.createElement("p");
                 cost.textContent = `Costo: ${alternative.costo?.explicacion || "No verificado"}${alternative.costo?.baseVerificada ? " (base verificada)" : ""}`;
+                const offer = document.createElement("p");
+                if (alternative.oferta) {
+                    const label = alternative.oferta.tipo === "MEJORA_TASA" ? "Mejora porcentual de tasa" : "Descuento sobre el importe transferido";
+                    offer.textContent = `${label} ${alternative.oferta.porcentaje}% · ${alternative.simulacionPromocion?.length || 0} escenarios calculados · rentabilidad no verificada`;
+                }
                 const evidence = document.createElement("p");
                 evidence.textContent = `Evidencia: ${(alternative.evidencia || []).map(fact => `${fact.id}: ${fact.dato}`).join("; ") || "Sin evidencia citada"}`;
                 const gaps = document.createElement("p");
                 gaps.textContent = `Pendiente: ${(alternative.capacidadesFaltantes || []).join("; ") || (alternative.ejecutable ? "Ninguna declarada" : "verificar la rentabilidad o capacidad requerida")}`;
-                card.append(heading, detail, cost, evidence, gaps);
+                card.append(heading, detail, cost);
+                if (alternative.oferta) card.append(offer);
+                card.append(evidence, gaps);
                 return card;
             }));
         }
+        renderRateScenarios(content.simulacionPromocion || {});
         if (isInitiative) {
             const winner = content.estrategiaElegida || {};
             const recipients = content.destinatarios || {};

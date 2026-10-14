@@ -3,6 +3,10 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const packageService = require("../src/services/director/recovery-execution-package");
+const promotion = require("../src/services/director/promotion-calculator");
+
+const RATES = { brl_0: 160, brl_100: 178, brl_500: 180, brl_1000: 182,
+    updated_at: new Date("2026-10-11T18:46:40.000Z") };
 
 const evidence = [{ id: "F1", dato: "10 conversaciones recientes con el bot." }];
 
@@ -36,11 +40,14 @@ test("iniciativa que requiere gasto no verificado no se ofrece para aprobar", ()
 
 test("aprobación crea el borrador conectado a Biblioteca, pero no publica", async () => {
     const row = { id: 9, decision_id: 12, tipo: "INICIATIVA_COMERCIAL", estado: "BORRADOR",
-        contenido: packageService.buildInitiativeContent(decision()) };
+        contenido: { ...packageService.buildInitiativeContent(decision()),
+            simulacionPromocion: promotion.buildScenarios(RATES, RATES.updated_at) } };
     const calls = [];
     const db = { query: async (sql, params) => {
         calls.push({ sql, params });
         if (sql.includes("SELECT * FROM director_execution_packages")) return { rows: [row] };
+        if (sql.includes("SELECT * FROM rates")) return { rows: [RATES] };
+        if (sql.includes("SELECT activa, vence_at")) return { rows: [] };
         if (sql.includes("UPDATE director_execution_packages")) {
             row.estado = params[1]; row.contenido = JSON.parse(params[2]);
             return { rows: [row] };

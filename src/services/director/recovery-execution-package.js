@@ -5,6 +5,7 @@ const recuperacion = require("../recuperacion");
 const mensajes = require("../recuperacion-mensajes");
 const recuperacionEnvios = require("../recuperacion-envios");
 const contentLibrary = require("../content-library");
+const promotionCalculator = require("./promotion-calculator");
 
 const PACKAGE_TYPE = "RECUPERACION_ABANDONOS";
 const STATES = new Set(["BORRADOR", "APROBADO", "CANCELADO"]);
@@ -135,13 +136,39 @@ function mapPackage(row) {
     };
 }
 
-function buildInitiativeContent(decision, now = new Date()) {
+function refreshOfferSimulation(strategy, promotionContext) {
+    if (!strategy) return strategy;
+    const offer = strategy.oferta || null;
+    const simulation = offer ? promotionCalculator.findOfferScenario(promotionContext, offer) : [];
+    if (!offer) return { ...strategy, simulacionPromocion: [] };
+    const costSummary = simulation.length ? simulation.map(item => ({ transferenciaBRL: item.importeTransferenciaBRL,
+        costoBeneficioBRL: item.costoBeneficioBRL, margenReferenciaRestanteBRL: item.margenReferenciaRestanteBRL,
+        margenReferenciaRestantePct: item.margenReferenciaRestantePct })) : null;
+    return { ...strategy, simulacionPromocion: simulation,
+        ejecutable: false,
+        costo: { tipo: "ECONOMICO", estimacion: costSummary, baseVerificada: false,
+            explicacion: simulation.length
+                ? "Beneficio valorizado con tasa vigente; no equivale al costo real de liquidación. El margen restante es una referencia del 5 %, no rentabilidad neta verificada."
+                : `Cálculo pendiente: ${promotionContext?.motivo || "no existe una tasa vigente válida"}` } };
+}
+
+function refreshCommercialAlternatives(alternatives, promotionContext) {
+    return (Array.isArray(alternatives) ? alternatives : []).map(item => refreshOfferSimulation(item, promotionContext));
+}
+
+function buildInitiativeContent(decision, now = new Date(), promotionContext = null) {
     const alternatives = Array.isArray(decision.alternativas) ? decision.alternativas : [];
-    const winner = decision.estrategiaElegida || alternatives[0] || null;
+    const recalculatedAlternatives = alternatives.map(item => refreshOfferSimulation(item, promotionContext));
+    const selectedId = decision.estrategiaElegida?.id;
+    const winner = refreshOfferSimulation(decision.estrategiaElegida
+        || recalculatedAlternatives.find(item => item.id === selectedId)
+        || recalculatedAlternatives[0] || null, promotionContext);
     const materials = winner?.materiales || [];
     const libraryMaterials = materials.filter(item => item.tipo === "biblioteca" && item.titulo && item.contenido);
     const recovery = isRecoveryDecision(decision);
     const missing = [...(winner?.capacidadesFaltantes || [])];
+    if (winner?.oferta && !winner.simulacionPromocion?.length) missing.push("La propuesta económica no se puede calcular: falta una tasa diaria vigente válida.");
+    if (winner?.oferta) missing.push("No hay costos reales de liquidación ni margen neto verificados; la oferta no puede aprobarse ni activarse.");
     for (const material of materials.filter(item => item.tipo !== "biblioteca")) {
         missing.push(`No hay un adaptador operativo para ejecutar material tipo ${material.tipo || "sin tipo"}; requiere acción manual revisada.`);
     }
@@ -152,7 +179,8 @@ function buildInitiativeContent(decision, now = new Date()) {
         objetivo: decision.problema,
         generadoAt: now.toISOString(),
         estrategiaElegida: winner,
-        alternativas: alternatives,
+        alternativas: recalculatedAlternatives,
+        simulacionPromocion: promotionContext || { disponible: false, motivo: "No calculada", escenarios: [] },
         destinatarios: winner?.destinatarios || { criterio: "Sin segmentación individual verificable", basadoEnDatos: false },
         materiales: materials,
         costos: winner?.costo || { tipo: "DESCONOCIDO", estimacion: null, baseVerificada: false,
@@ -163,7 +191,7 @@ function buildInitiativeContent(decision, now = new Date()) {
         capacidadesFaltantes: [...new Set(missing)],
         ejecucion: {
             adaptador: recovery ? "RECUPERACION_CRM" : libraryMaterials.length ? "BIBLIOTECA_BORRADOR" : null,
-            listaParaAprobar: recovery || (libraryMaterials.length > 0 && !winner?.requiereCompromisoEconomico),
+            listaParaAprobar: recovery || (libraryMaterials.length > 0 && !winner?.requiereCompromisoEconomico && !winner?.oferta),
             requiereAprobacion: true,
             publicacionesAutomaticas: false,
             mensajesAutomaticos: false,
@@ -177,11 +205,30 @@ async function ensureCommercialPackage(decision, db = pool, dependencies = {}) {
     const existing = await getPackageForDecision(decision.id, db);
     if (existing) {
         const content = existing.contenido || {};
-        const withAlternatives = { ...content, alternativas: decision.alternativas || content.alternativas || [],
-            estrategiaElegida: decision.estrategiaElegida || content.estrategiaElegida || null };
+        if (existing.tipo === "INICIATIVA_COMERCIAL" && existing.estado === "BORRADOR") {
+            const promotionContext = await promotionCalculator.getCurrentPromotionScenarios(db, dependencies.now || new Date());
+            const refreshed = buildInitiativeContent(decision, dependencies.now || new Date(), promotionContext);
+            const withAlternatives = { ...content, ...refreshed,
+                objetivo: content.objetivo || refreshed.objetivo,
+                generadoAt: content.generadoAt || refreshed.generadoAt,
+                materiales: content.materiales || refreshed.materiales,
+                plan: content.plan || refreshed.plan };
+            if (JSON.stringify(content) === JSON.stringify(withAlternatives)) return existing;
+            const updated = await db.query("UPDATE director_execution_packages SET contenido = $2::jsonb, actualizado_at = NOW() WHERE id = $1 RETURNING *",
+                [existing.id, JSON.stringify(withAlternatives)]);
+            return mapPackage(updated.rows[0]);
+        }
+        const promotionContext = existing.estado === "BORRADOR"
+            ? await promotionCalculator.getCurrentPromotionScenarios(db, dependencies.now || new Date())
+            : content.simulacionPromocion;
+        const withAlternatives = { ...content,
+            alternativas: refreshCommercialAlternatives(decision.alternativas || content.alternativas || [], promotionContext),
+            estrategiaElegida: refreshOfferSimulation(decision.estrategiaElegida || content.estrategiaElegida || null, promotionContext),
+            simulacionPromocion: promotionContext || { disponible: false, motivo: "No recalculada", escenarios: [] } };
         if (existing.estado === "BORRADOR" && withAlternatives.alternativas.length
             && (JSON.stringify(content.alternativas || []) !== JSON.stringify(withAlternatives.alternativas)
-                || JSON.stringify(content.estrategiaElegida || null) !== JSON.stringify(withAlternatives.estrategiaElegida))) {
+                || JSON.stringify(content.estrategiaElegida || null) !== JSON.stringify(withAlternatives.estrategiaElegida)
+                || JSON.stringify(content.simulacionPromocion || null) !== JSON.stringify(withAlternatives.simulacionPromocion))) {
             const updated = await db.query("UPDATE director_execution_packages SET contenido = $2::jsonb, actualizado_at = NOW() WHERE id = $1 RETURNING *",
                 [existing.id, JSON.stringify(withAlternatives)]);
             return mapPackage(updated.rows[0]);
@@ -190,8 +237,11 @@ async function ensureCommercialPackage(decision, db = pool, dependencies = {}) {
     }
     if (isRecoveryDecision(decision)) {
         const candidates = await (dependencies.getCandidates || recuperacion.obtenerCandidatosRecuperacion)(db, { throwOnError: true });
+        const promotionContext = await promotionCalculator.getCurrentPromotionScenarios(db, dependencies.now || new Date());
         const content = { ...buildPackageContent(decision, candidates, dependencies.now || new Date()),
-            alternativas: decision.alternativas || [], estrategiaElegida: decision.estrategiaElegida || null,
+            alternativas: refreshCommercialAlternatives(decision.alternativas, promotionContext),
+            estrategiaElegida: refreshOfferSimulation(decision.estrategiaElegida, promotionContext),
+            simulacionPromocion: promotionContext,
             ejecucion: { adaptador: "RECUPERACION_CRM", listaParaAprobar: true, requiereAprobacion: true,
                 publicacionesAutomaticas: false, mensajesAutomaticos: false, resultados: [] } };
         const result = await db.query(`
@@ -200,7 +250,8 @@ async function ensureCommercialPackage(decision, db = pool, dependencies = {}) {
         `, [decision.id, PACKAGE_TYPE, JSON.stringify(content)]);
         return result.rows[0] ? mapPackage(result.rows[0]) : getPackageForDecision(decision.id, db);
     }
-    const content = buildInitiativeContent(decision, dependencies.now || new Date());
+    const promotionContext = await promotionCalculator.getCurrentPromotionScenarios(db, dependencies.now || new Date());
+    const content = buildInitiativeContent(decision, dependencies.now || new Date(), promotionContext);
     const result = await db.query(`
         INSERT INTO director_execution_packages (decision_id, tipo, estado, contenido)
         VALUES ($1, 'INICIATIVA_COMERCIAL', 'BORRADOR', $2::jsonb)
@@ -219,10 +270,14 @@ async function getPackageForDecision(decisionId, db = pool) {
 async function ensureRecoveryPackage(decision, db = pool, dependencies = {}) {
     if (!isRecoveryDecision(decision)) return null;
     const existing = await getPackageForDecision(decision.id, db);
-    if (existing) return existing;
+    if (existing) return ensureCommercialPackage(decision, db, dependencies);
     const getCandidates = dependencies.getCandidates || recuperacion.obtenerCandidatosRecuperacion;
     const candidates = await getCandidates(db, { throwOnError: true });
-    const content = buildPackageContent(decision, candidates, dependencies.now || new Date());
+    const promotionContext = await promotionCalculator.getCurrentPromotionScenarios(db, dependencies.now || new Date());
+    const content = { ...buildPackageContent(decision, candidates, dependencies.now || new Date()),
+        alternativas: refreshCommercialAlternatives(decision.alternativas, promotionContext),
+        estrategiaElegida: refreshOfferSimulation(decision.estrategiaElegida, promotionContext),
+        simulacionPromocion: promotionContext };
     const result = await db.query(`
         INSERT INTO director_execution_packages (decision_id, tipo, estado, contenido)
         VALUES ($1, $2, 'BORRADOR', $3::jsonb)
@@ -310,6 +365,46 @@ async function updatePackage(rawId, input, db = pool) {
     return mapPackage(result.rows[0]);
 }
 
+function hasRateSensitiveClaim(message) {
+    return /\b(tasas?|cotizaciones?|cotizar|CUP|BRL|R\$|beneficios?|descuentos?|bonos?|promoci[oó]n(?:es)?|oferta(?:s)?)\b/i.test(String(message || ""));
+}
+
+function packageHasRateDependentContent(row, content) {
+    if (row.tipo === "RECUPERACION_ABANDONOS") {
+        return (content.clientes || []).some(client => client.incluido !== false && hasRateSensitiveClaim(client.mensaje));
+    }
+    if (content.estrategiaElegida?.oferta) return true;
+    return (content.materiales || []).some(material => hasRateSensitiveClaim(`${material.titulo || ""} ${material.contenido || ""}`));
+}
+
+function refreshContentForRates(content, context, row, now, alreadySentPhones = []) {
+    const alternatives = refreshCommercialAlternatives(content.alternativas, context);
+    const winner = refreshOfferSimulation(content.estrategiaElegida, context);
+    const refreshed = { ...content, alternativas: alternatives, estrategiaElegida: winner, simulacionPromocion: context };
+    if (row.tipo === "INICIATIVA_COMERCIAL") {
+        const rebuilt = buildInitiativeContent({ ...content, alternativas: alternatives, estrategiaElegida: winner }, now, context);
+        Object.assign(refreshed, { costos: rebuilt.costos, capacidadesFaltantes: rebuilt.capacidadesFaltantes,
+            ejecucion: { ...content.ejecucion, listaParaAprobar: rebuilt.ejecucion.listaParaAprobar } });
+        refreshed.materiales = (content.materiales || []).map(material => hasRateSensitiveClaim(material.contenido)
+            ? { ...material, contenido: "Consulta con el equipo de YORDA la cotización vigente para tu envío antes de continuar." }
+            : material);
+    } else if (row.tipo === "RECUPERACION_ABANDONOS") {
+        const sentPhones = new Set(alreadySentPhones.filter(result => ["ENVIADO", "YA_ENVIADO"].includes(result.estado)).map(result => result.phone));
+        refreshed.clientes = (content.clientes || []).map(client => client.incluido !== false && !sentPhones.has(client.phone)
+            && hasRateSensitiveClaim(client.mensaje)
+            ? { ...client, mensaje: `Hola${client.nombre ? ` ${client.nombre}` : ""}, si quieres retomar tu envío, te ayudamos a cotizarlo con los valores vigentes antes de continuar.` }
+            : client);
+    }
+    return refreshed;
+}
+
+async function persistRateRefresh(id, row, content, context, db, now) {
+    const updatedContent = refreshContentForRates(content, context, row, now);
+    await db.query("UPDATE director_execution_packages SET contenido = $2::jsonb, actualizado_at = NOW() WHERE id = $1 AND estado = 'BORRADOR'",
+        [id, JSON.stringify(updatedContent)]);
+    return updatedContent;
+}
+
 async function resolvePackage(rawId, action, db = pool, dependencies = {}) {
     const id = Number(rawId);
     const target = action === "approve" ? "APROBADO" : action === "cancel" ? "CANCELADO" : null;
@@ -317,7 +412,24 @@ async function resolvePackage(rawId, action, db = pool, dependencies = {}) {
     const current = await db.query("SELECT * FROM director_execution_packages WHERE id = $1 AND estado = 'BORRADOR'", [id]);
     const row = current.rows[0];
     if (!row) return null;
-    const content = row.contenido || {};
+    let content = row.contenido || {};
+    if (action === "approve" && packageHasRateDependentContent(row, content)) {
+        const promotionContext = await promotionCalculator.getCurrentPromotionScenarios(db, dependencies.now || new Date());
+        const previousRevision = content.simulacionPromocion?.revision || null;
+        if (!promotionContext.disponible || previousRevision !== promotionContext.revision) {
+            await persistRateRefresh(id, row, content, promotionContext, db, dependencies.now || new Date());
+            throw validationError(promotionContext.disponible
+                ? "La tasa vigente cambió desde la última revisión. Se recalculó el paquete; revisa los importes antes de aprobar."
+                : "No se pudo confirmar una tasa vigente válida. El paquete quedó pendiente de recálculo antes de aprobar.");
+        }
+        content.simulacionPromocion = promotionContext;
+        if (content.estrategiaElegida?.oferta || (content.estrategiaElegida?.requiereCompromisoEconomico && !content.costos?.baseVerificada)) {
+            throw validationError("No se puede aprobar una promoción económica sin costos reales y margen neto verificados.");
+        }
+        if (row.tipo === "INICIATIVA_COMERCIAL" && !content.ejecucion?.listaParaAprobar) {
+            throw validationError("Esta iniciativa no puede aprobarse todavía: faltan verificaciones de rentabilidad o capacidad operativa.");
+        }
+    }
     content.señalesOperador = [...(content.señalesOperador || []), {
         tipo: action === "approve" ? "APROBADO" : "CANCELADO", ocurridoAt: new Date().toISOString()
     }].slice(-20);
@@ -325,6 +437,18 @@ async function resolvePackage(rawId, action, db = pool, dependencies = {}) {
         const results = [];
         for (const client of content.clientes || []) {
             if (client.incluido === false) continue;
+            if (hasRateSensitiveClaim(client.mensaje)) {
+                const latestRates = await promotionCalculator.getCurrentPromotionScenarios(db, dependencies.now || new Date());
+                if (!latestRates.disponible || latestRates.revision !== content.simulacionPromocion?.revision) {
+                    content = refreshContentForRates(content, latestRates, row, dependencies.now || new Date(), results);
+                    content.ejecucion = { ...(content.ejecucion || {}), adaptador: "RECUPERACION_CRM", resultadosParciales: results,
+                        completados: results.filter(result => result.estado === "ENVIADO" || result.estado === "YA_ENVIADO").length,
+                        fallidos: results.filter(result => !["ENVIADO", "YA_ENVIADO"].includes(result.estado)).length };
+                    await db.query("UPDATE director_execution_packages SET contenido = $2::jsonb, actualizado_at = NOW() WHERE id = $1 AND estado = 'BORRADOR'",
+                        [id, JSON.stringify(content)]);
+                    throw validationError("La tasa cambió durante el envío. Se detuvieron los mensajes pendientes y se recalculó el paquete; revisa y vuelve a aprobar.");
+                }
+            }
             const sendRecovery = dependencies.sendRecovery || recuperacionEnvios.enviarRecuperacionManual;
             const sent = await sendRecovery({
                 phone: client.phone, familia: client.familia, indice: client.varianteIndice,
@@ -364,6 +488,6 @@ async function resolvePackage(rawId, action, db = pool, dependencies = {}) {
 
 module.exports = {
     PACKAGE_TYPE, isRecoveryDecision, seededRng, segmentName, campaignDraft, buildPackageContent,
-    buildInitiativeContent, getPackageForDecision, ensureRecoveryPackage, ensureCommercialPackage,
+    refreshOfferSimulation, refreshCommercialAlternatives, buildInitiativeContent, getPackageForDecision, ensureRecoveryPackage, ensureCommercialPackage,
     normalizeEditableContent, updatePackage, resolvePackage
 };

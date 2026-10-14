@@ -4,6 +4,7 @@ const pool = require("../../../db");
 const env = require("../../config/env");
 const llmGateway = require("./llm");
 const executionPackages = require("./recovery-execution-package");
+const promotionCalculator = require("./promotion-calculator");
 const { conLockExclusivo } = require("../job-lock");
 
 const REVIEW_INTERVAL_MS = 60 * 60 * 1000;
@@ -24,6 +25,7 @@ Reglas:
 1. Usa solo HECHOS con ids; cita los ids en cada estrategia. Distingue hechos de hipótesis y declara datos faltantes.
 2. Compara impacto, viabilidad, riesgo, recursos y costos. No inventes importes, margen neto ni costos. Para compromisos económicos sin costos verificados marca requiereCompromisoEconomico=true, ejecutable=false y explica qué falta.
 3. El margen aproximado del 5 % es una referencia no verificada, no una autorización para descontar. No inventes ofertas, urgencia, escasez ni beneficios.
+3a. Si evalúas una promoción, utiliza solo los escenarios calculados con la tasa vigente incluidos en los hechos. Puedes comparar descuento sobre BRL con mejora porcentual sobre la tasa; no confundas ambos. El costo BRL de mejora es solo una equivalencia, y el margen restante es teórico mientras falten costos reales. No presentes rentabilidad como verificada ni hagas ejecutable una oferta económica sin costos netos comprobados.
 4. Las estrategias pueden usar cualquier mecanismo comercial; los recursos disponibles describen integración, no limitan las ideas. Si falta una capacidad, declárala en capacidadesFaltantes y prepara lo que sí sea seguro.
 5. Cada estrategia debe incluir trabajo terminado: pasos, materiales concretos, destinatarios/criterio si la evidencia permite seleccionarlos, métricas comerciales y costes conocidos. No envíes ni publiques.
 6. Elige una única estrategia ganadora. Una idea creativa sin evidencia suficiente o imposible de ejecutar no debe ganar frente a una opción verificable.
@@ -33,7 +35,7 @@ Reglas:
 10. En CADA respuesta, también cuando la acción sea MANTENER, devuelve al menos tres alternativas comparables. Deben resolver la oportunidad por mecanismos sustancialmente distintos; cambiar el texto o el segmento de una misma campaña no las hace distintas.
 
 Devuelve JSON:
-{"accion":"CREAR|MANTENER|REEMPLAZAR|RETIRAR|SIN_DECISION","estrategiaElegidaId":"S1","alternativas":[{"id":"S1","nombre":"...","mecanismo":"...","problema":"...","evidenciaIds":["F1"],"causaProbable":"...","justificacion":"...","accionRecomendada":"...","resultadoEsperado":"...","impacto":0,"viabilidad":0,"riesgo":0,"confianza":0,"costo":{"tipo":"SIN_COSTO|OPERATIVO|ECONOMICO|DESCONOCIDO","estimacion":null,"baseVerificada":false,"explicacion":"..."},"requiereCompromisoEconomico":false,"ejecutable":true,"recursos":["..."],"pasos":["..."],"destinatarios":{"criterio":"...","basadoEnDatos":true},"materiales":[{"tipo":"biblioteca|whatsapp|bot|otro","titulo":"...","contenido":"..."}],"metricas":["remesas completadas", "ganancia neta"],"capacidadesFaltantes":[]}],"ventajaCambio":0,"motivoCambio":"OPORTUNIDAD_SUPERIOR|EVIDENCIA_INVALIDA|NO_EJECUTABLE|CAMBIO_MATERIAL|null","explicacionCambio":"..."}
+{"accion":"CREAR|MANTENER|REEMPLAZAR|RETIRAR|SIN_DECISION","estrategiaElegidaId":"S1","alternativas":[{"id":"S1","nombre":"...","mecanismo":"...","problema":"...","evidenciaIds":["F1"],"causaProbable":"...","justificacion":"...","accionRecomendada":"...","resultadoEsperado":"...","impacto":0,"viabilidad":0,"riesgo":0,"confianza":0,"costo":{"tipo":"SIN_COSTO|OPERATIVO|ECONOMICO|DESCONOCIDO","estimacion":null,"baseVerificada":false,"explicacion":"..."},"oferta":{"tipo":"NINGUNA|DESCUENTO_TRANSFERENCIA|MEJORA_TASA","porcentaje":0|1|2},"requiereCompromisoEconomico":false,"ejecutable":true,"recursos":["..."],"pasos":["..."],"destinatarios":{"criterio":"...","basadoEnDatos":true},"materiales":[{"tipo":"biblioteca|whatsapp|bot|otro","titulo":"...","contenido":"..."}],"metricas":["remesas completadas", "ganancia neta"],"capacidadesFaltantes":[]}],"ventajaCambio":0,"motivoCambio":"OPORTUNIDAD_SUPERIOR|EVIDENCIA_INVALIDA|NO_EJECUTABLE|CAMBIO_MATERIAL|null","explicacionCambio":"..."}
 
 RETIRAR solo es válido si la decisión vigente perdió validez o dejó de ser ejecutable.`;
 
@@ -93,6 +95,7 @@ async function collectCommercialSnapshot(db = pool) {
             NOW() AS capturado_at
     `);
     const row = result.rows[0] || {};
+    const escenariosPromocion = await promotionCalculator.getCurrentPromotionScenarios(db);
     return {
         capturadoAt: row.capturado_at,
         conversaciones24h: n(row.conversaciones_24h),
@@ -115,7 +118,8 @@ async function collectCommercialSnapshot(db = pool) {
         clientesVip: n(row.clientes_vip),
         volumenRemesas30d: n(row.volumen_remesas_30d),
         tasasActualizadasAt: row.tasas_actualizadas_at || null,
-        rentabilidad: { costosUnitariosDisponibles: false, gananciaNetaDisponible: false }
+        rentabilidad: { costosUnitariosDisponibles: false, gananciaNetaDisponible: false },
+        escenariosPromocion
     };
 }
 
@@ -133,7 +137,10 @@ function snapshotFacts(snapshot) {
         { id: "F10", dato: `Las tasas vigentes se actualizaron por última vez en ${snapshot.tasasActualizadasAt || "fecha no disponible"}.` },
         { id: "F11", dato: `${snapshot.clientesConRemesa30d} clientes completaron al menos una remesa en 30 días; ${snapshot.clientesFrecuentes} están marcados como frecuentes y ${snapshot.clientesVip} tienen nivel VIP.` },
         { id: "F12", dato: `El volumen monetario registrado en remesas completadas durante 30 días es ${snapshot.volumenRemesas30d}; es volumen transaccionado, no ganancia.` },
-        { id: "F13", dato: `No existe información suficiente de costos unitarios ni ganancia neta por operación; no se puede verificar la rentabilidad de promociones.` }
+        { id: "F13", dato: `No existe información suficiente de costos unitarios ni ganancia neta por operación; no se puede verificar la rentabilidad de promociones.` },
+        { id: "F14", dato: snapshot.escenariosPromocion?.disponible
+            ? `Escenarios con tasa vigente de rates (actualizada ${snapshot.escenariosPromocion.updatedAt}; zona São Paulo): ${JSON.stringify(snapshot.escenariosPromocion.escenarios)}. Margen 5 % y restante son referencias teóricas, no rentabilidad neta verificada.`
+            : `No se puede calcular ninguna promoción con una tasa vigente: ${snapshot.escenariosPromocion?.motivo || "tasa no disponible"}` }
     ];
 }
 
@@ -198,7 +205,7 @@ function withOutcomeObservation(snapshot, current = null, alternatives = [], sel
         metricasBase: base, observacionesResultado: [...previous, observation].slice(-24) };
 }
 
-function normalizeProposal(data, facts) {
+function normalizeProposal(data, facts, promotionContext = null) {
     const action = String(data?.accion || "").toUpperCase();
     const evidenceIds = [...new Set(Array.isArray(data?.evidenciaIds) ? data.evidenciaIds.map(String) : [])];
     const factMap = new Map(facts.map(fact => [fact.id, fact]));
@@ -217,6 +224,15 @@ function normalizeProposal(data, facts) {
             .join(" ");
         const economicLanguage = /\b(descuento|bono|bonificación|tasa preferencial|entrega gratis|gratis|crédito|cashback|incentivo|premio|regalo|promoción económica)\b|(?:R\$|\$)\s?\d/i.test(strategyText);
         const requiresMoney = Boolean(item?.requiereCompromisoEconomico) || economicLanguage || costType === "ECONOMICO";
+        const offerType = ["DESCUENTO_TRANSFERENCIA", "MEJORA_TASA"].includes(String(item?.oferta?.tipo || "").toUpperCase())
+            ? String(item.oferta.tipo).toUpperCase() : "NINGUNA";
+        const offerPercent = [1, 2].includes(Number(item?.oferta?.porcentaje)) ? Number(item.oferta.porcentaje) : 0;
+        const offer = offerType === "NINGUNA" ? null : { tipo: offerType, porcentaje: offerPercent };
+        const promotionScenarios = offer ? promotionCalculator.findOfferScenario(promotionContext, offer) : [];
+        const isRateOffer = Boolean(offer);
+        const promotionCostEstimate = promotionScenarios.length
+            ? promotionScenarios.map(scenario => ({ transferenciaBRL: scenario.importeTransferenciaBRL, costoBeneficioBRL: scenario.costoBeneficioBRL,
+                margenReferenciaRestanteBRL: scenario.margenReferenciaRestanteBRL, margenReferenciaRestantePct: scenario.margenReferenciaRestantePct })) : null;
         const costPenalty = costType === "SIN_COSTO" ? 0
             : costType === "OPERATIVO" ? 8
                 : verifiedCost ? 12 : 22;
@@ -228,10 +244,15 @@ function normalizeProposal(data, facts) {
             resultadoEsperado: clean(item?.resultadoEsperado, 600),
             impacto: score(item?.impacto), viabilidad: score(item?.viabilidad), riesgo: score(item?.riesgo),
             confianza: score(item?.confianza), costo: {
-                tipo: costType, estimacion: verifiedCost ? Number(item.costo.estimacion) : null,
-                baseVerificada: verifiedCost, explicacion: clean(item?.costo?.explicacion, 400)
+                tipo: isRateOffer ? "ECONOMICO" : costType,
+                estimacion: verifiedCost ? Number(item.costo.estimacion) : promotionCostEstimate,
+                baseVerificada: verifiedCost, explicacion: isRateOffer
+                    ? (promotionCostEstimate ? "Estimación del beneficio calculada con la tasa vigente; no es costo neto de liquidación. El margen restante usa la referencia no verificada del 5 %." : "Cálculo pendiente: no hay una tasa diaria vigente válida.")
+                    : clean(item?.costo?.explicacion, 400)
             },
-            requiereCompromisoEconomico: requiresMoney,
+            oferta: offer,
+            simulacionPromocion: promotionScenarios,
+            requiereCompromisoEconomico: requiresMoney || isRateOffer,
             penalizacionCosto: costPenalty,
             ejecutable: Boolean(item?.ejecutable) && !requiresMoney,
             recursos: (Array.isArray(item?.recursos) ? item.recursos : []).map(value => clean(value, 120)).filter(Boolean).slice(0, 8),
@@ -247,7 +268,7 @@ function normalizeProposal(data, facts) {
             strategy.impacto * 0.35 + strategy.viabilidad * 0.35 + strategy.confianza * 0.3
             - strategy.riesgo * 0.2 - strategy.penalizacionCosto
         )));
-        if (!strategy.evidencia.length) strategy.ejecutable = false;
+        if (!strategy.evidencia.length || (isRateOffer && (!promotionScenarios.length || !verifiedCost))) strategy.ejecutable = false;
         if (strategy.ejecutable && (!strategy.pasos.length || !strategy.accionRecomendada)) strategy.ejecutable = false;
         return strategy;
     }).filter(item => item.nombre && item.mecanismo);
@@ -275,13 +296,13 @@ function normalizeProposal(data, facts) {
     };
 }
 
-async function generateCommercialProposal(llm, user, facts) {
+async function generateCommercialProposal(llm, user, facts, promotionContext = null) {
     const first = await llm.completeJson({ tarea: "decision", system: DECISION_SYSTEM, user, temperature: 0.1 });
-    let proposal = normalizeProposal(first.data, facts);
+    let proposal = normalizeProposal(first.data, facts, promotionContext);
     if (proposal.alternativesValid) return proposal;
     const retryUser = `${user}\n\nTU RESPUESTA ANTERIOR NO CUMPLIÓ EL CRITERIO DE COMPARACIÓN. Rehazla completa: entrega al menos tres mecanismos realmente distintos, cita evidencia disponible para cada uno y vuelve a elegir la mejor. No conviertas variaciones de copy o segmentos en estrategias distintas.`;
     const retry = await llm.completeJson({ tarea: "decision", system: DECISION_SYSTEM, user: retryUser, temperature: 0.1 });
-    proposal = normalizeProposal(retry.data, facts);
+    proposal = normalizeProposal(retry.data, facts, promotionContext);
     return proposal;
 }
 
@@ -368,8 +389,8 @@ async function evaluateBestDecision(dependencies = {}) {
         remesasOContactosEjecutados: executionPackage.contenido?.ejecucion?.completados ?? null,
         activosBibliotecaCreados: executionPackage.contenido?.ejecucion?.activosBiblioteca || []
     } : null;
-    const user = `HECHOS DISPONIBLES:\n${facts.map(f => `${f.id}. ${f.dato}`).join("\n")}\n\nDECISIÓN VIGENTE Y MÉTRICAS OBSERVADAS:\n${current ? JSON.stringify(current) : "No existe."}\n\nSEÑALES DE REVISIÓN/EJECUCIÓN DEL OPERADOR:\n${JSON.stringify(executionFeedback)}`;
-    const proposal = await generateCommercialProposal(llm, user, facts);
+    const user = `HECHOS DISPONIBLES:\n${facts.map(f => `${f.id}. ${f.dato}`).join("\n")}\n\nESCENARIOS DE OFERTAS CON TASA REAL (úsalos solo si están disponibles; son estimaciones, no rentabilidad comprobada):\n${JSON.stringify(snapshot.escenariosPromocion)}\n\nDECISIÓN VIGENTE Y MÉTRICAS OBSERVADAS:\n${current ? JSON.stringify(current) : "No existe."}\n\nSEÑALES DE REVISIÓN/EJECUCIÓN DEL OPERADOR:\n${JSON.stringify(executionFeedback)}`;
+    const proposal = await generateCommercialProposal(llm, user, facts, snapshot.escenariosPromocion);
     if (!proposal.alternativesValid) {
         return { decision: current, changed: false, reason: "ALTERNATIVAS_INSUFICIENTES",
             alternativas: proposal.alternatives, executionPackage };
@@ -413,7 +434,7 @@ function startBestDecision(dependencies = {}) {
 
 module.exports = {
     DECISION_SYSTEM, MIN_CHANGE_ADVANTAGE, MIN_IMPACT_LEAD, collectCommercialSnapshot,
-    snapshotFacts, commercialOutcomeMetrics, withOutcomeObservation, mechanismsAreDistinct, normalizeProposal,
+    snapshotFacts, commercialOutcomeMetrics, withOutcomeObservation, mechanismsAreDistinct, mapDecision, normalizeProposal,
     generateCommercialProposal, replacementAllowed, applyProposal, getBestDecision, evaluateBestDecision,
     refreshBestDecision, closeDecision, startBestDecision
 };
