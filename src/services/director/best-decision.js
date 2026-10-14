@@ -293,6 +293,66 @@ function referralCandidateEvaluated(alternatives) {
         && /1\s?%|uno por ciento|recompensa/.test(`${item.nombre} ${item.accionRecomendada}`.toLowerCase()));
 }
 
+function referralAction(text) {
+    return /referid|recomendaci[oó]n/.test(String(text || "").toLowerCase());
+}
+
+function prepareMandatoryComparison(data, facts, referralContext = null) {
+    const alternatives = (Array.isArray(data?.alternativas) ? data.alternativas : []).map(item => ({ ...item }));
+    const evidenceSet = new Set(facts.map(fact => fact.id));
+    const selectedId = String(data?.estrategiaElegidaId || "");
+    const recoveryLike = item => {
+        const text = `${item?.nombre || ""} ${item?.mecanismo || ""} ${item?.accionRecomendada || ""}`.toLowerCase();
+        const ids = Array.isArray(item?.evidenciaIds) ? item.evidenciaIds : [];
+        return ids.includes("F20") || (ids.includes("F4") && /aband|reactiv|recuper|seguimiento/.test(text));
+    };
+    const recovery = alternatives.filter(recoveryLike);
+    if (recovery.length > 1 && evidenceSet.has("F20")) {
+        // Keep the selected/current recovery mechanism and attach the matching
+        // aggregate evidence; remove its near-duplicate quote-followup variant.
+        const keep = recovery.find(item => String(item.id) === selectedId) || recovery[0];
+        keep.evidenciaIds = [...new Set([...(keep.evidenciaIds || []), "F20"] )];
+        for (let index = alternatives.length - 1; index >= 0; index -= 1) {
+            if (recoveryLike(alternatives[index]) && alternatives[index] !== keep) alternatives.splice(index, 1);
+        }
+    }
+
+    const validReferralCandidate = alternatives.some(item => referralAction(`${item?.nombre || ""} ${item?.mecanismo || ""}`)
+        && (Array.isArray(item?.evidenciaIds) ? item.evidenciaIds : []).includes("F19")
+        && /1\s?%|uno por ciento/.test(String(item?.accionRecomendada || "")));
+    if (evidenceSet.has("F19") && !validReferralCandidate) {
+        const index = alternatives.findIndex(item => referralAction(`${item?.nombre || ""} ${item?.mecanismo || ""}`));
+        const scenario = referralContext || referralEconomics.evaluateReferralEconomics();
+        const sampleCosts = (scenario.scenarios || []).slice(0, 3)
+            .map(item => `R$${item.transferBRL}: recompensa R$${item.rewardBRL}, restante teórico R$${item.remainingReferenceBRL} antes de costos`)
+            .join("; ");
+        const missing = scenario.missing || [];
+        const referralAlternative = {
+            ...(index >= 0 ? alternatives[index] : {}),
+            id: index >= 0 ? (alternatives[index].id || "S_REFERIDOS") : "S_REFERIDOS",
+            nombre: index >= 0 ? (alternatives[index].nombre || "Programa de referidos") : "Programa de referidos (candidato F19)",
+            mecanismo: index >= 0 ? alternatives[index].mecanismo : "Captación por recomendación verificada; recompensa solo después de la primera remesa",
+            evidenciaIds: [...new Set([...(index >= 0 && Array.isArray(alternatives[index].evidenciaIds) ? alternatives[index].evidenciaIds : []), "F19"])],
+            accionRecomendada: `Evaluar una recompensa del 1 % del importe de la primera remesa completada, una sola vez por cliente referido; no activar ni pagar hasta validar costos netos, beneficios acumulados, antifraude, identidad y método de entrega. ${sampleCosts}`,
+            resultadoEsperado: "Captación incremental posible; no cuantificable sin historial de referidos y atribución.",
+            impacto: index >= 0 ? alternatives[index].impacto : null,
+            viabilidad: index >= 0 ? alternatives[index].viabilidad : null,
+            riesgo: index >= 0 ? alternatives[index].riesgo : null,
+            confianza: index >= 0 ? alternatives[index].confianza : null,
+            costo: { tipo: "ECONOMICO", estimacion: null, baseVerificada: false,
+                explicacion: `Costo unitario calculado: ${sampleCosts}. El 5 % es margen bruto de referencia; ganancia neta y costos efectivos desconocidos.` },
+            requiereCompromisoEconomico: true, ejecutable: false,
+            destinatarios: { criterio: "Clientes recomendadores no identificados ni verificados.", basadoEnDatos: false },
+            capacidadesFaltantes: [...new Set([...(index >= 0 ? alternatives[index].capacidadesFaltantes || [] : []), ...missing,
+                "Aprobación expresa requerida; no hay enrolamiento ni pago automático."])],
+            metricas: ["Nuevos clientes con primera remesa confirmada", "Recompensas devengadas una sola vez", "Margen neto tras todos los costos"]
+        };
+        if (index >= 0) alternatives[index] = referralAlternative;
+        else alternatives.push(referralAlternative);
+    }
+    return { ...data, alternativas: alternatives };
+}
+
 function opportunityCoverageValid(alternatives, facts) {
     const factIds = new Set(facts.map(fact => fact.id));
     if (!["F19", "F20", "F21", "F23"].every(id => factIds.has(id))) return true;
@@ -329,6 +389,8 @@ function normalizeProposal(data, facts, promotionContext = null) {
     const evidence = evidenceIds.map(id => factMap.get(id)).filter(Boolean);
     const alternatives = (Array.isArray(data?.alternativas) ? data.alternativas : []).slice(0, 5).map((item, index) => {
         const ids = [...new Set(Array.isArray(item?.evidenciaIds) ? item.evidenciaIds.map(String) : [])];
+        const referralCandidate = factMap.has("F19") && referralAction(`${item?.nombre || ""} ${item?.mecanismo || ""}`);
+        if (referralCandidate && !ids.includes("F19")) ids.push("F19");
         const evidence = ids.map(id => factMap.get(id)).filter(Boolean);
         const costType = ["SIN_COSTO", "OPERATIVO", "ECONOMICO", "DESCONOCIDO"].includes(item?.costo?.tipo)
             ? item.costo.tipo : "DESCONOCIDO";
@@ -345,6 +407,8 @@ function normalizeProposal(data, facts, promotionContext = null) {
             ? String(item.oferta.tipo).toUpperCase() : "NINGUNA";
         const offerPercent = [1, 2].includes(Number(item?.oferta?.porcentaje)) ? Number(item.oferta.porcentaje) : 0;
         const offer = offerType === "NINGUNA" ? null : { tipo: offerType, porcentaje: offerPercent };
+        const isReferralCandidate = evidence.some(fact => fact.id === "F19") && referralAction(`${item?.nombre || ""} ${item?.mecanismo || ""}`);
+        const referralUnitCases = isReferralCandidate ? referralEconomics.evaluateReferralEconomics().scenarios.slice(0, 3) : null;
         const promotionScenarios = offer ? (promotionCalculator.findOfferScenario(promotionContext, offer) || []) : [];
         const isRateOffer = Boolean(offer);
         const promotionCostEstimate = promotionScenarios.length
@@ -365,8 +429,12 @@ function normalizeProposal(data, facts, promotionContext = null) {
             impacto: score(item?.impacto), viabilidad: score(item?.viabilidad), riesgo: score(item?.riesgo),
             confianza: score(item?.confianza), costo: {
                 tipo: isRateOffer ? "ECONOMICO" : costType,
-                estimacion: verifiedCost ? Number(item.costo.estimacion) : promotionCostEstimate,
-                baseVerificada: verifiedCost, explicacion: isRateOffer
+                estimacion: verifiedCost ? Number(item.costo.estimacion) : isReferralCandidate
+                    ? { tipo: "SENSIBILIDAD_UNITARIA_NO_PREVISION", escenarios: referralUnitCases, gananciaNetaVerificada: false }
+                    : promotionCostEstimate,
+                baseVerificada: verifiedCost, explicacion: isReferralCandidate
+                    ? clean(item?.costo?.explicacion, 800)
+                    : isRateOffer
                     ? (promotionCostEstimate ? "Estimación del beneficio calculada con la tasa vigente; no es costo neto de liquidación. El margen restante usa la referencia no verificada del 5 %." : "Cálculo pendiente: no hay una tasa diaria vigente válida.")
                     : clean(item?.costo?.explicacion, 400)
             },
@@ -414,9 +482,10 @@ function normalizeProposal(data, facts, promotionContext = null) {
     };
 }
 
-async function generateCommercialProposal(llm, user, facts, promotionContext = null, analysisId = null, contextMetrics = {}) {
+async function generateCommercialProposal(llm, user, facts, promotionContext = null, analysisId = null, contextMetrics = {}, referralContext = null) {
     const first = await llm.completeJson({ tarea: "decision", system: DECISION_SYSTEM, user, temperature: 0.1, analysisId, contextMetrics });
-    return normalizeProposal(first.data, facts, promotionContext);
+    const prepared = prepareMandatoryComparison(first.data, facts, referralContext);
+    return normalizeProposal(prepared, facts, promotionContext);
 }
 
 function validNewDecision(proposal) {
@@ -507,7 +576,7 @@ async function evaluateBestDecision(dependencies = {}) {
     const proposal = await generateCommercialProposal(llm, user, facts, snapshot.escenariosPromocion, analysisId, {
         hechosAgregados: facts.length, filasClientesIncluidas: 0, filasOperacionesIncluidas: 0,
         mensajesConversacionalesIncluidos: 0, contextoCrudoIncluido: false
-    });
+    }, snapshot.referralEconomics);
     if (!proposal.alternativesValid) {
         return { decision: current, changed: false, reason: "ALTERNATIVAS_INSUFICIENTES",
             alternativas: proposal.alternatives, executionPackage };
@@ -554,6 +623,6 @@ module.exports = {
     DECISION_SYSTEM, MIN_CHANGE_ADVANTAGE, MIN_IMPACT_LEAD, collectCommercialSnapshot,
     buildDecisionContext, compactPromotionEvidence,
     snapshotFacts, commercialOutcomeMetrics, withOutcomeObservation, mechanismsAreDistinct, mapDecision, normalizeProposal,
-    opportunityCoverageValid, generateCommercialProposal, replacementAllowed, applyProposal, getBestDecision, evaluateBestDecision,
+    opportunityCoverageValid, prepareMandatoryComparison, generateCommercialProposal, replacementAllowed, applyProposal, getBestDecision, evaluateBestDecision,
     referralCandidateEvaluated, refreshBestDecision, closeDecision, startBestDecision
 };

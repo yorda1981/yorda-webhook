@@ -132,6 +132,30 @@ test("la comparación real exige evidencia para recuperación, segunda remesa, r
     assert.equal(incomplete.alternativesValid, false);
 });
 
+test("repara F19 desde economía determinista cuando la IA solo citó F22, sin aprobar la recompensa", () => {
+    const comparisonFacts = ["F4", "F19", "F20", "F21", "F22", "F23"].map(id => ({ id, dato: `Hecho agregado ${id}` }));
+    const raw = proposal({ estrategiaElegidaId: "S1", alternativas: [
+        { id: "S1", nombre: "Campaña de reactivación para clientes en abandono", mecanismo: "Seguimiento personalizado a clientes que abandonaron operaciones", evidenciaIds: ["F4"], accionRecomendada: "Seguimiento personalizado", ejecutable: true },
+        { id: "S2", nombre: "Recuperación selectiva de cotizaciones", mecanismo: "Contactar clientes con cotizaciones sin cierre", evidenciaIds: ["F20"], accionRecomendada: "Contactar clientes" },
+        { id: "S3", nombre: "Segunda transferencia", mecanismo: "Incentivo tras primera remesa para aumentar recurrencia", evidenciaIds: ["F21"], accionRecomendada: "Ofrecer incentivos para segunda remesa" },
+        { id: "S4", nombre: "Mejora de conversión", mecanismo: "Auditar y simplificar proceso de cotización y PIX", evidenciaIds: ["F23"], accionRecomendada: "Revisar el proceso" },
+        { id: "S5", nombre: "Programa de referidos", mecanismo: "Incentivar a clientes a referir nuevos usuarios", evidenciaIds: ["F22"], accionRecomendada: "Implementar programa con recompensas" }
+    ] });
+    const prepared = service.prepareMandatoryComparison(raw, comparisonFacts);
+    const normalized = service.normalizeProposal(prepared, comparisonFacts);
+    assert.equal(normalized.alternatives.length, 4, "elimina duplicado de recuperación y conserva A-D");
+    assert.equal(normalized.alternativesValid, true);
+    const referral = normalized.alternatives.find(item => item.evidencia.some(fact => fact.id === "F19"));
+    assert.match(referral.accionRecomendada, /1 %.*primera remesa completada/i);
+    assert.equal(referral.requiereCompromisoEconomico, true);
+    assert.equal(referral.ejecutable, false);
+    assert.equal(referral.costo.baseVerificada, false);
+    assert.equal(referral.costo.estimacion.escenarios[0].rewardBRL, 1);
+    assert.equal(referral.costo.estimacion.escenarios[0].remainingReferenceBRL, 4);
+    assert.equal(referral.gananciaIncremental.estimacionBRL, null);
+    assert.match(referral.destinatarios.criterio, /lista individual/);
+});
+
 test("una comparación incompleta no dispara una segunda llamada pagada", async () => {
     let calls = 0;
     const result = await service.generateCommercialProposal({ completeJson: async () => {
