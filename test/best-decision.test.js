@@ -14,7 +14,7 @@ const facts = [
 ];
 
 function proposal(overrides = {}) {
-    return {
+    const value = {
         accion: "CREAR",
         decision: "Recuperar las cotizaciones abiertas",
         problema: "Hay intención de compra sin cierre.",
@@ -30,12 +30,50 @@ function proposal(overrides = {}) {
         explicacionCambio: "",
         ...overrides
     };
+    value.alternativas ||= [
+        { id:"S1", nombre:value.decision, mecanismo:"Seguimiento de cotizaciones", problema:value.problema,
+            evidenciaIds:["F3"], causaProbable:value.causaProbable, justificacion:value.justificacion,
+            accionRecomendada:value.accionRecomendada, resultadoEsperado:value.resultadoEsperado,
+            impacto:value.impacto, viabilidad:80, riesgo:10, confianza:value.confianza,
+            costo:{ tipo:"SIN_COSTO", explicacion:"Sin gasto nuevo" }, ejecutable:true, pasos:["Revisar cotizaciones"] },
+        { id:"S2", nombre:"Mejorar atención", mecanismo:"Optimización del flujo del bot", problema:"Dudas repetidas",
+            evidenciaIds:["F1"], justificacion:"Resolver fricción", accionRecomendada:"Revisar dudas",
+            resultadoEsperado:"Más cotizaciones", impacto:55, viabilidad:70, riesgo:15, confianza:60,
+            costo:{ tipo:"DESCONOCIDO", explicacion:"Costo operativo no medido" }, ejecutable:true, pasos:["Revisar conversaciones"] },
+        { id:"S3", nombre:"Activar referidos", mecanismo:"Adquisición por recomendación", problema:"Captación",
+            evidenciaIds:["F1"], justificacion:"Explorar referidos", accionRecomendada:"Diseñar piloto sin incentivo económico",
+            resultadoEsperado:"Nuevos clientes", impacto:60, viabilidad:60, riesgo:20, confianza:55,
+            costo:{ tipo:"DESCONOCIDO", explicacion:"No hay costos de incentivos disponibles" }, ejecutable:true, pasos:["Validar propuesta"] }
+    ];
+    value.estrategiaElegidaId ||= "S1";
+    return value;
 }
 
 test("solo acepta evidencia que existe en el resumen comercial", () => {
     const normalized = service.normalizeProposal(proposal(), facts);
     assert.deepEqual(normalized.evidence, [facts[1]]);
     assert.equal(normalized.impacto, 70);
+});
+
+test("la prioridad exige tres mecanismos comerciales distintos y no inventa costos", () => {
+    const normalized = service.normalizeProposal(proposal({ alternativas: proposal().alternativas }), facts);
+    assert.equal(normalized.alternativesValid, true);
+    assert.equal(normalized.alternatives.length, 3);
+    assert.equal(normalized.alternatives[2].costo.estimacion, null);
+    assert.equal(normalized.alternatives[2].ejecutable, true);
+    const repetitive = service.normalizeProposal(proposal({ alternativas: proposal().alternativas.map(item => ({ ...item, mecanismo:"Mensaje promocional" })) }), facts);
+    assert.equal(repetitive.alternativesValid, false);
+});
+
+test("registra variaciones comerciales observadas sin presentarlas como causalidad", () => {
+    const before = { snapshot: { metricasBase: { conversaciones24h: 10, cotizaciones24h: 4, remesasCompletadas24h: 2 },
+        observacionesResultado: [] } };
+    const after = { conversaciones24h: 12, cotizaciones24h: 3, remesas24h: 4,
+        clientesConRemesa30d: 20, volumenRemesas30d: 900, capturadoAt: "2026-10-14T12:00:00Z" };
+    const result = service.withOutcomeObservation(after, before, [], null);
+    assert.deepEqual(result.observacionesResultado[0].variacionDesdeDecision,
+        { conversaciones24h: 2, cotizaciones24h: -1, remesasCompletadas24h: 2 });
+    assert.match(result.observacionesResultado[0].nota, /no atribuye causalidad/);
 });
 
 test("una alternativa ligeramente mejor no sustituye la decisión vigente", () => {

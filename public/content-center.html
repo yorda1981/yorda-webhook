@@ -133,15 +133,24 @@
             <div><div class="eyebrow">Paquete de ejecución</div><h2 id="packageTitle">Recuperación de abandonos</h2></div>
             <div class="package-badge" id="packageState">BORRADOR</div>
         </div>
-        <div class="package-summary">
+        <div id="initiativeExecution" hidden>
+            <div class="package-section"><h3>Alternativas comerciales evaluadas</h3><div id="initiativeAlternatives" class="package-list"></div></div>
+            <div class="package-section initiative-only"><h3>Estrategia seleccionada</h3><div class="package-list" id="initiativeWinner"></div></div>
+            <div class="package-section initiative-only"><h3>Objetivo y preparación</h3><textarea id="initiativeObjective" maxlength="2000"></textarea><div id="initiativePlan" class="package-list"></div></div>
+            <div class="package-section initiative-only"><h3>Material listo para revisión</h3><div id="initiativeMaterials"></div></div>
+            <div class="package-section initiative-only"><h3>Costos, rentabilidad y riesgos</h3><div id="initiativeEconomics" class="package-list"></div></div>
+            <div class="package-section initiative-only"><h3>Capacidades pendientes</h3><div id="initiativeGaps" class="package-list"></div></div>
+            <div class="package-section initiative-only"><h3>Métricas</h3><div id="initiativeMetrics" class="package-list"></div></div>
+        </div>
+        <div class="package-summary recovery-package-only">
             <div class="package-stat"><strong id="packageTotal">0</strong>clientes preparados</div>
             <div class="package-stat"><strong id="packageHigh">0</strong>alta prioridad</div>
             <div class="package-stat"><strong id="packageMedium">0</strong>prioridad media</div>
             <div class="package-stat"><strong id="packageMessages">0</strong>mensajes listos</div>
         </div>
-        <div class="package-section"><h3>Objetivo</h3><textarea id="packageObjective" maxlength="2000"></textarea></div>
-        <div class="package-section"><h3>Criterios de selección</h3><ul class="package-list" id="packageCriteria"></ul></div>
-        <div class="package-section">
+        <div class="package-section recovery-package-only"><h3>Objetivo</h3><textarea id="packageObjective" maxlength="2000"></textarea></div>
+        <div class="package-section recovery-package-only"><h3>Criterios de selección</h3><ul class="package-list" id="packageCriteria"></ul></div>
+        <div class="package-section recovery-package-only">
             <h3>Horario y secuencia</h3>
             <div class="config-grid">
                 <div><label for="packageWindowOne">Primera ventana</label><input id="packageWindowOne" maxlength="80"></div>
@@ -149,10 +158,10 @@
             </div>
             <ul class="package-list" id="packageSequence"></ul>
         </div>
-        <div class="package-section"><h3>Borrador de campaña</h3><input id="packageCampaignName" maxlength="200"><textarea id="packageCampaignDraft" maxlength="4000"></textarea></div>
-        <div class="package-section"><h3>Publicaciones</h3><p class="decision-text" id="packagePublications"></p></div>
-        <div class="package-section"><h3>Métricas preparadas</h3><ul class="package-list" id="packageMetrics"></ul></div>
-        <div class="package-section"><h3>Clientes y mensajes preparados</h3><div class="package-clients" id="packageClients"></div></div>
+        <div class="package-section recovery-package-only"><h3>Borrador de campaña</h3><input id="packageCampaignName" maxlength="200"><textarea id="packageCampaignDraft" maxlength="4000"></textarea></div>
+        <div class="package-section recovery-package-only"><h3>Publicaciones</h3><p class="decision-text" id="packagePublications"></p></div>
+        <div class="package-section recovery-package-only"><h3>Métricas preparadas</h3><ul class="package-list" id="packageMetrics"></ul></div>
+        <div class="package-section recovery-package-only"><h3>Clientes y mensajes preparados</h3><div class="package-clients" id="packageClients"></div></div>
         <div class="package-actions">
             <button class="secondary" id="packageSaveButton" type="button">Guardar cambios</button>
             <button id="packageApproveButton" type="button">Aprobar paquete</button>
@@ -617,8 +626,69 @@
         panel.hidden = !currentExecutionPackage;
         if (!currentExecutionPackage) return;
         const content = currentExecutionPackage.contenido;
+        const isInitiative = currentExecutionPackage.tipo === "INICIATIVA_COMERCIAL";
+        const alternatives = Array.isArray(content.alternativas) ? content.alternativas : [];
+        byId("initiativeExecution").hidden = alternatives.length === 0;
+        document.querySelectorAll(".initiative-only").forEach(section => { section.hidden = !isInitiative; });
+        document.querySelectorAll(".recovery-package-only").forEach(section => { section.hidden = isInitiative; });
         byId("packageState").textContent = currentExecutionPackage.estado;
-        byId("packageTitle").textContent = content.campana.nombre;
+        byId("packageTitle").textContent = isInitiative
+            ? (content.estrategiaElegida?.nombre || "Iniciativa comercial")
+            : content.campana.nombre;
+        if (alternatives.length) {
+            byId("initiativeAlternatives").replaceChildren(...alternatives.map((alternative, index) => {
+                const card = document.createElement("article");
+                card.className = "package-item";
+                const heading = document.createElement("strong");
+                heading.textContent = `${index + 1}. ${alternative.nombre || alternative.decision || "Estrategia"}${alternative.id === content.estrategiaElegida?.id ? " · SELECCIONADA" : ""}`;
+                const detail = document.createElement("p");
+                detail.textContent = `${alternative.mecanismo || "Mecanismo no especificado"} · puntuación ${alternative.puntuacionComercial ?? "—"}/100 · impacto ${alternative.impacto ?? "—"}/100 · viabilidad ${alternative.viabilidad ?? "—"}/100 · riesgo ${alternative.riesgo ?? "—"}/100`;
+                const cost = document.createElement("p");
+                cost.textContent = `Costo: ${alternative.costo?.explicacion || "No verificado"}${alternative.costo?.baseVerificada ? " (base verificada)" : ""}`;
+                const evidence = document.createElement("p");
+                evidence.textContent = `Evidencia: ${(alternative.evidencia || []).map(fact => `${fact.id}: ${fact.dato}`).join("; ") || "Sin evidencia citada"}`;
+                card.append(heading, detail, cost, evidence);
+                return card;
+            }));
+        }
+        if (isInitiative) {
+            const winner = content.estrategiaElegida || {};
+            byId("initiativeWinner").textContent = `${winner.justificacion || "Sin justificación"} ${winner.accion || ""}`;
+            byId("initiativeObjective").value = content.objetivo || "";
+            listItems("initiativePlan", content.plan || [], step => typeof step === "string" ? step : `${step.orden || ""}. ${step.accion || step.descripcion || JSON.stringify(step)}`);
+            byId("initiativeMaterials").replaceChildren(...(content.materiales || []).map((material, index) => {
+                const box = document.createElement("div");
+                box.className = "package-section";
+                const label = document.createElement("label");
+                label.textContent = `${material.tipo || "Material"} · título`;
+                const title = document.createElement("input");
+                title.maxLength = 180;
+                title.value = material.titulo || "";
+                title.dataset.initiativeTitle = String(index);
+                const bodyLabel = document.createElement("label");
+                bodyLabel.textContent = "Contenido";
+                const body = document.createElement("textarea");
+                body.maxLength = 4000;
+                body.value = material.contenido || "";
+                body.dataset.initiativeBody = String(index);
+                box.append(label, title, bodyLabel, body);
+                return box;
+            }));
+            const costs = content.costos || {};
+            const economic = Boolean(winner.requiereCompromisoEconomico) || costs.tipo === "ECONOMICO";
+            byId("initiativeEconomics").textContent = `${costs.baseVerificada ? "Costo con base verificada" : "Ganancia no verificable"}: ${costs.explicacion || "No hay costos reales registrados."}${economic && !costs.baseVerificada ? " · No se autoriza oferta económica." : ""}`;
+            listItems("initiativeGaps", content.capacidadesFaltantes || [], item => item);
+            listItems("initiativeMetrics", content.metricas || [], metric => typeof metric === "string" ? metric : `${metric.nombre}: ${metric.medicion || "medición pendiente"}`);
+            const ready = Boolean(content.ejecucion?.listaParaAprobar);
+            byId("packageObjective").value = content.objetivo || "";
+            byId("initiativeObjective").disabled = currentExecutionPackage.estado !== "BORRADOR";
+            byId("initiativeMaterials").querySelectorAll("input,textarea").forEach(element => { element.disabled = currentExecutionPackage.estado !== "BORRADOR"; });
+            byId("packageSaveButton").hidden = currentExecutionPackage.estado !== "BORRADOR";
+            byId("packageApproveButton").hidden = currentExecutionPackage.estado !== "BORRADOR" || !ready;
+            byId("packageApproveButton").textContent = "Aprobar y preparar activos";
+            byId("packageCancelButton").hidden = currentExecutionPackage.estado !== "BORRADOR";
+            return;
+        }
         byId("packageTotal").textContent = content.segmento.total;
         byId("packageHigh").textContent = content.segmento.altaPrioridad;
         byId("packageMedium").textContent = content.segmento.prioridadMedia;
@@ -668,6 +738,7 @@
         byId("packageSaveButton").hidden = !editable;
         byId("packageApproveButton").hidden = !editable;
         byId("packageCancelButton").hidden = !editable;
+        byId("packageApproveButton").textContent = "Aprobar y ejecutar recuperación";
     }
 
     async function loadExecutionPackage() {
@@ -683,18 +754,28 @@
     async function saveExecutionPackage() {
         if (!currentExecutionPackage) return;
         try {
+            const content = currentExecutionPackage.contenido;
+            const isInitiative = currentExecutionPackage.tipo === "INICIATIVA_COMERCIAL";
+            const body = isInitiative ? {
+                objetivo:byId("initiativeObjective").value,
+                materiales:(content.materiales || []).map((material, index) => ({
+                    indice:index,
+                    titulo:byId("initiativeMaterials").querySelector(`[data-initiative-title="${index}"]`)?.value,
+                    contenido:byId("initiativeMaterials").querySelector(`[data-initiative-body="${index}"]`)?.value
+                }))
+            } : {
+                objetivo:byId("packageObjective").value,
+                campana:{ nombre:byId("packageCampaignName").value, borrador:byId("packageCampaignDraft").value },
+                horario:{ primeraVentana:byId("packageWindowOne").value, segundaVentana:byId("packageWindowTwo").value },
+                clientes:(content.clientes || []).map(client => ({
+                    phone:client.phone,
+                    incluido:byId("packageClients").querySelector(`[data-package-phone="${client.phone}"]`).checked,
+                    mensaje:byId("packageClients").querySelector(`[data-package-message-phone="${client.phone}"]`).value
+                }))
+            };
             const data = await requestJson(`/admin/content-library/director/execution-package/${currentExecutionPackage.id}`, {
                 method:"POST",
-                body:JSON.stringify({
-                    objetivo:byId("packageObjective").value,
-                    campana:{ nombre:byId("packageCampaignName").value, borrador:byId("packageCampaignDraft").value },
-                    horario:{ primeraVentana:byId("packageWindowOne").value, segundaVentana:byId("packageWindowTwo").value },
-                    clientes:(currentExecutionPackage.contenido.clientes || []).map(client => ({
-                        phone:client.phone,
-                        incluido:byId("packageClients").querySelector(`[data-package-phone="${client.phone}"]`).checked,
-                        mensaje:byId("packageClients").querySelector(`[data-package-message-phone="${client.phone}"]`).value
-                    }))
-                })
+                body:JSON.stringify(body)
             });
             currentExecutionPackage = data.package;
             renderExecutionPackage();
@@ -704,11 +785,21 @@
 
     async function resolveExecutionPackage(action) {
         if (!currentExecutionPackage) return;
+        const content = currentExecutionPackage.contenido;
+        if (action === "approve" && currentExecutionPackage.tipo === "RECUPERACION_ABANDONOS") {
+            const count = (content.clientes || []).filter(client => client.incluido !== false).length;
+            if (!window.confirm(`Se enviarán mensajes individuales a hasta ${count} clientes elegibles. ¿Confirmas el envío ahora?`)) return;
+        }
         try {
             const data = await requestJson(`/admin/content-library/director/execution-package/${currentExecutionPackage.id}/${action}`, { method:"POST", body:"{}" });
             currentExecutionPackage = data.package;
             renderExecutionPackage();
-            setStatus(action === "approve" ? "Paquete aprobado y listo para ejecutar." : "Paquete cancelado.", "ok");
+            const genericDrafts = data.package?.contenido?.ejecucion?.borradoresCreados;
+            const sent = data.package?.contenido?.ejecucion?.completados;
+            setStatus(action !== "approve" ? "Paquete cancelado." : genericDrafts
+                ? `${genericDrafts} borradores creados en la Biblioteca; no se publicaron.`
+                : sent !== undefined ? `Recuperación ejecutada con autorización: ${sent} mensajes enviados o ya procesados.`
+                : "Paquete aprobado.", "ok");
         } catch (error) { setStatus(error.message, "error"); }
     }
 

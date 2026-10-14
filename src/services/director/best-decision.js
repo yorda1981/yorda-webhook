@@ -18,20 +18,21 @@ const CHANGE_REASONS = new Set([
 
 const DECISION_SYSTEM = `Eres el Director Comercial de YORDA, un servicio de remesas hacia Cuba.
 
-Debes responder una sola pregunta: con toda la información disponible ahora, ¿cuál es la acción que más ayudará a YORDA a conseguir más clientes o más remesas?
+Investiga la situación comercial y genera al menos tres estrategias que sean diferentes por su mecanismo, no por la redacción. No existe un catálogo cerrado de estrategias: puedes proponer cambios de adquisición, conversión, fidelidad, experiencia, recomendación, operación, confianza, canal u otra posibilidad que surja de los hechos.
 
 Reglas:
-1. Propón una única acción concreta y ejecutable por el operador con los recursos que YORDA ya posee.
-2. Usa exclusivamente los HECHOS proporcionados. Cita sus ids en evidenciaIds. No inventes datos ni causas.
-3. Distingue la causa probable de la evidencia observada.
-4. Si no existe evidencia suficiente, responde SIN_DECISION.
-5. Si existe una decisión vigente, protégela. Una alternativa ligeramente mejor no justifica interrumpirla.
-6. Solo responde REEMPLAZAR por OPORTUNIDAD_SUPERIOR si la ventaja de cambiar es al menos 20/100 y el impacto de la nueva acción supera claramente el de la vigente.
-7. También puedes reemplazar por EVIDENCIA_INVALIDA, NO_EJECUTABLE o CAMBIO_MATERIAL cuando los hechos lo demuestren.
-8. Si la decisión vigente sigue siendo suficientemente buena, responde MANTENER.
+1. Usa solo HECHOS con ids; cita los ids en cada estrategia. Distingue hechos de hipótesis y declara datos faltantes.
+2. Compara impacto, viabilidad, riesgo, recursos y costos. No inventes importes, margen neto ni costos. Para compromisos económicos sin costos verificados marca requiereCompromisoEconomico=true, ejecutable=false y explica qué falta.
+3. El margen aproximado del 5 % es una referencia no verificada, no una autorización para descontar. No inventes ofertas, urgencia, escasez ni beneficios.
+4. Las estrategias pueden usar cualquier mecanismo comercial; los recursos disponibles describen integración, no limitan las ideas. Si falta una capacidad, declárala en capacidadesFaltantes y prepara lo que sí sea seguro.
+5. Cada estrategia debe incluir trabajo terminado: pasos, materiales concretos, destinatarios/criterio si la evidencia permite seleccionarlos, métricas comerciales y costes conocidos. No envíes ni publiques.
+6. Elige una única estrategia ganadora. Una idea creativa sin evidencia suficiente o imposible de ejecutar no debe ganar frente a una opción verificable.
+7. Si existe una decisión vigente, protégela: una alternativa ligeramente mejor no la sustituye. Solo REEMPLAZAR por ventaja >=20/100 y mejora clara del impacto, o por EVIDENCIA_INVALIDA, NO_EJECUTABLE o CAMBIO_MATERIAL demostrados.
+8. SIN_DECISION solo cuando no exista evidencia suficiente; aun así, devuelve las estrategias exploradas y qué información falta.
+9. Usa el registro de métricas antes/después de la decisión vigente para aprender; las variaciones son señales observadas, no prueba causal de que la iniciativa las produjo.
 
 Devuelve JSON:
-{"accion":"CREAR|MANTENER|REEMPLAZAR|RETIRAR|SIN_DECISION","decision":"...","problema":"...","evidenciaIds":["F1"],"causaProbable":"...","justificacion":"...","accionRecomendada":"...","resultadoEsperado":"...","impacto":0,"confianza":0,"ventajaCambio":0,"motivoCambio":"OPORTUNIDAD_SUPERIOR|EVIDENCIA_INVALIDA|NO_EJECUTABLE|CAMBIO_MATERIAL|null","explicacionCambio":"..."}
+{"accion":"CREAR|MANTENER|REEMPLAZAR|RETIRAR|SIN_DECISION","estrategiaElegidaId":"S1","alternativas":[{"id":"S1","nombre":"...","mecanismo":"...","problema":"...","evidenciaIds":["F1"],"causaProbable":"...","justificacion":"...","accionRecomendada":"...","resultadoEsperado":"...","impacto":0,"viabilidad":0,"riesgo":0,"confianza":0,"costo":{"tipo":"SIN_COSTO|OPERATIVO|ECONOMICO|DESCONOCIDO","estimacion":null,"baseVerificada":false,"explicacion":"..."},"requiereCompromisoEconomico":false,"ejecutable":true,"recursos":["..."],"pasos":["..."],"destinatarios":{"criterio":"...","basadoEnDatos":true},"materiales":[{"tipo":"biblioteca|whatsapp|bot|otro","titulo":"...","contenido":"..."}],"metricas":["remesas completadas", "ganancia neta"],"capacidadesFaltantes":[]}],"ventajaCambio":0,"motivoCambio":"OPORTUNIDAD_SUPERIOR|EVIDENCIA_INVALIDA|NO_EJECUTABLE|CAMBIO_MATERIAL|null","explicacionCambio":"..."}
 
 MANTENER no necesita repetir todos los textos. RETIRAR solo es válido si la decisión vigente perdió validez o dejó de ser ejecutable.`;
 
@@ -79,7 +80,15 @@ async function collectCommercialSnapshot(db = pool) {
              WHERE ocurrido_at >= NOW() - INTERVAL '24 hours')::int AS bajas_grupo_24h,
             (SELECT COUNT(*) FROM content_publications
              WHERE estado = 'PUBLICADA' AND publicada_at >= NOW() - INTERVAL '7 days')::int AS publicaciones_7d,
+            (SELECT COUNT(DISTINCT phone) FROM operations
+             WHERE status = 'completada' AND completed_at >= NOW() - INTERVAL '30 days')::int AS clientes_con_remesa_30d,
+            (SELECT COUNT(*) FROM customers WHERE cliente_frecuente = TRUE)::int AS clientes_frecuentes,
+            (SELECT COUNT(*) FROM customers WHERE COALESCE(nivel_vip, 0) > 0)::int AS clientes_vip,
+            (SELECT COALESCE(SUM(monto), 0) FROM operations
+             WHERE status = 'completada' AND completed_at >= NOW() - INTERVAL '30 days') AS volumen_remesas_30d,
             (SELECT updated_at FROM rates WHERE id = 1) AS tasas_actualizadas_at,
+            FALSE AS costos_unitarios_disponibles,
+            FALSE AS ganancia_neta_disponible,
             NOW() AS capturado_at
     `);
     const row = result.rows[0] || {};
@@ -100,7 +109,12 @@ async function collectCommercialSnapshot(db = pool) {
         altasGrupo24h: n(row.altas_grupo_24h),
         bajasGrupo24h: n(row.bajas_grupo_24h),
         publicaciones7d: n(row.publicaciones_7d),
-        tasasActualizadasAt: row.tasas_actualizadas_at || null
+        clientesConRemesa30d: n(row.clientes_con_remesa_30d),
+        clientesFrecuentes: n(row.clientes_frecuentes),
+        clientesVip: n(row.clientes_vip),
+        volumenRemesas30d: n(row.volumen_remesas_30d),
+        tasasActualizadasAt: row.tasas_actualizadas_at || null,
+        rentabilidad: { costosUnitariosDisponibles: false, gananciaNetaDisponible: false }
     };
 }
 
@@ -115,7 +129,10 @@ function snapshotFacts(snapshot) {
         { id: "F7", dato: `${snapshot.operacionesPendientes48h} operaciones de las últimas 48 h siguen pendientes.` },
         { id: "F8", dato: `El grupo tiene ${snapshot.miembrosGrupo} miembros; en 24 h hubo ${snapshot.altasGrupo24h} altas y ${snapshot.bajasGrupo24h} bajas.` },
         { id: "F9", dato: `Se publicaron ${snapshot.publicaciones7d} contenidos durante los últimos 7 días.` },
-        { id: "F10", dato: `Las tasas vigentes se actualizaron por última vez en ${snapshot.tasasActualizadasAt || "fecha no disponible"}.` }
+        { id: "F10", dato: `Las tasas vigentes se actualizaron por última vez en ${snapshot.tasasActualizadasAt || "fecha no disponible"}.` },
+        { id: "F11", dato: `${snapshot.clientesConRemesa30d} clientes completaron al menos una remesa en 30 días; ${snapshot.clientesFrecuentes} están marcados como frecuentes y ${snapshot.clientesVip} tienen nivel VIP.` },
+        { id: "F12", dato: `El volumen monetario registrado en remesas completadas durante 30 días es ${snapshot.volumenRemesas30d}; es volumen transaccionado, no ganancia.` },
+        { id: "F13", dato: `No existe información suficiente de costos unitarios ni ganancia neta por operación; no se puede verificar la rentabilidad de promociones.` }
     ];
 }
 
@@ -128,6 +145,9 @@ function mapDecision(row) {
         resultadoEsperado: row.resultado_esperado, impacto: Number(row.impacto),
         confianza: Number(row.confianza), sustituyeId: row.sustituye_id ? Number(row.sustituye_id) : null,
         motivoCambio: row.motivo_cambio || null, explicacionCambio: row.explicacion_cambio || null,
+        alternativas: Array.isArray(row.snapshot?.alternativas) ? row.snapshot.alternativas : [],
+        estrategiaElegida: row.snapshot?.estrategiaElegida || null,
+        snapshot: row.snapshot || {},
         creadaAt: row.creada_at, evaluadaAt: row.evaluada_at, cerradaAt: row.cerrada_at
     };
 }
@@ -140,27 +160,100 @@ async function getBestDecision(db = pool) {
 const clean = (value, max = 1200) => String(value || "").trim().slice(0, max);
 const score = value => Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
 
+function commercialOutcomeMetrics(snapshot) {
+    return {
+        conversaciones24h: snapshot.conversaciones24h,
+        cotizaciones24h: snapshot.cotizaciones24h,
+        remesasCompletadas24h: snapshot.remesas24h,
+        remesasCompletadas30d: snapshot.clientesConRemesa30d,
+        volumenRemesas30d: snapshot.volumenRemesas30d
+    };
+}
+
+function withOutcomeObservation(snapshot, current = null, alternatives = [], selectedStrategy = null) {
+    const currentMetrics = commercialOutcomeMetrics(snapshot);
+    const base = current?.snapshot?.metricasBase || currentMetrics;
+    const previous = current?.snapshot?.observacionesResultado || [];
+    const deltas = Object.fromEntries(["conversaciones24h", "cotizaciones24h", "remesasCompletadas24h"]
+        .map(key => [key, n(currentMetrics[key]) - n(base[key])]));
+    const observation = { capturadoAt: snapshot.capturadoAt || new Date().toISOString(), metricas: currentMetrics, variacionDesdeDecision: deltas,
+        nota: "Cambio observado respecto al inicio; no atribuye causalidad a la estrategia." };
+    return { ...snapshot, alternativas: alternatives, estrategiaElegida: selectedStrategy,
+        metricasBase: base, observacionesResultado: [...previous, observation].slice(-24) };
+}
+
 function normalizeProposal(data, facts) {
     const action = String(data?.accion || "").toUpperCase();
     const evidenceIds = [...new Set(Array.isArray(data?.evidenciaIds) ? data.evidenciaIds.map(String) : [])];
     const factMap = new Map(facts.map(fact => [fact.id, fact]));
     const evidence = evidenceIds.map(id => factMap.get(id)).filter(Boolean);
+    const alternatives = (Array.isArray(data?.alternativas) ? data.alternativas : []).slice(0, 6).map((item, index) => {
+        const ids = [...new Set(Array.isArray(item?.evidenciaIds) ? item.evidenciaIds.map(String) : [])];
+        const evidence = ids.map(id => factMap.get(id)).filter(Boolean);
+        const costType = ["SIN_COSTO", "OPERATIVO", "ECONOMICO", "DESCONOCIDO"].includes(item?.costo?.tipo)
+            ? item.costo.tipo : "DESCONOCIDO";
+        const verifiedCost = Boolean(item?.costo?.baseVerificada) && evidence.length > 0
+            && Number.isFinite(Number(item?.costo?.estimacion));
+        const requiresMoney = Boolean(item?.requiereCompromisoEconomico)
+            || costType === "ECONOMICO" || (costType === "DESCONOCIDO" && item?.ejecutable === false);
+        const costPenalty = costType === "SIN_COSTO" ? 0
+            : costType === "OPERATIVO" ? 8
+                : verifiedCost ? 12 : 22;
+        const strategy = {
+            id: clean(item?.id, 12) || `S${index + 1}`,
+            nombre: clean(item?.nombre, 180), mecanismo: clean(item?.mecanismo, 240),
+            problema: clean(item?.problema, 600), evidencia: evidence, causaProbable: clean(item?.causaProbable, 600),
+            justificacion: clean(item?.justificacion, 800), accionRecomendada: clean(item?.accionRecomendada, 1000),
+            resultadoEsperado: clean(item?.resultadoEsperado, 600),
+            impacto: score(item?.impacto), viabilidad: score(item?.viabilidad), riesgo: score(item?.riesgo),
+            confianza: score(item?.confianza), costo: {
+                tipo: costType, estimacion: verifiedCost ? Number(item.costo.estimacion) : null,
+                baseVerificada: verifiedCost, explicacion: clean(item?.costo?.explicacion, 400)
+            },
+            requiereCompromisoEconomico: requiresMoney,
+            penalizacionCosto: costPenalty,
+            ejecutable: Boolean(item?.ejecutable) && !requiresMoney,
+            recursos: (Array.isArray(item?.recursos) ? item.recursos : []).map(value => clean(value, 120)).filter(Boolean).slice(0, 8),
+            pasos: (Array.isArray(item?.pasos) ? item.pasos : []).map(value => clean(value, 400)).filter(Boolean).slice(0, 12),
+            destinatarios: { criterio: clean(item?.destinatarios?.criterio, 400), basadoEnDatos: Boolean(item?.destinatarios?.basadoEnDatos) },
+            materiales: (Array.isArray(item?.materiales) ? item.materiales : []).slice(0, 8).map(asset => ({
+                tipo: clean(asset?.tipo, 40), titulo: clean(asset?.titulo, 180), contenido: clean(asset?.contenido, 4000)
+            })),
+            metricas: (Array.isArray(item?.metricas) ? item.metricas : []).map(value => clean(value, 160)).filter(Boolean).slice(0, 8),
+            capacidadesFaltantes: (Array.isArray(item?.capacidadesFaltantes) ? item.capacidadesFaltantes : []).map(value => clean(value, 240)).filter(Boolean).slice(0, 8)
+        };
+        strategy.puntuacionComercial = Math.max(0, Math.min(100, Math.round(
+            strategy.impacto * 0.35 + strategy.viabilidad * 0.35 + strategy.confianza * 0.3
+            - strategy.riesgo * 0.2 - strategy.penalizacionCosto
+        )));
+        if (!strategy.evidencia.length) strategy.ejecutable = false;
+        if (strategy.ejecutable && (!strategy.pasos.length || !strategy.accionRecomendada)) strategy.ejecutable = false;
+        return strategy;
+    }).filter(item => item.nombre && item.mecanismo);
+    const selectedId = clean(data?.estrategiaElegidaId, 12);
+    const ranked = [...alternatives].sort((a, b) => Number(b.ejecutable) - Number(a.ejecutable)
+        || b.puntuacionComercial - a.puntuacionComercial);
+    const selectedStrategy = alternatives.find(item => item.id === selectedId) || ranked[0] || null;
+    const decisionData = selectedStrategy || data;
     return {
         action,
-        decision: clean(data?.decision, 500), problema: clean(data?.problema, 800),
-        evidence, causaProbable: clean(data?.causaProbable, 800),
-        justificacion: clean(data?.justificacion, 1200),
-        accionRecomendada: clean(data?.accionRecomendada, 1200),
-        resultadoEsperado: clean(data?.resultadoEsperado, 800),
-        impacto: score(data?.impacto), confianza: score(data?.confianza),
+        decision: clean(decisionData?.decision || decisionData?.nombre, 500), problema: clean(decisionData?.problema, 800),
+        evidence: selectedStrategy ? selectedStrategy.evidencia : evidence,
+        causaProbable: clean(decisionData?.causaProbable, 800),
+        justificacion: clean(decisionData?.justificacion, 1200),
+        accionRecomendada: clean(decisionData?.accionRecomendada, 1200),
+        resultadoEsperado: clean(decisionData?.resultadoEsperado, 800),
+        impacto: score(decisionData?.impacto), confianza: score(decisionData?.confianza),
         ventajaCambio: score(data?.ventajaCambio),
         motivoCambio: CHANGE_REASONS.has(data?.motivoCambio) ? data.motivoCambio : null,
-        explicacionCambio: clean(data?.explicacionCambio, 1000)
+        explicacionCambio: clean(data?.explicacionCambio, 1000),
+        alternatives, selectedStrategy,
+        alternativesValid: alternatives.length >= 3 && new Set(alternatives.map(item => item.mecanismo.toLowerCase())).size >= 3
     };
 }
 
 function validNewDecision(proposal) {
-    return proposal.decision && proposal.problema && proposal.evidence.length && proposal.justificacion
+    return proposal.alternativesValid && proposal.decision && proposal.problema && proposal.evidence.length && proposal.justificacion
         && proposal.accionRecomendada && proposal.resultadoEsperado;
 }
 
@@ -184,14 +277,18 @@ async function insertDecision(client, proposal, snapshot, current = null) {
         RETURNING *
     `, [proposal.decision, proposal.problema, JSON.stringify(proposal.evidence), justification,
         proposal.accionRecomendada, proposal.resultadoEsperado, proposal.impacto, proposal.confianza,
-        JSON.stringify(snapshot), current?.id || null, proposal.motivoCambio, proposal.explicacionCambio || null]);
+        JSON.stringify(withOutcomeObservation(snapshot, null, proposal.alternatives, proposal.selectedStrategy)),
+        current?.id || null, proposal.motivoCambio, proposal.explicacionCambio || null]);
     return mapDecision(result.rows[0]);
 }
 
 async function applyProposal(db, current, proposal, snapshot) {
     if (current && (proposal.action === "MANTENER" || proposal.action === "SIN_DECISION")) {
-        await db.query("UPDATE director_decisions SET evaluada_at = NOW() WHERE id = $1 AND estado = 'VIGENTE'", [current.id]);
-        return { decision: { ...current, evaluadaAt: new Date() }, changed: false, reason: "MANTENIDA" };
+        const observedSnapshot = withOutcomeObservation(snapshot, current, proposal.alternatives, proposal.selectedStrategy);
+        await db.query("UPDATE director_decisions SET evaluada_at = NOW(), snapshot = $2::jsonb WHERE id = $1 AND estado = 'VIGENTE'", [current.id,
+            JSON.stringify(observedSnapshot)]);
+        return { decision: { ...current, alternativas: proposal.alternatives, estrategiaElegida: proposal.selectedStrategy,
+            snapshot: observedSnapshot, evaluadaAt: new Date() }, changed: false, reason: "MANTENIDA" };
     }
     if (current && proposal.action === "RETIRAR" && ["EVIDENCIA_INVALIDA", "NO_EJECUTABLE"].includes(proposal.motivoCambio)) {
         await db.query(`UPDATE director_decisions SET estado = 'RETIRADA', motivo_cambio = $2,
@@ -235,7 +332,7 @@ async function evaluateBestDecision(dependencies = {}) {
     const proposal = normalizeProposal(data, facts);
     const result = await applyProposal(db, current, proposal, snapshot);
     if (result.decision) {
-        result.executionPackage = await executionPackages.ensureRecoveryPackage(result.decision, db, dependencies);
+        result.executionPackage = await executionPackages.ensureCommercialPackage(result.decision, db, dependencies);
     }
     return result;
 }
@@ -272,6 +369,6 @@ function startBestDecision(dependencies = {}) {
 
 module.exports = {
     DECISION_SYSTEM, MIN_CHANGE_ADVANTAGE, MIN_IMPACT_LEAD, collectCommercialSnapshot,
-    snapshotFacts, normalizeProposal, replacementAllowed, applyProposal, getBestDecision, evaluateBestDecision,
+    snapshotFacts, commercialOutcomeMetrics, withOutcomeObservation, normalizeProposal, replacementAllowed, applyProposal, getBestDecision, evaluateBestDecision,
     refreshBestDecision, closeDecision, startBestDecision
 };

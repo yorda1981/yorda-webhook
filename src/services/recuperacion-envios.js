@@ -43,7 +43,7 @@ async function buscarBloqueoActual(phone, executor) {
  * El índice parcial de la migración protege también dos POST concurrentes
  * con idempotency keys distintas para el mismo cliente.
  */
-async function enviarRecuperacionManual({ phone, familia, indice, idempotencyKey }, deps = {}) {
+async function enviarRecuperacionManual({ phone, familia, indice, idempotencyKey, textoAprobado = null }, deps = {}) {
     const db = deps.pool || pool;
     const candidatoFn = deps.obtenerCandidato || recuperacion.obtenerCandidatoRecuperablePorTelefono;
     const sendFn = deps.sendFn || enviarMensaje;
@@ -73,6 +73,13 @@ async function enviarRecuperacionManual({ phone, familia, indice, idempotencyKey
             await client.query("ROLLBACK");
             return { ok: false, code: "VARIANTE_INVALIDA", error: "La variante ya no pertenece al candidato o al motor actual." };
         }
+        const texto = textoAprobado === null || textoAprobado === undefined
+            ? aprobado.mensaje : String(textoAprobado).trim().slice(0, 2000);
+        if (!texto) {
+            await client.query("ROLLBACK");
+            return { ok: false, code: "MENSAJE_INVALIDO", error: "El mensaje aprobado está vacío." };
+        }
+        aprobado = { ...aprobado, mensaje: texto };
 
         // Conserva todo el historial, pero libera el bloqueo lógico de éxitos
         // anteriores al cooldown para que el cliente pueda volver a elegirse.

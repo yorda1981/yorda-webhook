@@ -234,14 +234,19 @@ async function createDirectorDraft(input, db = pool) {
     if (aporte.length < 20) throw validationError("Un borrador del Director debe explicar cómo genera confianza, clientes o remesas.");
     const fuentes = normalizeSources(input?.fuentes);
     const impacto = input?.impacto && typeof input.impacto === "object" ? input.impacto : null;
+    const origenSistema = input?.origenSistema ? String(input.origenSistema).slice(0, 40) : null;
+    if (origenSistema) {
+        const existing = await db.query(`${SELECT_ASSET} WHERE ci.origen_sistema = $1`, [origenSistema]);
+        if (existing.rows[0]) return mapAsset(existing.rows[0]);
+    }
     const client = await db.connect();
     try {
         await client.query("BEGIN");
         const itemResult = await client.query(`
-            INSERT INTO content_items (titulo, creado_por, estado, origen, grupo, categoria, aporte, impacto, fuentes)
-            VALUES ($1, 'director', 'BORRADOR', 'director', $2, $3, $4, $5::jsonb, $6::jsonb)
+            INSERT INTO content_items (titulo, creado_por, estado, origen, grupo, categoria, aporte, impacto, fuentes, origen_sistema)
+            VALUES ($1, 'director', 'BORRADOR', 'director', $2, $3, $4, $5::jsonb, $6::jsonb, $7)
             RETURNING id, titulo, creado_at, actualizado_at, estado, origen, grupo, categoria, aporte, impacto, fuentes
-        `, [title, grupo, categoria, aporte, impacto ? JSON.stringify(impacto) : null, JSON.stringify(fuentes)]);
+        `, [title, grupo, categoria, aporte, impacto ? JSON.stringify(impacto) : null, JSON.stringify(fuentes), origenSistema]);
         const item = itemResult.rows[0];
         const revisionResult = await client.query(`
             INSERT INTO content_revisions (content_item_id, numero, cuerpo, creado_por)
@@ -259,6 +264,10 @@ async function createDirectorDraft(input, db = pool) {
         return mapAsset({ ...item, cuerpo: revision.cuerpo, revision_id: revision.id, revision_numero: revision.numero });
     } catch (error) {
         try { await client.query("ROLLBACK"); } catch (_) {}
+        if (error.code === "23505" && origenSistema) {
+            const existing = await db.query(`${SELECT_ASSET} WHERE ci.origen_sistema = $1`, [origenSistema]);
+            if (existing.rows[0]) return mapAsset(existing.rows[0]);
+        }
         throw error;
     } finally {
         client.release();

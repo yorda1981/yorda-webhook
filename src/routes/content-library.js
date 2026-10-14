@@ -140,7 +140,7 @@ function createContentLibraryRouter({ service = contentLibrary, selector = conte
         try {
             const current = await decision.getBestDecision();
             if (!current || current.id !== Number(req.params.id)) return res.status(404).json({ error: "La decisión ya no está vigente." });
-            const packageReady = await executionPackage.ensureRecoveryPackage(current);
+            const packageReady = await executionPackage.ensureCommercialPackage(current);
             res.json({ package: packageReady });
         } catch (error) {
             sendError(res, error);

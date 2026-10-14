@@ -3,6 +3,8 @@
 const pool = require("../../../db");
 const recuperacion = require("../recuperacion");
 const mensajes = require("../recuperacion-mensajes");
+const recuperacionEnvios = require("../recuperacion-envios");
+const contentLibrary = require("../content-library");
 
 const PACKAGE_TYPE = "RECUPERACION_ABANDONOS";
 const STATES = new Set(["BORRADOR", "APROBADO", "CANCELADO"]);
@@ -133,6 +135,75 @@ function mapPackage(row) {
     };
 }
 
+function buildInitiativeContent(decision, now = new Date()) {
+    const alternatives = Array.isArray(decision.alternativas) ? decision.alternativas : [];
+    const winner = decision.estrategiaElegida || alternatives[0] || null;
+    const materials = winner?.materiales || [];
+    const libraryMaterials = materials.filter(item => item.tipo === "biblioteca" && item.titulo && item.contenido);
+    const recovery = isRecoveryDecision(decision);
+    const missing = [...(winner?.capacidadesFaltantes || [])];
+    if (!recovery && !libraryMaterials.length) {
+        missing.push("No existe todavía un adaptador operativo para ejecutar esta estrategia desde YORDA.");
+    }
+    return {
+        objetivo: decision.problema,
+        generadoAt: now.toISOString(),
+        estrategiaElegida: winner,
+        alternativas: alternatives,
+        destinatarios: winner?.destinatarios || { criterio: "Sin segmentación individual verificable", basadoEnDatos: false },
+        materiales: materials,
+        costos: winner?.costo || { tipo: "DESCONOCIDO", estimacion: null, baseVerificada: false,
+            explicacion: "No hay costos unitarios ni ganancia neta registrados para validar importes." },
+        plan: winner?.pasos || [decision.accionRecomendada],
+        metricas: winner?.metricas || ["Remesas completadas", "Ganancia neta (no disponible hasta registrar costos reales)"],
+        resultadoEsperado: winner?.resultadoEsperado || decision.resultadoEsperado,
+        capacidadesFaltantes: [...new Set(missing)],
+        ejecucion: {
+            adaptador: recovery ? "RECUPERACION_CRM" : libraryMaterials.length ? "BIBLIOTECA_BORRADOR" : null,
+            listaParaAprobar: recovery || (libraryMaterials.length > 0 && !winner?.requiereCompromisoEconomico),
+            requiereAprobacion: true,
+            publicacionesAutomaticas: false,
+            mensajesAutomaticos: false,
+            activosBiblioteca: []
+        },
+        recuperacion: recovery ? buildPackageContent(decision, [], now) : null
+    };
+}
+
+async function ensureCommercialPackage(decision, db = pool, dependencies = {}) {
+    const existing = await getPackageForDecision(decision.id, db);
+    if (existing) {
+        const content = existing.contenido || {};
+        const withAlternatives = { ...content, alternativas: decision.alternativas || content.alternativas || [],
+            estrategiaElegida: decision.estrategiaElegida || content.estrategiaElegida || null };
+        if (withAlternatives.alternativas.length && JSON.stringify(content.alternativas || []) !== JSON.stringify(withAlternatives.alternativas)) {
+            const updated = await db.query("UPDATE director_execution_packages SET contenido = $2::jsonb, actualizado_at = NOW() WHERE id = $1 RETURNING *",
+                [existing.id, JSON.stringify(withAlternatives)]);
+            return mapPackage(updated.rows[0]);
+        }
+        return existing;
+    }
+    if (isRecoveryDecision(decision)) {
+        const candidates = await (dependencies.getCandidates || recuperacion.obtenerCandidatosRecuperacion)(db, { throwOnError: true });
+        const content = { ...buildPackageContent(decision, candidates, dependencies.now || new Date()),
+            alternativas: decision.alternativas || [], estrategiaElegida: decision.estrategiaElegida || null,
+            ejecucion: { adaptador: "RECUPERACION_CRM", listaParaAprobar: true, requiereAprobacion: true,
+                publicacionesAutomaticas: false, mensajesAutomaticos: false, resultados: [] } };
+        const result = await db.query(`
+            INSERT INTO director_execution_packages (decision_id, tipo, estado, contenido)
+            VALUES ($1, $2, 'BORRADOR', $3::jsonb) ON CONFLICT (decision_id) DO NOTHING RETURNING *
+        `, [decision.id, PACKAGE_TYPE, JSON.stringify(content)]);
+        return result.rows[0] ? mapPackage(result.rows[0]) : getPackageForDecision(decision.id, db);
+    }
+    const content = buildInitiativeContent(decision, dependencies.now || new Date());
+    const result = await db.query(`
+        INSERT INTO director_execution_packages (decision_id, tipo, estado, contenido)
+        VALUES ($1, 'INICIATIVA_COMERCIAL', 'BORRADOR', $2::jsonb)
+        ON CONFLICT (decision_id) DO NOTHING RETURNING *
+    `, [decision.id, JSON.stringify(content)]);
+    return result.rows[0] ? mapPackage(result.rows[0]) : getPackageForDecision(decision.id, db);
+}
+
 async function getPackageForDecision(decisionId, db = pool) {
     const id = Number(decisionId);
     if (!Number.isSafeInteger(id) || id <= 0) throw validationError("Decisión inválida.");
@@ -158,6 +229,24 @@ async function ensureRecoveryPackage(decision, db = pool, dependencies = {}) {
 
 function normalizeEditableContent(input, current) {
     const content = structuredClone(current);
+    if (Array.isArray(content.alternativas)) {
+        if (input.objetivo !== undefined) content.objetivo = String(input.objetivo).trim().slice(0, 2000);
+        if (Array.isArray(input.materiales)) {
+            const winner = content.estrategiaElegida;
+            const changes = new Map(input.materiales.map((item, index) => [Number(item?.indice ?? index), item]));
+            winner.materiales = (winner.materiales || []).map((material, index) => {
+                const change = changes.get(index);
+                if (!change) return material;
+                const titulo = String(change.titulo ?? material.titulo).trim().slice(0, 180);
+                const contenido = String(change.contenido ?? material.contenido).trim().slice(0, 4000);
+                if (!titulo || !contenido) throw validationError("El material de la iniciativa no puede quedar vacío.");
+                return { ...material, titulo, contenido };
+            });
+            content.materiales = winner.materiales;
+        }
+        if (!content.objetivo) throw validationError("El objetivo comercial es obligatorio.");
+        return content;
+    }
     const campaignDraftWasGenerated = input.campana?.borrador === current.campana.borrador;
     for (const field of ["objetivo", "duracion", "resultadoEsperado", "estrategia"]) {
         if (input[field] !== undefined) content[field] = String(input[field]).trim().slice(0, 2000);
@@ -203,16 +292,57 @@ async function updatePackage(rawId, input, db = pool) {
     return mapPackage(result.rows[0]);
 }
 
-async function resolvePackage(rawId, action, db = pool) {
+async function resolvePackage(rawId, action, db = pool, dependencies = {}) {
     const id = Number(rawId);
     const target = action === "approve" ? "APROBADO" : action === "cancel" ? "CANCELADO" : null;
     if (!Number.isSafeInteger(id) || id <= 0 || !target || !STATES.has(target)) throw validationError("Acción de paquete inválida.");
-    const result = await db.query(`UPDATE director_execution_packages SET estado = $2, actualizado_at = NOW(), resuelto_at = NOW()
-                                   WHERE id = $1 AND estado = 'BORRADOR' RETURNING *`, [id, target]);
+    const current = await db.query("SELECT * FROM director_execution_packages WHERE id = $1 AND estado = 'BORRADOR'", [id]);
+    const row = current.rows[0];
+    if (!row) return null;
+    const content = row.contenido || {};
+    if (action === "approve" && row.tipo === "RECUPERACION_ABANDONOS") {
+        const results = [];
+        for (const client of content.clientes || []) {
+            if (client.incluido === false) continue;
+            const sendRecovery = dependencies.sendRecovery || recuperacionEnvios.enviarRecuperacionManual;
+            const sent = await sendRecovery({
+                phone: client.phone, familia: client.familia, indice: client.varianteIndice,
+                textoAprobado: client.mensaje, idempotencyKey: `director-package-${id}-${client.phone}`
+            }, { pool: db });
+            results.push({ phone: client.phone, estado: sent.code, error: sent.error || null });
+        }
+        content.ejecucion = { ...(content.ejecucion || {}), adaptador: "RECUPERACION_CRM", resultados: results,
+            completados: results.filter(result => result.estado === "ENVIADO" || result.estado === "YA_ENVIADO").length,
+            fallidos: results.filter(result => !["ENVIADO", "YA_ENVIADO"].includes(result.estado)).length };
+    } else if (action === "approve" && row.tipo === "INICIATIVA_COMERCIAL") {
+        const materials = (content.materiales || []).filter(item => item.tipo === "biblioteca" && item.titulo && item.contenido);
+        if (!materials.length) throw validationError("Esta iniciativa aún no tiene un adaptador listo para ejecutarse.");
+        const facts = content.estrategiaElegida?.evidencia || [];
+        if (!facts.length) throw validationError("No se puede aprobar material sin evidencia citada.");
+        const assets = [];
+        for (let index = 0; index < materials.length; index += 1) {
+            const material = materials[index];
+            const createDraft = dependencies.createDirectorDraft || contentLibrary.createDirectorDraft;
+            assets.push(await createDraft({
+                titulo: material.titulo, cuerpo: material.contenido, grupo: "permanente",
+                categoria: "iniciativa-comercial",
+                aporte: content.estrategiaElegida?.justificacion || content.objetivo,
+                impacto: { puntuacion: content.estrategiaElegida?.puntuacionComercial || 0 },
+                fuentes: facts.map(fact => ({ nombre: "Datos internos de YORDA", titulo: fact.dato, url: "" })),
+                origenSistema: `director-pkg-${id}-${index + 1}`
+            }, db));
+        }
+        content.ejecucion = { ...content.ejecucion, activosBiblioteca: assets.map(asset => ({ id: asset.id, titulo: asset.titulo })),
+            borradoresCreados: assets.length };
+    }
+    const result = await db.query(`UPDATE director_execution_packages SET estado = $2, contenido = $3::jsonb,
+                                   actualizado_at = NOW(), resuelto_at = NOW()
+                                   WHERE id = $1 AND estado = 'BORRADOR' RETURNING *`, [id, target, JSON.stringify(content)]);
     return mapPackage(result.rows[0]);
 }
 
 module.exports = {
     PACKAGE_TYPE, isRecoveryDecision, seededRng, segmentName, campaignDraft, buildPackageContent,
-    getPackageForDecision, ensureRecoveryPackage, normalizeEditableContent, updatePackage, resolvePackage
+    buildInitiativeContent, getPackageForDecision, ensureRecoveryPackage, ensureCommercialPackage,
+    normalizeEditableContent, updatePackage, resolvePackage
 };
