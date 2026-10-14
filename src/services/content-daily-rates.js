@@ -171,10 +171,10 @@ async function ensureDailyRatesSchedule({ db = pool, now = new Date() } = {}) {
             INSERT INTO content_schedules
                 (idioma, programada_para, estado, idempotency_key, content_item_id, result_code, error,
                  ejecutada_at)
-            VALUES ('es', $1, $2, $3, $4, $5, $6, CASE WHEN $2 = 'FALLIDA' THEN NOW() ELSE NULL END)
+            VALUES ('es', $1, $2, $3, $4, $5, $6, CASE WHEN $7 THEN NOW() ELSE NULL END)
             ON CONFLICT (idempotency_key) DO NOTHING
             RETURNING id
-        `, [scheduledAt, state, key, contentId, resultCode, error]);
+        `, [scheduledAt, state, key, contentId, resultCode, error, state === "FALLIDA"]);
         const scheduleId = Number(inserted.rows[0]?.id || 0);
         if (scheduleId) {
             await client.query(`
