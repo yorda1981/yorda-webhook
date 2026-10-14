@@ -95,6 +95,18 @@ test("una oferta con porcentaje incompleto queda pendiente sin romper la evaluac
     assert.deepEqual(normalized.alternatives[0].simulacionPromocion, []);
 });
 
+test("la evaluación real no es comparable hasta que el Director analice F19 como referidos al 1 %", () => {
+    const referralFacts = [...facts, { id: "F19", dato: "Recompensa hipotética de referidos del 1 % después de la primera remesa." }];
+    const alternatives = proposal().alternativas.map(item => ({ ...item }));
+    alternatives[2] = { ...alternatives[2], nombre: "Referidos con recompensa condicionada",
+        mecanismo: "Adquisición por recomendación de clientes", evidenciaIds: ["F19"],
+        accionRecomendada: "Evaluar una recompensa del 1 % solo tras primera transferencia confirmada" };
+    const evaluated = service.normalizeProposal(proposal({ alternativas: alternatives }), referralFacts);
+    assert.equal(evaluated.alternativesValid, true);
+    const omitted = service.normalizeProposal(proposal(), referralFacts);
+    assert.equal(omitted.alternativesValid, false);
+});
+
 test("reintenta si el modelo no compara oportunidades realmente distintas", async () => {
     const responses = [proposal({ alternativas: proposal().alternativas.slice(0, 1) }), proposal()];
     const users = [];

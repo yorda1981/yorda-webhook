@@ -248,6 +248,12 @@ function mechanismsAreDistinct(alternatives) {
     return true;
 }
 
+function referralCandidateEvaluated(alternatives) {
+    return alternatives.some(item => item.evidencia.some(fact => fact.id === "F19")
+        && /referid|recomendaci[oó]n/.test(`${item.nombre} ${item.mecanismo} ${item.accionRecomendada}`.toLowerCase())
+        && /1\s?%|uno por ciento|recompensa/.test(`${item.nombre} ${item.accionRecomendada}`.toLowerCase()));
+}
+
 function commercialOutcomeMetrics(snapshot) {
     return {
         conversaciones24h: snapshot.conversaciones24h,
@@ -358,6 +364,7 @@ function normalizeProposal(data, facts, promotionContext = null) {
         explicacionCambio: clean(data?.explicacionCambio, 1000),
         alternatives, selectedStrategy,
         alternativesValid: alternatives.length >= 3 && mechanismsAreDistinct(alternatives)
+            && (!factMap.has("F19") || referralCandidateEvaluated(alternatives))
     };
 }
 
@@ -365,7 +372,7 @@ async function generateCommercialProposal(llm, user, facts, promotionContext = n
     const first = await llm.completeJson({ tarea: "decision", system: DECISION_SYSTEM, user, temperature: 0.1, analysisId });
     let proposal = normalizeProposal(first.data, facts, promotionContext);
     if (proposal.alternativesValid) return proposal;
-    const retryUser = `${user}\n\nTU RESPUESTA ANTERIOR NO CUMPLIÓ EL CRITERIO DE COMPARACIÓN. Rehazla completa: entrega al menos tres mecanismos realmente distintos, cita evidencia disponible para cada uno y vuelve a elegir la mejor. No conviertas variaciones de copy o segmentos en estrategias distintas.`;
+    const retryUser = `${user}\n\nTU RESPUESTA ANTERIOR NO CUMPLIÓ EL CRITERIO DE COMPARACIÓN. Rehazla completa: entrega al menos tres mecanismos realmente distintos, cita evidencia disponible para cada uno y vuelve a elegir la mejor. No conviertas variaciones de copy o segmentos en estrategias distintas. Evalúa de forma explícita el programa de referidos de F19 como alternativa real, con recompensa hipotética del 1 % después de una primera remesa; marca sus costos y ejecución como pendientes si no están verificados. No lo presentes como aprobado.`;
     const retry = await llm.completeJson({ tarea: "decision", system: DECISION_SYSTEM, user: retryUser, temperature: 0.1, analysisId });
     proposal = normalizeProposal(retry.data, facts, promotionContext);
     return proposal;
@@ -503,5 +510,5 @@ module.exports = {
     DECISION_SYSTEM, MIN_CHANGE_ADVANTAGE, MIN_IMPACT_LEAD, collectCommercialSnapshot,
     snapshotFacts, commercialOutcomeMetrics, withOutcomeObservation, mechanismsAreDistinct, mapDecision, normalizeProposal,
     generateCommercialProposal, replacementAllowed, applyProposal, getBestDecision, evaluateBestDecision,
-    refreshBestDecision, closeDecision, startBestDecision
+    referralCandidateEvaluated, refreshBestDecision, closeDecision, startBestDecision
 };
