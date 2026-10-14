@@ -266,12 +266,12 @@ async function reconciliarBorradorRecuperacion(row, db, dependencies = {}) {
     const getCandidates = dependencies.getCandidates || recuperacion.obtenerCandidatosRecuperacion;
     const candidates = await getCandidates(db, { throwOnError: true });
     const generated = buildPackageContent({ id: Number(row.decision_id), resultadoEsperado: previous.resultadoEsperado }, candidates);
-    const newByPhone = new Map(generated.clientes.map(client => [client.phone, client]));
-    const oldByPhone = new Map((previous.clientes || []).map(client => [client.phone, client]));
+    const newByPhone = new Map(generated.clientes.map(client => [String(client.phone), client]));
+    const oldByPhone = new Map((previous.clientes || []).map(client => [String(client.phone), client]));
     const clients = [];
 
     for (const fresh of generated.clientes) {
-        const old = oldByPhone.get(fresh.phone);
+        const old = oldByPhone.get(String(fresh.phone));
         clients.push({
             ...fresh,
             incluido: old ? old.incluido !== false : true,
@@ -281,7 +281,7 @@ async function reconciliarBorradorRecuperacion(row, db, dependencies = {}) {
         });
     }
     for (const old of previous.clientes || []) {
-        if (newByPhone.has(old.phone)) continue;
+        if (newByPhone.has(String(old.phone))) continue;
         const getReason = dependencies.getExclusionReason || recuperacion.obtenerMotivoExclusion;
         const motivoExclusion = await getReason(old.phone, db);
         clients.push({ ...old, incluido: false, motivoExclusion });

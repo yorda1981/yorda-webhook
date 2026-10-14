@@ -67,7 +67,7 @@ test("al abrir un borrador, reconcilia elegibilidad, reemplaza mensajes viejos y
         return { rows: [] };
     }};
     const result = await service.getPackageForDecision(12, db, {
-        getCandidates: async () => [candidates[0]],
+        getCandidates: async () => [{ ...candidates[0], phone: Number(candidates[0].phone) }],
         getExclusionReason: async phone => phone === candidates[1].phone ? "Ya existe un intento de recuperación para esta cotización." : "No elegible."
     });
     assert.equal(result.contenido.segmento.total, 1);
