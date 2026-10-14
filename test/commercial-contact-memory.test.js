@@ -64,3 +64,10 @@ test("reconoce solicitudes comerciales de baja en español, portugués e inglés
     assert.equal(memory.isCommercialOptOut("Não me mandem mensagens"), true);
     assert.equal(memory.isCommercialOptOut("Quiero cotizar R$210"), false);
 });
+
+test("la solicitud de no contacto se registra como rechazo y no solo como respuesta", async () => {
+    const db = dbMock();
+    await memory.markLatestResponse(contact.phone, db, "DECLINED");
+    assert.match(db.queries[0].sql, /SET response_status = \$2/);
+    assert.equal(db.queries[0].params[1], "DECLINED");
+});

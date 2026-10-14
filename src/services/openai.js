@@ -55,7 +55,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null, opci
         // Una solicitud explícita de no recibir comunicaciones comerciales se
         // conserva en el perfil; no altera respuestas ni operaciones iniciadas.
         const solicitaNoComerciales = commercialContactMemory.isCommercialOptOut(text);
-        await commercialContactMemory.markLatestResponse(phone).catch(() => {});
+        await commercialContactMemory.markLatestResponse(phone, undefined, solicitaNoComerciales ? "DECLINED" : "REPLIED").catch(() => {});
         await limpiarSaludoPendiente(phone).catch(() => {});
 
         const txt = norm(text);

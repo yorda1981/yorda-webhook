@@ -77,6 +77,15 @@ test("rechaza costos afirmados por el modelo y no elige ofertas sin rentabilidad
     assert.equal(normalized.selectedStrategy.id, "S2");
 });
 
+test("una recompensa de referidos siempre queda como compromiso económico pendiente", () => {
+    const alternatives = proposal().alternativas.map(item => ({ ...item }));
+    alternatives[0] = { ...alternatives[0], nombre: "Programa de referidos", mecanismo: "Recomendación boca a boca",
+        accionRecomendada: "Dar una recompensa del 1 % tras la primera transferencia confirmada", ejecutable: true };
+    const normalized = service.normalizeProposal(proposal({ alternativas: alternatives, estrategiaElegidaId: "S1" }), facts);
+    assert.equal(normalized.alternatives[0].requiereCompromisoEconomico, true);
+    assert.equal(normalized.alternatives[0].ejecutable, false);
+});
+
 test("reintenta si el modelo no compara oportunidades realmente distintas", async () => {
     const responses = [proposal({ alternativas: proposal().alternativas.slice(0, 1) }), proposal()];
     const users = [];
@@ -179,20 +188,30 @@ test("la sustitución cierra la anterior y crea exactamente una nueva prioridad 
 });
 
 test("la instantánea convierte únicamente datos existentes en hechos citables", async () => {
-    const db = { query: async () => ({ rows: [{
-        conversaciones_24h: "10", conversaciones_media_7d: "7.285",
-        cotizaciones_24h: "4", cotizaciones_media_7d: "3",
-        cotizaciones_sin_cierre_48h: "6", abandonos_7d: "2",
-        operaciones_24h: "3", operaciones_media_7d: "2.2",
-        remesas_24h: "2", remesas_media_7d: "1.5", operaciones_pendientes_48h: "1",
-        miembros_grupo: "120", altas_grupo_24h: "3", bajas_grupo_24h: "1",
-        publicaciones_7d: "2", tasas_actualizadas_at: new Date("2026-10-13T10:00:00Z"),
-        capturado_at: new Date("2026-10-13T12:00:00Z")
-    }] }) };
+    const queries = [];
+    const db = {
+        query: async sql => {
+            queries.push(String(sql));
+            return { rows: [{
+                conversaciones_24h: "10", conversaciones_media_7d: "7.285",
+                cotizaciones_24h: "4", cotizaciones_media_7d: "3",
+                cotizaciones_sin_cierre_48h: "6", abandonos_7d: "2",
+                operaciones_24h: "3", operaciones_media_7d: "2.2",
+                remesas_24h: "2", remesas_media_7d: "1.5", operaciones_pendientes_48h: "1",
+                miembros_grupo: "120", altas_grupo_24h: "3", bajas_grupo_24h: "1",
+                publicaciones_7d: "2", tasas_actualizadas_at: new Date("2026-10-13T10:00:00Z"),
+                capturado_at: new Date("2026-10-13T12:00:00Z")
+            }] };
+        }
+    };
     const snapshot = await service.collectCommercialSnapshot(db);
     assert.equal(snapshot.conversaciones24h, 10);
     assert.equal(snapshot.conversacionesMedia7d, 7.3);
     assert.match(service.snapshotFacts(snapshot)[2].dato, /6 cotizaciones/);
+    assert.match(service.snapshotFacts(snapshot).find(fact => fact.id === "F19").dato, /referidos.*1 %/i);
+    assert.equal(snapshot.funnel.primerasRemesas30d, 0);
+    assert.match(queries[0], /primeras_remesas_30d/);
+    assert.match(queries[0], /contactos_con_respuesta_30d/);
 });
 
 test("migración, rutas, arranque e interfaz exponen una única decisión vigente", () => {

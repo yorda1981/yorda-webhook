@@ -11,6 +11,7 @@ const contentDirector = require("../services/director/content-director");
 const directorConfig = require("../services/director/director-config");
 const bestDecision = require("../services/director/best-decision");
 const recoveryExecutionPackage = require("../services/director/recovery-execution-package");
+const directorAiUsage = require("../services/director/ai-usage");
 const { verificarToken } = require("../middleware/admin-auth");
 const { adminReadLimiter, adminWriteLimiter } = require("../middleware/admin-rate-limiters");
 
@@ -71,7 +72,8 @@ function createContentLibraryRouter({ service = contentLibrary, selector = conte
     // Director IA: últimas ejecuciones y ejecución a demanda (solo crea borradores).
     router.get("/director/status", adminReadLimiter, verificarToken, async (_req, res) => {
         try {
-            res.json(await director.getDirectorStatus());
+            const [status, aiUsage] = await Promise.all([director.getDirectorStatus(), directorAiUsage.getDailySummary()]);
+            res.json({ ...status, aiUsage });
         } catch (error) {
             sendError(res, error);
         }

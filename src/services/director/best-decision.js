@@ -5,6 +5,7 @@ const env = require("../../config/env");
 const llmGateway = require("./llm");
 const executionPackages = require("./recovery-execution-package");
 const promotionCalculator = require("./promotion-calculator");
+const referralEconomics = require("./referral-economics");
 const { conLockExclusivo } = require("../job-lock");
 
 const REVIEW_INTERVAL_MS = 60 * 60 * 1000;
@@ -33,6 +34,7 @@ Reglas:
 8. SIN_DECISION solo cuando no exista evidencia suficiente; aun así, devuelve las estrategias exploradas y qué información falta.
 9. Usa el registro de métricas antes/después de la decisión vigente para aprender; las variaciones son señales observadas, no prueba causal de que la iniciativa las produjo.
 10. En CADA respuesta, también cuando la acción sea MANTENER, devuelve al menos tres alternativas comparables. Deben resolver la oportunidad por mecanismos sustancialmente distintos; cambiar el texto o el segmento de una misma campaña no las hace distintas.
+11. Evalúa explícitamente el programa de referidos hipotético F19 frente a alternativas de otros mecanismos. La recompensa del 1 % solo se paga tras la primera remesa confirmada; no la recomiendes como activable si costos netos, beneficios acumulados, antifraude y método de entrega no están verificados y aprobados.
 
 Devuelve JSON:
 {"accion":"CREAR|MANTENER|REEMPLAZAR|RETIRAR|SIN_DECISION","estrategiaElegidaId":"S1","alternativas":[{"id":"S1","nombre":"...","mecanismo":"...","problema":"...","evidenciaIds":["F1"],"causaProbable":"...","justificacion":"...","accionRecomendada":"...","resultadoEsperado":"...","impacto":0,"viabilidad":0,"riesgo":0,"confianza":0,"costo":{"tipo":"SIN_COSTO|OPERATIVO|ECONOMICO|DESCONOCIDO","estimacion":null,"baseVerificada":false,"explicacion":"..."},"oferta":{"tipo":"NINGUNA|DESCUENTO_TRANSFERENCIA|MEJORA_TASA","porcentaje":0|1|2},"requiereCompromisoEconomico":false,"ejecutable":true,"recursos":["..."],"pasos":["..."],"destinatarios":{"criterio":"...","basadoEnDatos":true},"materiales":[{"tipo":"biblioteca|whatsapp|bot|otro","titulo":"...","contenido":"..."}],"metricas":["remesas completadas", "ganancia neta"],"capacidadesFaltantes":[]}],"ventajaCambio":0,"motivoCambio":"OPORTUNIDAD_SUPERIOR|EVIDENCIA_INVALIDA|NO_EJECUTABLE|CAMBIO_MATERIAL|null","explicacionCambio":"..."}
@@ -89,6 +91,42 @@ async function collectCommercialSnapshot(db = pool) {
             (SELECT COUNT(*) FROM customers WHERE COALESCE(nivel_vip, 0) > 0)::int AS clientes_vip,
             (SELECT COALESCE(SUM(monto), 0) FROM operations
              WHERE status = 'completada' AND completed_at >= NOW() - INTERVAL '30 days') AS volumen_remesas_30d,
+            (SELECT COUNT(*) FROM customers
+             WHERE created_at >= NOW() - INTERVAL '30 days')::int AS clientes_nuevos_registrados_30d,
+            (SELECT COUNT(DISTINCT o.phone) FROM operations o
+             WHERE o.status = 'completada' AND o.completed_at >= NOW() - INTERVAL '30 days'
+               AND NOT EXISTS (SELECT 1 FROM operations old WHERE old.phone = o.phone AND old.status = 'completada'
+                               AND old.completed_at < o.completed_at))::int AS primeras_remesas_30d,
+            (SELECT COUNT(DISTINCT o.phone) FROM operations o
+             WHERE o.status = 'completada' AND o.completed_at >= NOW() - INTERVAL '30 days'
+               AND EXISTS (SELECT 1 FROM operations old WHERE old.phone = o.phone AND old.status = 'completada'
+                           AND old.completed_at < o.completed_at))::int AS clientes_recurrentes_30d,
+            (SELECT COUNT(*) FROM customers c
+             WHERE c.estado_crm IN ('cotizado','esperando_pix')
+               AND c.fecha_cotizacion >= NOW() - INTERVAL '30 days')::int AS cotizaciones_abiertas_30d,
+            (SELECT COUNT(*) FROM customers c
+             WHERE c.estado_crm = 'esperando_pix'
+               AND c.fecha_cotizacion >= NOW() - INTERVAL '30 days')::int AS abandonos_pix_30d,
+            (SELECT COUNT(*) FROM customers c
+             WHERE COALESCE(c.marketing_opt_out, FALSE) = FALSE
+               AND COALESCE(c.cliente_frecuente, FALSE) = TRUE
+               AND EXISTS (SELECT 1 FROM operations o WHERE o.phone = c.phone AND o.status = 'completada'
+                           AND o.completed_at >= NOW() - INTERVAL '90 days')
+               AND NOT EXISTS (SELECT 1 FROM operations o WHERE o.phone = c.phone AND o.status IN ('pendiente','confirmada'))
+               AND (c.pausa_hasta IS NULL OR c.pausa_hasta <= NOW()))::int AS clientes_frecuentes_sin_operacion_activa,
+            (SELECT COUNT(*) FROM commercial_contact_events WHERE occurred_at >= NOW() - INTERVAL '30 days'
+               AND provider_status = 'SENT')::int AS contactos_comerciales_enviados_30d,
+            (SELECT COUNT(*) FROM commercial_contact_events WHERE occurred_at >= NOW() - INTERVAL '30 days'
+               AND provider_status = 'SENT' AND response_status = 'REPLIED')::int AS contactos_con_respuesta_30d,
+            (SELECT COUNT(*) FROM commercial_contact_events WHERE occurred_at >= NOW() - INTERVAL '30 days'
+               AND response_status = 'DECLINED')::int AS contactos_rechazados_30d,
+            (SELECT COUNT(DISTINCT phone) FROM commercial_contact_events WHERE occurred_at >= NOW() - INTERVAL '30 days'
+               AND provider_status = 'SENT')::int AS clientes_contactados_30d,
+            (SELECT COUNT(*) FROM commercial_contact_events WHERE occurred_at >= NOW() - INTERVAL '30 days'
+               AND operation_id IS NOT NULL) ::int AS contactos_con_operacion_vinculada_30d,
+            (SELECT MIN(occurred_at) FROM commercial_contact_events) AS memoria_contacto_desde,
+            (SELECT COUNT(*) FROM operations WHERE status = 'completada'
+               AND completed_at >= NOW() - INTERVAL '30 days' AND monto > 0)::int AS remesas_con_importe_30d,
             (SELECT updated_at FROM rates WHERE id = 1) AS tasas_actualizadas_at,
             FALSE AS costos_unitarios_disponibles,
             FALSE AS ganancia_neta_disponible,
@@ -96,6 +134,9 @@ async function collectCommercialSnapshot(db = pool) {
     `);
     const row = result.rows[0] || {};
     const escenariosPromocion = await promotionCalculator.getCurrentPromotionScenarios(db);
+    const referral = referralEconomics.evaluateReferralEconomics({
+        costsKnown: false, vipBenefitsKnown: !escenariosPromocion.beneficiosExistentesConCostoDesconocido
+    });
     return {
         capturadoAt: row.capturado_at,
         conversaciones24h: n(row.conversaciones_24h),
@@ -117,9 +158,28 @@ async function collectCommercialSnapshot(db = pool) {
         clientesFrecuentes: n(row.clientes_frecuentes),
         clientesVip: n(row.clientes_vip),
         volumenRemesas30d: n(row.volumen_remesas_30d),
+        funnel: {
+            clientesNuevosRegistrados30d: n(row.clientes_nuevos_registrados_30d),
+            primerasRemesas30d: n(row.primeras_remesas_30d),
+            clientesRecurrentes30d: n(row.clientes_recurrentes_30d),
+            cotizacionesAbiertas30d: n(row.cotizaciones_abiertas_30d),
+            abandonosPix30d: n(row.abandonos_pix_30d),
+            clientesFrecuentesSinOperacionActiva: n(row.clientes_frecuentes_sin_operacion_activa),
+            remesasConImporte30d: n(row.remesas_con_importe_30d)
+        },
+        contactOutcomes: {
+            clientesContactados30d: n(row.clientes_contactados_30d),
+            enviados30d: n(row.contactos_comerciales_enviados_30d),
+            respuestas30d: n(row.contactos_con_respuesta_30d),
+            rechazados30d: n(row.contactos_rechazados_30d),
+            contactosConOperacionVinculada30d: n(row.contactos_con_operacion_vinculada_30d),
+            memoriaDesde: row.memoria_contacto_desde || null,
+            nota: "Una operación vinculada es una relación registrada, no atribución causal; no hay atribución incremental verificada."
+        },
         tasasActualizadasAt: row.tasas_actualizadas_at || null,
         rentabilidad: { costosUnitariosDisponibles: false, gananciaNetaDisponible: false },
-        escenariosPromocion
+        escenariosPromocion,
+        referralEconomics: referral
     };
 }
 
@@ -140,7 +200,12 @@ function snapshotFacts(snapshot) {
         { id: "F13", dato: `No existe información suficiente de costos unitarios ni ganancia neta por operación; no se puede verificar la rentabilidad de promociones.` },
         { id: "F14", dato: snapshot.escenariosPromocion?.disponible
             ? `Escenarios con tasa vigente de rates (actualizada ${snapshot.escenariosPromocion.updatedAt}; zona São Paulo): ${JSON.stringify(snapshot.escenariosPromocion.escenarios)}. Margen 5 % y restante son referencias teóricas, no rentabilidad neta verificada.`
-            : `No se puede calcular ninguna promoción con una tasa vigente: ${snapshot.escenariosPromocion?.motivo || "tasa no disponible"}` }
+            : `No se puede calcular ninguna promoción con una tasa vigente: ${snapshot.escenariosPromocion?.motivo || "tasa no disponible"}` },
+        { id: "F15", dato: `Últimos 30 días: ${snapshot.funnel?.clientesNuevosRegistrados30d || 0} registros de clientes; ${snapshot.funnel?.primerasRemesas30d || 0} primeras remesas observables y ${snapshot.funnel?.clientesRecurrentes30d || 0} clientes con remesas recurrentes. El registro de cliente no equivale necesariamente a captación atribuible.` },
+        { id: "F16", dato: `Embudo: ${snapshot.funnel?.cotizacionesAbiertas30d || 0} clientes en estado cotizado/esperando PIX en 30 días; ${snapshot.funnel?.abandonosPix30d || 0} esperando PIX. Es estado actual de CRM, no una cohorte de conversión completa.` },
+        { id: "F17", dato: `Memoria de contactos disponible desde ${snapshot.contactOutcomes?.memoriaDesde || "sin eventos históricos verificables"}. En los últimos 30 días registrados: ${snapshot.contactOutcomes?.clientesContactados30d || 0} clientes, ${snapshot.contactOutcomes?.enviados30d || 0} envíos confirmados, ${snapshot.contactOutcomes?.respuestas30d || 0} respuestas, ${snapshot.contactOutcomes?.rechazados30d || 0} rechazos y ${snapshot.contactOutcomes?.contactosConOperacionVinculada30d || 0} contactos con operación vinculada. El historial anterior no se reconstruyó; asociación no prueba causalidad.` },
+        { id: "F18", dato: `Hay ${snapshot.funnel?.clientesFrecuentesSinOperacionActiva || 0} clientes frecuentes con remesa en 90 días, sin operación activa y sin bloqueo CRM identificable; es un universo potencial, no autorización ni evidencia de que quieran recibir una campaña.` },
+        { id: "F19", dato: `Candidato a programa de referidos: recompensa hipotética del 1 % solo tras primera remesa confirmada. Escenarios: ${JSON.stringify(snapshot.referralEconomics?.scenarios || [])}. El 5 % de margen es referencia bruta no verificada; quedan pendientes costos netos, beneficios acumulados, antifraude, identidad y método de pago. No está autorizado.` }
     ];
 }
 
@@ -222,7 +287,7 @@ function normalizeProposal(data, facts, promotionContext = null) {
             ...(Array.isArray(item?.pasos) ? item.pasos : []),
             ...(Array.isArray(item?.materiales) ? item.materiales.map(material => `${material?.titulo || ""} ${material?.contenido || ""}`) : [])]
             .join(" ");
-        const economicLanguage = /\b(descuento|bono|bonificación|tasa preferencial|entrega gratis|gratis|crédito|cashback|incentivo|premio|regalo|promoción económica)\b|(?:R\$|\$)\s?\d/i.test(strategyText);
+        const economicLanguage = /\b(descuento|bono|bonificación|tasa preferencial|entrega gratis|gratis|crédito|cashback|incentivo|premio|regalo|recompensa|comisión|comissao|cash\s?back|cup[oó]n|promoção|promoción económica)\b|(?:R\$|\$)\s?\d/i.test(strategyText);
         const requiresMoney = Boolean(item?.requiereCompromisoEconomico) || economicLanguage || costType === "ECONOMICO";
         const offerType = ["DESCUENTO_TRANSFERENCIA", "MEJORA_TASA"].includes(String(item?.oferta?.tipo || "").toUpperCase())
             ? String(item.oferta.tipo).toUpperCase() : "NINGUNA";
@@ -296,12 +361,12 @@ function normalizeProposal(data, facts, promotionContext = null) {
     };
 }
 
-async function generateCommercialProposal(llm, user, facts, promotionContext = null) {
-    const first = await llm.completeJson({ tarea: "decision", system: DECISION_SYSTEM, user, temperature: 0.1 });
+async function generateCommercialProposal(llm, user, facts, promotionContext = null, analysisId = null) {
+    const first = await llm.completeJson({ tarea: "decision", system: DECISION_SYSTEM, user, temperature: 0.1, analysisId });
     let proposal = normalizeProposal(first.data, facts, promotionContext);
     if (proposal.alternativesValid) return proposal;
     const retryUser = `${user}\n\nTU RESPUESTA ANTERIOR NO CUMPLIÓ EL CRITERIO DE COMPARACIÓN. Rehazla completa: entrega al menos tres mecanismos realmente distintos, cita evidencia disponible para cada uno y vuelve a elegir la mejor. No conviertas variaciones de copy o segmentos en estrategias distintas.`;
-    const retry = await llm.completeJson({ tarea: "decision", system: DECISION_SYSTEM, user: retryUser, temperature: 0.1 });
+    const retry = await llm.completeJson({ tarea: "decision", system: DECISION_SYSTEM, user: retryUser, temperature: 0.1, analysisId });
     proposal = normalizeProposal(retry.data, facts, promotionContext);
     return proposal;
 }
@@ -380,6 +445,7 @@ async function evaluateBestDecision(dependencies = {}) {
     const llm = dependencies.llm || llmGateway;
     const snapshot = await collectCommercialSnapshot(db);
     const facts = snapshotFacts(snapshot);
+    const analysisId = require("node:crypto").randomUUID();
     const current = await getBestDecision(db);
     const executionPackage = current ? await executionPackages.getPackageForDecision(current.id, db) : null;
     const executionFeedback = executionPackage ? {
@@ -390,12 +456,13 @@ async function evaluateBestDecision(dependencies = {}) {
         activosBibliotecaCreados: executionPackage.contenido?.ejecucion?.activosBiblioteca || []
     } : null;
     const user = `HECHOS DISPONIBLES:\n${facts.map(f => `${f.id}. ${f.dato}`).join("\n")}\n\nESCENARIOS DE OFERTAS CON TASA REAL (úsalos solo si están disponibles; son estimaciones, no rentabilidad comprobada):\n${JSON.stringify(snapshot.escenariosPromocion)}\n\nDECISIÓN VIGENTE Y MÉTRICAS OBSERVADAS:\n${current ? JSON.stringify(current) : "No existe."}\n\nSEÑALES DE REVISIÓN/EJECUCIÓN DEL OPERADOR:\n${JSON.stringify(executionFeedback)}`;
-    const proposal = await generateCommercialProposal(llm, user, facts, snapshot.escenariosPromocion);
+    const proposal = await generateCommercialProposal(llm, user, facts, snapshot.escenariosPromocion, analysisId);
     if (!proposal.alternativesValid) {
         return { decision: current, changed: false, reason: "ALTERNATIVAS_INSUFICIENTES",
             alternativas: proposal.alternatives, executionPackage };
     }
     const result = await applyProposal(db, current, proposal, snapshot);
+    if (result.decision?.id) await require("./ai-usage").linkDecision(analysisId, result.decision.id, db);
     if (result.decision) {
         result.executionPackage = await executionPackages.ensureCommercialPackage(result.decision, db, dependencies);
     }

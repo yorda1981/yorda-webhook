@@ -89,16 +89,17 @@ async function recent(phone, limit = 20, db = pool) {
     return r.rows;
 }
 
-async function markLatestResponse(phone, db = pool) {
+async function markLatestResponse(phone, db = pool, status = "REPLIED") {
+    const responseStatus = ["REPLIED", "DECLINED"].includes(status) ? status : "REPLIED";
     await db.query(`
         UPDATE commercial_contact_events
-        SET response_status = 'REPLIED'
+        SET response_status = $2
         WHERE id = (
             SELECT id FROM commercial_contact_events
             WHERE phone = $1 AND provider_status = 'SENT' AND response_status = 'UNKNOWN'
             ORDER BY occurred_at DESC, id DESC LIMIT 1
         )
-    `, [phone]);
+    `, [phone, responseStatus]);
 }
 
 module.exports = { claim, settle, recent, markLatestResponse, isCommercialOptOut };

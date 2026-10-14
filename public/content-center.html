@@ -848,7 +848,10 @@
     async function loadDirectorStatus() {
         const data = await requestJson("/admin/content-library/director/status");
         const last = (data.runs || [])[0];
-        byId("directorStatus").textContent = data.enabled ? describeRun(last) : "Desactivado (DIRECTOR_ENABLED=false).";
+        const ai = data.aiUsage || {};
+        const aiCost = ai.costo_disponible ? ` · US$ ${Number(ai.costo_usd || 0).toFixed(4)}` : " · costo USD sin configurar";
+        const aiSummary = ` · IA hoy: ${ai.llamadas || 0}/${ai.limiteLlamadas || 12} análisis, ${ai.tokens || 0}/${ai.limiteTokens || 50000} tokens, ${ai.bloqueadas || 0} bloqueados${aiCost}`;
+        byId("directorStatus").textContent = (data.enabled ? describeRun(last) : "Desactivado (DIRECTOR_ENABLED=false).") + aiSummary;
         byId("directorAlert").textContent = data.alerta || "";
         const running = Boolean(last && last.estado === "EN_CURSO");
         byId("directorRunButton").disabled = !data.enabled || running;
