@@ -29,6 +29,11 @@ const crm = require("../src/services/crm");
 
 test.beforeEach(() => { mensajesEnviados = []; });
 
+const contactMemory = {
+    claim: async () => ({ allowed: true, id: 1 }),
+    settle: async () => "SENT"
+};
+
 function mockOnda30min(t, { bloqueados = [], pausas = {} } = {}) {
     const bloqueadosSet = new Set(bloqueados);
     t.mock.method(pool, "query", async (sql, params = []) => {
@@ -57,26 +62,47 @@ function mockOnda30min(t, { bloqueados = [], pausas = {} } = {}) {
 test("onda30min: pausa humana ACTIVA -> no envía el recordatorio", async (t) => {
     const enUnaHora = new Date(Date.now() + 60 * 60000).toISOString();
     mockOnda30min(t, { pausas: { "5511900000002": enUnaHora } });
-    await crm.ejecutarRecordatorios();
+    await crm.ejecutarRecordatorios({ contactMemory });
     assert.ok(!mensajesEnviados.includes("5511900000002"), "con pausa_hasta en el futuro, el recordatorio no debe enviarse");
 });
 
 test("onda30min: pausa humana VENCIDA -> comportamiento normal (sí envía)", async (t) => {
     const haceUnaHora = new Date(Date.now() - 60 * 60000).toISOString();
     mockOnda30min(t, { pausas: { "5511900000002": haceUnaHora } });
-    await crm.ejecutarRecordatorios();
+    await crm.ejecutarRecordatorios({ contactMemory });
     assert.ok(mensajesEnviados.includes("5511900000002"), "con pausa_hasta ya vencida, el recordatorio debe enviarse igual que siempre");
 });
 
 test("onda30min: SIN pausa (pausa_hasta null) -> comportamiento normal (sí envía)", async (t) => {
     mockOnda30min(t, {});
-    await crm.ejecutarRecordatorios();
+    await crm.ejecutarRecordatorios({ contactMemory });
     assert.ok(mensajesEnviados.includes("5511900000002"));
+});
+
+test("onda30min: fallo de Z-API queda como fallo y no marca recordatorio exitoso", async (t) => {
+    const bloqueadosSet = new Set();
+    let marcadorExito = false;
+    t.mock.method(pool, "query", async (sql, params = []) => {
+        if (/FROM customers\s+WHERE estado_crm = 'cotizado'/.test(sql)) return { rows: [{ phone: "5511900000099", nombre: "Arianna", ultimo_monto: 210, idioma: "es" }] };
+        if (/^SELECT 1 FROM blocked_numbers WHERE phone = \$1/.test(sql)) return { rows: [] };
+        if (/^SELECT pausa_hasta FROM customers WHERE phone = \$1/.test(sql)) return { rows: [{ pausa_hasta: null }] };
+        if (/^SELECT \* FROM operations/.test(sql)) return { rows: [] };
+        if (/UPDATE customers SET[\s\S]*ultimo_recordatorio/.test(sql)) marcadorExito = true;
+        return { rows: [] };
+    });
+    let settled;
+    const failingMemory = {
+        claim: async () => ({ allowed: true, id: 9 }),
+        settle: async (_id, result) => { settled = result; }
+    };
+    await crm.ejecutarRecordatorios({ contactMemory: failingMemory, sendFn: async () => false });
+    assert.equal(settled.sent, false);
+    assert.equal(marcadorExito, false);
 });
 
 test("onda30min: nunca envía el recordatorio a un número bloqueado", async (t) => {
     mockOnda30min(t, { bloqueados: ["5511900000001"] });
-    await crm.ejecutarRecordatorios();
+    await crm.ejecutarRecordatorios({ contactMemory });
     assert.ok(!mensajesEnviados.includes("5511900000001"), "el bloqueado no debe recibir el recordatorio de 30 min");
     assert.ok(mensajesEnviados.includes("5511900000002"), "el cliente normal sí debe recibirlo");
 });
@@ -104,7 +130,7 @@ function mockOnda24h(t, { bloqueados = [], pausas = {} } = {}) {
 
 test("onda24h: nunca envía el recordatorio a un número bloqueado", async (t) => {
     mockOnda24h(t, { bloqueados: ["5511900000003"] });
-    await crm.ejecutarRecordatorios();
+    await crm.ejecutarRecordatorios({ contactMemory });
     assert.ok(!mensajesEnviados.includes("5511900000003"));
     assert.ok(mensajesEnviados.includes("5511900000004"));
 });
@@ -112,7 +138,7 @@ test("onda24h: nunca envía el recordatorio a un número bloqueado", async (t) =
 test("onda24h: pausa humana ACTIVA -> no envía el recordatorio", async (t) => {
     const enUnaHora = new Date(Date.now() + 60 * 60000).toISOString();
     mockOnda24h(t, { pausas: { "5511900000004": enUnaHora } });
-    await crm.ejecutarRecordatorios();
+    await crm.ejecutarRecordatorios({ contactMemory });
     assert.ok(!mensajesEnviados.includes("5511900000004"));
 });
 
@@ -139,14 +165,13 @@ function mockOnda7d(t, { bloqueados = [], pausas = {} } = {}) {
 
 test("onda7d: nunca envía el recordatorio a un número bloqueado", async (t) => {
     mockOnda7d(t, { bloqueados: ["5511900000005"] });
-    await crm.ejecutarRecordatorios();
-    assert.ok(!mensajesEnviados.includes("5511900000005"));
-    assert.ok(mensajesEnviados.includes("5511900000006"));
+    await crm.ejecutarRecordatorios({ contactMemory });
+    assert.deepEqual(mensajesEnviados, [], "el tiempo por sí solo no vuelve a disparar saludos semanales");
 });
 
 test("onda7d: pausa humana ACTIVA -> no envía el recordatorio", async (t) => {
     const enUnaHora = new Date(Date.now() + 60 * 60000).toISOString();
     mockOnda7d(t, { pausas: { "5511900000006": enUnaHora } });
-    await crm.ejecutarRecordatorios();
-    assert.ok(!mensajesEnviados.includes("5511900000006"));
+    await crm.ejecutarRecordatorios({ contactMemory });
+    assert.deepEqual(mensajesEnviados, []);
 });

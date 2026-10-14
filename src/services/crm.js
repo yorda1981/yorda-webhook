@@ -13,7 +13,7 @@
  * Recordatorios automáticos (ejecutar cada 15 min):
  *   30 min post-cotización sin PIX     → recuperar_30m
  *   24 h  post-cotización sin cierre   → recuperar_24h
- *   7 d   sin actividad                → recuperar_7d
+ * No existe reactivación semanal: el tiempo sin actividad no es motivo.
  */
 
 "use strict";
@@ -23,6 +23,7 @@ const { enviarMensaje } = require("./zapi");
 const { filtrarNoBloqueados } = require("./blocked-numbers");
 const { enPausaHumana } = require("./webhook-guard");
 const { obtenerUltimaOperacion } = require("./operations");
+const contactMemory = require("./commercial-contact-memory");
 
 const ESTADOS_OP_ACTIVA = new Set(["pendiente", "confirmada"]);
 
@@ -168,11 +169,12 @@ async function verificarYMarcarFrecuente(phone) {
         `, [phone]);
         const total = Number(r.rows[0]?.total || 0);
         if (total >= 3) {
-            await pool.query(`
+            const rMarcado = await pool.query(`
                 UPDATE customers SET cliente_frecuente = true, updated_at = NOW()
-                WHERE phone = $1
+                WHERE phone = $1 AND cliente_frecuente IS DISTINCT FROM true
+                RETURNING phone
             `, [phone]);
-            return true;
+            return rMarcado.rows.length > 0;
         }
         return false;
     } catch (e) {
@@ -324,12 +326,7 @@ async function onComprobanteRecibido(phone, lang) {
 
 async function onOperacionCompletada(phone, lang, nombre) {
     await actualizarEstadoCRM(phone, "completado", lang);
-    const esFrecuente = await verificarYMarcarFrecuente(phone);
-    if (esFrecuente) {
-        try {
-            await enviarMensaje(phone, msg("completado_frecuente", lang, nombre?.split(" ")[0]));
-        } catch (_) {}
-    }
+    await verificarYMarcarFrecuente(phone);
 }
 
 // ─────────────────────────────────────────
@@ -343,10 +340,10 @@ async function onOperacionCompletada(phone, lang, nombre) {
  *   2) 24 h  post-cotización (sin cierre)
  *   3) 7 d   sin actividad   (reactivación suave)
  */
-async function ejecutarRecordatorios() {
+async function ejecutarRecordatorios(dependencies = {}) {
     try {
-        await onda30min();
-        await onda24h();
+        await onda30min(dependencies);
+        await onda24h(dependencies);
         await onda7d();
     } catch (e) {
         console.error("❌ CRM recordatorios:", e.message);
@@ -355,7 +352,7 @@ async function ejecutarRecordatorios() {
 
 // ── Onda 1: 30 minutos ──────────────────
 
-async function onda30min() {
+async function onda30min(dependencies = {}) {
     const r = await pool.query(`
         SELECT phone, nombre, ultimo_monto, idioma
         FROM customers
@@ -380,9 +377,11 @@ async function onda30min() {
             if (ultimaOp && ESTADOS_OP_ACTIVA.has(ultimaOp.status)) continue;
             const lang   = c.idioma === "pt" ? "pt" : "es";
             const nombre = c.nombre ? c.nombre.split(" ")[0] : null;
-            await enviarMensaje(c.phone, msg("recuperar_30m", lang, nombre, c.ultimo_monto));
-            await marcarRecordatorio(c.phone, "recuperar_30m");
-            console.log(`🔔 [CRM 30m] → ${c.phone}`);
+            const texto = msg("recuperar_30m", lang, nombre, c.ultimo_monto);
+            if (await enviarComercial(c, "cotizacion_pago", "ayuda_pago_cotizacion", texto, dependencies)) {
+                await marcarRecordatorio(c.phone, "recuperar_30m");
+                console.log(`🔔 [CRM 30m] enviado → ${c.phone}`);
+            }
         } catch (e) {
             console.error(`❌ CRM 30m ${c.phone}:`, e.message);
         }
@@ -391,7 +390,7 @@ async function onda30min() {
 
 // ── Onda 2: 24 horas ────────────────────
 
-async function onda24h() {
+async function onda24h(dependencies = {}) {
     const r = await pool.query(`
         SELECT phone, nombre, idioma
         FROM customers
@@ -408,7 +407,8 @@ async function onda24h() {
             if (ultimaOp24 && ESTADOS_OP_ACTIVA.has(ultimaOp24.status)) continue;
             const lang   = c.idioma === "pt" ? "pt" : "es";
             const nombre = c.nombre ? c.nombre.split(" ")[0] : null;
-            await enviarMensaje(c.phone, msg("recuperar_24h", lang, nombre));
+            const texto = msg("recuperar_24h", lang, nombre);
+            if (!await enviarComercial(c, "cotizacion_pendiente", "actualizar_cotizacion", texto, dependencies)) continue;
             await marcarRecordatorio(c.phone, "recuperar_24h");
             // Si ya mandamos 24h y no responde → abandono
             await actualizarEstadoCRM(c.phone, "abandono");
@@ -422,28 +422,30 @@ async function onda24h() {
 // ── Onda 3: 7 días ──────────────────────
 
 async function onda7d() {
-    const r = await pool.query(`
-        SELECT phone, nombre, idioma
-        FROM customers
-        WHERE estado_crm = 'abandono'
-          AND ultima_interaccion < NOW() - INTERVAL '7 days'
-          AND (ultimo_recordatorio IS NULL OR ultimo_recordatorio < NOW() - INTERVAL '7 days')
-    `);
+    // El tiempo transcurrido no es una oportunidad comercial. La reactivación
+    // solo puede originarse en una decisión con evidencia nueva del Director.
+    return 0;
+}
 
-    for (const c of await filtrarNoBloqueados(r.rows)) {
-        try {
-            if (await enPausaHumana(c.phone)) continue;
-            const ultimaOp7d = await obtenerUltimaOperacion(c.phone);
-            if (ultimaOp7d && ESTADOS_OP_ACTIVA.has(ultimaOp7d.status)) continue;
-            const lang   = c.idioma === "pt" ? "pt" : "es";
-            const nombre = c.nombre ? c.nombre.split(" ")[0] : null;
-            await enviarMensaje(c.phone, msg("recuperar_7d", lang, nombre));
-            await marcarRecordatorio(c.phone, "recuperar_7d");
-            console.log(`🔔 [CRM 7d] → ${c.phone}`);
-        } catch (e) {
-            console.error(`❌ CRM 7d ${c.phone}:`, e.message);
-        }
+async function enviarComercial(cliente, reason, estrategia, texto, dependencies = {}) {
+    let claim;
+    try {
+        const memory = dependencies.contactMemory || contactMemory;
+        claim = await memory.claim({
+            phone: cliente.phone, source: "crm", reason, strategy: estrategia,
+            content: texto, operationId: cliente.operation_id || null
+        });
+    } catch (error) {
+        console.error("❌ CRM: no se pudo coordinar contacto comercial:", error.message);
+        return false;
     }
+    if (!claim.allowed) return false;
+    let sent = false;
+    let error = null;
+    try { sent = (await (dependencies.sendFn || enviarMensaje)(cliente.phone, texto)) === true; }
+    catch (e) { error = e.message; }
+    await (dependencies.contactMemory || contactMemory).settle(claim.id, { sent, error: error || (sent ? null : "Proveedor no confirmó el envío.") });
+    return sent;
 }
 
 // ── Helpers ─────────────────────────────

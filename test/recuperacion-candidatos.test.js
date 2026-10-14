@@ -49,13 +49,17 @@ test("prioridadDeEstado: cualquier otro estado -> null (nunca genera un candidat
 test("la consulta incluye EXACTAMENTE los dos estados esperados en el filtro de inclusión", async (t) => {
     const sql = await capturarSQL(t);
     assert.match(sql, /estado IN \('aguardando_comprovante', 'cotizacion_realizada'\)/);
+    assert.match(sql, /cu\.tipo_favorito IS NOT NULL/);
+    assert.match(sql, /COALESCE\(cu\.marketing_opt_out, false\) = false/);
+    assert.match(sql, /commercial_contact_events ce[\s\S]*ce\.occurred_at >= COALESCE/);
+    assert.match(sql, /recuperacion_envios re[\s\S]*re\.estado IN \('ENVIANDO','ENVIADO'\)[\s\S]*re\.creado_at/);
 });
 
 // ── 3-4. Operación confirmada/completada posterior -> excluido ──
 
 test("la consulta excluye por NOT EXISTS cuando ya hay operación 'confirmada' o 'completada'", async (t) => {
     const sql = await capturarSQL(t);
-    assert.match(sql, /NOT EXISTS[\s\S]*?FROM operations o[\s\S]*?status IN \('confirmada','completada'\)/);
+    assert.match(sql, /NOT EXISTS[\s\S]*?FROM operations o[\s\S]*?status IN \('pendiente','confirmada','completada'\)/);
 });
 
 // ── 5. Operación ANTERIOR al intento no debe excluir (comparación forward-only) ──

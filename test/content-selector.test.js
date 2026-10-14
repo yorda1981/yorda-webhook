@@ -84,3 +84,15 @@ test("con contentId selecciona ese activo activo, sin filtrar por idioma", async
     assert.doesNotMatch(captured.sql, /ci\.idioma = \$1/);
     await assert.rejects(selectContent({ contentId: "abc" }, db), { code: "CONTENT_SELECTOR_VALIDATION" });
 });
+
+test("selecciona borradores aprobados del Director por estado ACTIVO, nunca borradores ni inactivos", async () => {
+    let sql;
+    const db = { async query(query) {
+        sql = query;
+        return { rows: [{ id: 18, revision_id: 4, revision_numero: 2, titulo: "Guía", cuerpo: "Aprobada", estado: "ACTIVO", idioma: "es", prioridad: 50 }] };
+    }};
+    const result = await selectContent({ idioma: "es" }, db);
+    assert.equal(result.contentId, 18);
+    assert.match(sql, /ci\.estado = 'ACTIVO'/);
+    assert.doesNotMatch(sql, /origen_sistema IS NULL/);
+});

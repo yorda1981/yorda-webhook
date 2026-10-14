@@ -2,7 +2,8 @@
 
 require("dotenv").config();
 
-const { guardarCliente, obtenerCliente, marcarSaludoPendiente, limpiarContextoCorto, limpiarTarjetaFrecuente }          = require("./customer-memory");
+const { guardarCliente, obtenerCliente, marcarSaludoPendiente, limpiarSaludoPendiente, limpiarContextoCorto, limpiarTarjetaFrecuente } = require("./customer-memory");
+const commercialContactMemory = require("./commercial-contact-memory");
 const { obtenerUltimaOperacion, obtenerPendienteCliente }                   = require("./operations");
 const { activarPausaHumana }                       = require("./webhook-guard");
 const crm                                          = require("./crm");
@@ -51,6 +52,12 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null, opci
     try {
         if (!text || !phone) { reportar("sin_texto"); return ""; }
 
+        // Una solicitud explícita de no recibir comunicaciones comerciales se
+        // conserva en el perfil; no altera respuestas ni operaciones iniciadas.
+        const solicitaNoComerciales = commercialContactMemory.isCommercialOptOut(text);
+        await commercialContactMemory.markLatestResponse(phone).catch(() => {});
+        await limpiarSaludoPendiente(phone).catch(() => {});
+
         const txt = norm(text);
 
         const cliente    = await obtenerCliente(phone);
@@ -68,6 +75,9 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null, opci
         }
 
         await guardarCliente({ phone, ultimaInteraccion: new Date().toISOString() });
+        if (solicitaNoComerciales) {
+            await require("../../db").query("UPDATE customers SET marketing_opt_out = true WHERE phone = $1", [phone]).catch(() => {});
+        }
 
         // ── Pedido de la calculadora en proceso: el bot se queda en silencio ──
         // Una vez que un pedido llega desde la calculadora, se maneja 100% por el
@@ -102,6 +112,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null, opci
 
         // FIX 3: Extraer monto ANTES de esCubaBrasil para que montoValido esté disponible
         const { valorFinal, valorMonetario, montoValido } = extraerMonto(txt, text);
+        const presupuestoDeclarado = /\b(solo tengo|apenas tenho|so tenho|mi presupuesto es|meu orcamento e|no puedo pasar de|nao posso passar de)\b/i.test(txt);
         const soloNums = txt.replace(/\D/g, "");
 
         // Moneda mencionada EXPLÍCITAMENTE en ESTE mensaje -- se calculan acá
@@ -652,7 +663,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null, opci
         if (esEnvioNuevoSobreAbandonado(cliente, montoValido, valorFinal, hayOperacionRealBRL)) await limpiarSesion(phone);
 
         if (hayContextoBRL && !esUSD && !esMLC && puedeCotizarBRL(cliente, montoValido, valorFinal, hayOperacionRealBRL))
-            return await cotizarBRL(phone, pushName, valorFinal, lang) || "";
+            return await cotizarBRL(phone, pushName, valorFinal, lang, { budgetDeclared: presupuestoDeclarado }) || "";
 
         if (valorFinal && !montoValido) { reportar("monto_invalido"); return ""; }
 

@@ -61,7 +61,8 @@ function fakeDb({ failFinalUpdate = false } = {}) {
 }
 
 function deps(db, { candidato: c = candidato(), sendFn = async () => true } = {}) {
-    return { pool: db, obtenerCandidato: async () => c, sendFn };
+    return { pool: db, obtenerCandidato: async () => c, sendFn,
+        contactMemory: { claim: async () => ({ allowed: true, id: 99 }), settle: async () => "SENT" } };
 }
 
 test("candidato válido: registra ENVIANDO, hace commit antes del proveedor y termina ENVIADO", async () => {
@@ -154,8 +155,8 @@ test("éxito Z-API pero fallo de UPDATE local: queda ENVIANDO y no se reintenta"
 test("preview B: enviar reconstruye y registra exactamente familia+índice aprobados, sin nueva selección aleatoria", async () => {
     const db = fakeDb(); let textoEnviado = null;
     const d = deps(db, { sendFn: async (_phone, texto) => { textoEnviado = texto; return true; } });
-    const r = await enviarRecuperacionManual({ phone: "5511900000001", familia: "servicio_especifico", indice: 3, idempotencyKey: "k-preview-b" }, d);
-    assert.equal(r.ok, true); assert.equal(textoEnviado, r.texto); assert.equal(db.rows[0].texto, r.texto); assert.match(r.texto, /mandamos CUP\?/i);
+    const r = await enviarRecuperacionManual({ phone: "5511900000001", familia: "servicio_especifico", indice: 0, idempotencyKey: "k-preview-b" }, d);
+    assert.equal(r.ok, true); assert.equal(textoEnviado, r.texto); assert.equal(db.rows[0].texto, r.texto); assert.match(r.texto, /consultaste un envío a CUP/i);
 });
 
 test("cooldown menor de 24h bloquea, y después de 24h permite otro intento conservando historial", async () => {

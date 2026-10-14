@@ -4,6 +4,7 @@ const pool = require("../../db");
 const recuperacion = require("./recuperacion");
 const mensajes = require("./recuperacion-mensajes");
 const { enviarMensaje } = require("./zapi");
+const contactMemory = require("./commercial-contact-memory");
 
 const COOLDOWN_HORAS = 24;
 
@@ -145,6 +146,23 @@ async function enviarRecuperacionManual({ phone, familia, indice, idempotencyKey
     }
 
     // El proveedor se llama únicamente después de haber confirmado ENVIANDO.
+    let memoria;
+    try {
+        memoria = await (deps.contactMemory || contactMemory).claim({
+            phone, source: "recuperacion", reason: `campana_${familia}`,
+            strategy: `recuperacion_${familia}_${indice}`, content: aprobado.mensaje,
+            metadata: { recoveryAttemptId: intento.id }
+        });
+    } catch (e) {
+        await db.query(`UPDATE recuperacion_envios SET estado = 'FALLIDO', error = $2, actualizado_at = NOW() WHERE id = $1`,
+            [intento.id, `No se pudo coordinar contacto: ${e.message}`]).catch(() => {});
+        return { ok: false, code: "CONTACT_MEMORY_ERROR", error: "No se pudo validar el historial comercial." };
+    }
+    if (!memoria.allowed) {
+        await db.query(`UPDATE recuperacion_envios SET estado = 'FALLIDO', error = $2, actualizado_at = NOW() WHERE id = $1`,
+            [intento.id, `Contacto omitido por control comercial: ${memoria.code}`]).catch(() => {});
+        return { ok: false, code: memoria.code, error: "El historial comercial impide contactar ahora." };
+    }
     let enviado = false;
     let error = null;
     try {
@@ -153,6 +171,7 @@ async function enviarRecuperacionManual({ phone, familia, indice, idempotencyKey
     } catch (e) {
         error = e.message || "Error del proveedor WhatsApp.";
     }
+    await (deps.contactMemory || contactMemory).settle(memoria.id, { sent: enviado, error });
 
     let actualizado;
     try {

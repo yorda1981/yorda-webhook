@@ -305,12 +305,16 @@ module.exports = {
 // ── Saludo matutino: marcar / listar / limpiar ──
 async function marcarSaludoPendiente(phone) {
     try {
-        await pool.query("UPDATE customers SET saludo_pendiente = true WHERE phone = $1", [phone]);
+        await pool.query("UPDATE customers SET saludo_pendiente = true, saludo_pendiente_at = NOW() WHERE phone = $1", [phone]);
     } catch (err) { console.error("❌ marcarSaludoPendiente:", err.message); }
 }
 async function obtenerSaludosPendientes() {
     try {
-        const r = await pool.query("SELECT phone, nombre FROM customers WHERE saludo_pendiente = true");
+        const r = await pool.query(`
+            SELECT phone, nombre FROM customers
+            WHERE saludo_pendiente = true
+              AND (ultima_interaccion IS NULL OR ultima_interaccion <= saludo_pendiente_at)
+        `);
         // Filtrado en JS (no en el SQL) a propósito: filtrarNoBloqueados() ya
         // degrada solo a "no bloqueado" si blocked_numbers no existe todavía
         // (migración 0010 sin correr), sin romper el saludo matutino.
@@ -319,6 +323,6 @@ async function obtenerSaludosPendientes() {
 }
 async function limpiarSaludoPendiente(phone) {
     try {
-        await pool.query("UPDATE customers SET saludo_pendiente = false WHERE phone = $1", [phone]);
+        await pool.query("UPDATE customers SET saludo_pendiente = false, saludo_pendiente_at = NULL WHERE phone = $1", [phone]);
     } catch (err) { console.error("❌ limpiarSaludoPendiente:", err.message); }
 }

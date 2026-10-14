@@ -81,7 +81,9 @@ function antiguedadDe(fechaIntento, ahora = new Date()) {
 // lógica -- un único WHERE, dos formas de llamarlo.
 const PREDICADO_CANDIDATO = `
     cu.estado IN ('aguardando_comprovante', 'cotizacion_realizada')
+    AND cu.tipo_favorito IS NOT NULL
     AND COALESCE(cu.fecha_estado, cu.fecha_cotizacion) IS NOT NULL
+    AND COALESCE(cu.marketing_opt_out, false) = false
     -- Mínimo 2 horas de antigüedad -- mismo umbral que ya usa el flujo de
     -- PIX (DOS_HORAS en shared.js) para no interrumpir una conversación
     -- todavía en curso.
@@ -110,19 +112,29 @@ const PREDICADO_CANDIDATO = `
               )
           )
     )
-    -- Cooldown independiente de los recordatorios automáticos: un envío
-    -- manual exitoso oculta al cliente durante 24h, pero no borra historial.
+    -- Un intento de recuperación ya reclamado o enviado para esta misma
+    -- cotización no se vuelve a presentar como una oportunidad nueva. Los
+    -- históricos incompletos ENVIANDO se bloquean de forma conservadora.
     AND NOT EXISTS (
         SELECT 1 FROM recuperacion_envios re
         WHERE re.phone = cu.phone
-          AND re.estado = 'ENVIADO'
-          AND re.enviado_at > NOW() - INTERVAL '24 hours'
+          AND re.estado IN ('ENVIANDO','ENVIADO')
+          AND COALESCE(re.enviado_at, re.creado_at) >= COALESCE(cu.fecha_estado, cu.fecha_cotizacion)
+    )
+    -- No reescribir un contacto comercial posterior a esta cotización con
+    -- otra plantilla equivalente. Una cotización nueva posterior sí abre
+    -- una oportunidad nueva.
+    AND NOT EXISTS (
+        SELECT 1 FROM commercial_contact_events ce
+        WHERE ce.phone = cu.phone
+          AND ce.occurred_at >= COALESCE(cu.fecha_estado, cu.fecha_cotizacion)
+          AND ce.provider_status IN ('SENDING','SENT','UNKNOWN')
     )
 `;
 
 const SELECT_CANDIDATO = `
     SELECT
-        cu.phone, cu.nombre, cu.estado, cu.tipo_favorito, cu.ultimo_monto,
+        cu.phone, cu.nombre, cu.estado, cu.tipo_favorito, cu.ultimo_monto, cu.idioma,
         COALESCE(cu.fecha_estado, cu.fecha_cotizacion) AS fecha_intento,
         cu.estado_crm, cu.ultimo_recordatorio, cu.tipo_ultimo_recordatorio,
         (SELECT json_build_object(
@@ -143,6 +155,7 @@ function mapearFilaCandidato(row) {
         prioridad:              prioridadDeEstado(row.estado),
         servicio:               etiquetaServicio(row.tipo_favorito),
         tipoFavorito:           row.tipo_favorito,
+        idioma:                 row.idioma,
         ultimoMonto:            row.ultimo_monto !== null ? Number(row.ultimo_monto) : null,
         fechaIntento:           row.fecha_intento,
         antiguedad:             antiguedadDe(row.fecha_intento),

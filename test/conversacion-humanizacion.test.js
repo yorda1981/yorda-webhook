@@ -501,6 +501,15 @@ test("CLIENTE DECIDIDO: 'quiero enviar 500' cotiza directo, camino corto", async
     assert.match(r, /500/);
 });
 
+test("PRESUPUESTO DECLARADO: 'solo tengo R$210' actualiza la cotización al monto que el cliente sí tiene", async (t) => {
+    const mundo = mockMundoConversacional(t);
+    mundo.customers.set("5511900010018", { phone: "5511900010018", estado: "cotizacion_realizada", ultimo_monto: 500, tipo_favorito: "brl_cup" });
+    const r = await procesarMensaje("5511900010018", "Solo tengo R$210", "Cliente");
+    assert.match(r, /210/);
+    assert.doesNotMatch(r, /500/);
+    assert.equal(Number(mundo.customers.get("5511900010018").ultimo_monto), 210);
+});
+
 // ── Cierre natural de la conversación ──
 
 test("CIERRE NATURAL: 'gracias' con un flujo abierto (aguardando comprobante) -> respuesta corta, no el cierre genérico", async (t) => {

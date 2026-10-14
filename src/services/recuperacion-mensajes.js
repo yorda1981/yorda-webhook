@@ -173,15 +173,15 @@ const FAMILIAS = {
     // (ver familiasElegibles) -- nunca se usa para inventar un servicio.
     servicio_especifico: {
         variantes: [
-            (ctx) => `${ctx.nombre ? ctx.nombre + ", ¿" : "¿"}mandamos ${ctx.servicioConversacional} hoy?`,
-            (ctx) => `Buen día${ctx.nombre ? ", " + ctx.nombre : ""} 😊 ¿mandamos algo hoy?`,
-            (ctx) => `${ctx.nombre ? ctx.nombre + ", ¿" : "¿"}hacemos ${ctx.servicioConversacional} hoy?`,
-            (ctx) => `${ctx.nombre ? ctx.nombre + " 👀 ¿m" : "¿M"}andamos ${ctx.servicioConversacional}?`,
-            (ctx) => `Pasando a saludarte${ctx.nombre ? ", " + ctx.nombre : ""} 😄`,
-            (ctx) => `${ctx.nombre ? ctx.nombre + ", " : ""}${ctx.servicioConversacional === "una recarga" ? "¿hacemos una recarga hoy?" : "¿hacemos un envío hoy?"}`,
-            (ctx) => `Buenos días${ctx.nombre ? ", " + ctx.nombre : ""}. ¿Cómo estás?`,
-            (ctx) => `${ctx.nombre ? ctx.nombre + ", h" : "H"}oy podemos mandar ${ctx.servicioConversacional}.`,
-            (ctx) => `¿Qué vuelta${ctx.nombre ? ", " + ctx.nombre : ""}?`
+            (ctx) => ctx.lang === "pt"
+                ? `Oi${ctx.nombre ? ` ${ctx.nombre}` : ""} 👋 Vi que você consultou ${ctx.servicioContextual}. Se ainda pretende fazer, posso preparar um cálculo atualizado para você saber exatamente quanto chega aí. Quer que eu confira? 🇨🇺`
+                : `Hola${ctx.nombre ? ` ${ctx.nombre}` : ""} 👋 Vi que consultaste ${ctx.servicioContextual}. Si todavía tienes pensado hacerlo, puedo prepararte un cálculo actualizado para que sepas exactamente cuánto recibirían allá. ¿Quieres que lo revisemos? 🇨🇺`,
+            (ctx) => ctx.lang === "pt"
+                ? `Oi${ctx.nombre ? ` ${ctx.nombre}` : ""} 👋 Sobre sua consulta de ${ctx.servicioContextual}: ficou alguma dúvida sobre o processo ou o pagamento? Me diga qual e eu explico antes de você decidir.`
+                : `Hola${ctx.nombre ? ` ${ctx.nombre}` : ""} 👋 Sobre tu consulta de ${ctx.servicioContextual}: ¿te quedó alguna duda del proceso o del pago? Dime cuál y te respondo antes de que decidas.`,
+            (ctx) => ctx.lang === "pt"
+                ? `Oi${ctx.nombre ? ` ${ctx.nombre}` : ""} 👋 Você conseguiu resolver o que precisava sobre ${ctx.servicioContextual}? Se ainda quiser continuar, posso ajudar a retomar pelo cálculo; se seus planos mudaram, não precisa fazer nada.`
+                : `Hola${ctx.nombre ? ` ${ctx.nombre}` : ""} 👋 ¿Pudiste resolver lo que necesitabas sobre ${ctx.servicioContextual}? Si todavía quieres continuar, puedo ayudarte a retomarlo desde el cálculo; si cambió tu plan, no hace falta que hagas nada.`
         ]
     }
 };
@@ -193,16 +193,15 @@ const FAMILIAS = {
 // (poco humor); >7d permite más broma/reactivación -- pero ninguna queda
 // 100% excluida salvo servicio_especifico (que depende del dato real).
 const FAMILIAS_POR_TONO = {
-    "2h-24h": ["recordatorio_normal", "recordatorio_normal", "me_acorde"],
-    "1-3d":   ["me_acorde", "recordatorio_normal", "dia_de_envio", "tasa_curiosidad"],
-    "4-7d":   ["me_acorde", "dia_de_envio", "broma", "tasa_curiosidad", "recordatorio_normal"],
-    ">7d":    ["me_acorde", "broma", "broma", "dia_de_envio", "tasa_curiosidad", "recordatorio_normal"]
+    // No hay familia genérica de saludos: solo puede proponerse un contacto
+    // contextual a una cotización real; otro contacto requiere una oportunidad nueva.
+    "2h-24h": [], "1-3d": [], "4-7d": [], ">7d": []
 };
 
 function familiasElegibles(tono, tieneServicioReal) {
-    const base = [...(FAMILIAS_POR_TONO[tono] || FAMILIAS_POR_TONO["1-3d"])];
-    if (tieneServicioReal) base.push("servicio_especifico");
-    return base;
+    if (!tieneServicioReal) return [];
+    const elegibles = FAMILIAS_POR_TONO[tono] || [];
+    return [...elegibles, "servicio_especifico"];
 }
 
 // Cantidad total de opciones (familia, variante) realmente disponibles
@@ -225,6 +224,7 @@ function elegirFamiliaVariante(candidato, { rng = Math.random, excluir = null } 
     const tono = antiguedadTono(candidato.fechaIntento);
     const tieneServicioReal = !!candidato.tipoFavorito;
     const familias = familiasElegibles(tono, tieneServicioReal);
+    if (!familias.length) return null;
     const opcionesDisponibles = totalOpciones(tono, tieneServicioReal);
 
     const MAX_INTENTOS = 8;
@@ -248,8 +248,12 @@ function elegirFamiliaVariante(candidato, { rng = Math.random, excluir = null } 
 function renderizarMensaje(candidato, { familia, indice }) {
     const ctx = {
         nombre: primerNombreConfiable(candidato.nombre),
+        lang: candidato.idioma === "pt" ? "pt" : "es",
         servicio: fraseServicio(candidato.tipoFavorito),
-        servicioConversacional: fraseServicioConversacional(fraseServicio(candidato.tipoFavorito))
+        servicioConversacional: fraseServicioConversacional(fraseServicio(candidato.tipoFavorito)),
+        servicioContextual: candidato.idioma === "pt"
+            ? ({ brl_cup: "uma remessa para CUP", usd_clasica: "um envio em USD", usd_prepago: "um envio em USD", mlc: "um envio em MLC", recarga_nacional: "uma recarga", recarga_internacional: "uma recarga", cup_efectivo: "uma entrega de CUP em espécie", usd_efectivo: "uma entrega de USD em espécie" }[candidato.tipoFavorito] || "um envio")
+            : ({ brl_cup: "un envío a CUP", usd_clasica: "un envío en USD", usd_prepago: "un envío en USD", mlc: "un envío en MLC", recarga_nacional: "una recarga", recarga_internacional: "una recarga", cup_efectivo: "una entrega de CUP en efectivo", usd_efectivo: "una entrega de USD en efectivo" }[candidato.tipoFavorito] || "un envío")
     };
     return FAMILIAS[familia].variantes[indice](ctx);
 }
@@ -280,7 +284,9 @@ function construirVarianteAprobada(candidato, { familia, indice }) {
 // envío, pueda persistir "familia usada / variante usada / fecha" y evitar
 // repetir lo mismo poco después al mismo cliente. ──
 function generarMensajePreview(candidato, { rng = Math.random, excluir = null } = {}) {
-    const { familia, indice, tono } = elegirFamiliaVariante(candidato, { rng, excluir });
+    const seleccion = elegirFamiliaVariante(candidato, { rng, excluir });
+    if (!seleccion) return null;
+    const { familia, indice, tono } = seleccion;
     const mensaje = renderizarMensaje(candidato, { familia, indice });
     return {
         phone: candidato.phone,

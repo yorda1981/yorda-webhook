@@ -43,7 +43,7 @@ async function leerTasas() {
 // COTIZACIÓN BRL → CUP
 // ─────────────────────────────────────────
 
-async function cotizarBRL(phone, pushName, valorFinal, lang) {
+async function cotizarBRL(phone, pushName, valorFinal, lang, { budgetDeclared = false } = {}) {
     const nivelVip = await nivelVipPhone(phone);
     const r = await calcularOperacion({ tipo: "brl_cup", valor: valorFinal, nivelVip });
     if (!r) return null;
@@ -57,13 +57,15 @@ async function cotizarBRL(phone, pushName, valorFinal, lang) {
     await crm.onCotizacion(phone, lang);
 
     let tip = "";
-    if (valorFinal < 100)       tip = "\n\n💡 Con R$100+ la tasa mejora.";
-    else if (valorFinal < 500)  tip = "\n\n🔥 Con R$500+ la tasa sube otro escalón.";
-    else if (valorFinal < 1000) tip = "\n\n🚀 Con R$1000+ obtienes la mejor tasa.";
+    if (!budgetDeclared) {
+        if (valorFinal < 100)       tip = "\n\n💡 Con R$100+ la tasa mejora.";
+        else if (valorFinal < 500)  tip = "\n\n🔥 Con R$500+ la tasa sube otro escalón.";
+        else if (valorFinal < 1000) tip = "\n\n🚀 Con R$1000+ obtienes la mejor tasa.";
+    }
     const vipTip = nivelVip > 0 ? `\n\n${"⭐".repeat(nivelVip)} Tasa VIP aplicada.` : "";
 
     const oferta    = await leerOferta(nivelVip > 0);
-    const ofertaMsg = oferta ? `\n\n🔥 *OFERTA:* ${oferta}` : "";
+    const ofertaMsg = oferta && !budgetDeclared ? `\n\n🔥 *OFERTA:* ${oferta}` : "";
     const res = `💵 R$${valorFinal} = ${fmt(r.cup)} CUP 🇨🇺${tip}${vipTip}${ofertaMsg}\n\n${pickL(CIERRES_COT, CIERRES_COT_PT, lang)}`;
     await enviarSeguro(phone, res);
     return res;

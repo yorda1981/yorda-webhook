@@ -682,7 +682,7 @@ app.post("/admin/completar-operacion/:id", adminWriteLimiter, verificarToken, as
             const { nivelAnterior, nivelNuevo } = await crm.recalcularNivelVipUno(operacion.phone);
             if (nivelNuevo > nivelAnterior && !(await blockedNumbers.estaBloqueado(operacion.phone))) {
                 const estrellas = "⭐".repeat(nivelNuevo);
-                const mVip = `🌟 *¡Felicidades! Ahora eres cliente VIP ${estrellas} de Yorda Envíos!*\n\nDesde ahora tienes:\n💰 Tasa preferencial en tus próximas transferencias\n🚚 Descuento en tus pedidos de entrega en efectivo\n🎁 Promociones exclusivas para ti\n\n¡Gracias por confiar en nosotros! 💜🇨🇺`;
+                const mVip = `🌟 *¡Felicidades! Alcanzaste el nivel VIP ${estrellas} de YORDA.*\n\nGracias por confiar en nosotros y elegirnos para tus remesas. Si tienes una transferencia en mente, escríbenos y te ayudamos con las condiciones vigentes. 💜🇨🇺`;
                 await enviarMensaje(operacion.phone, mVip);
             } else if (nivelNuevo < nivelAnterior) {
                 console.log(`ℹ️ Cliente ${operacion.phone} bajó de nivel VIP: ${nivelAnterior} → ${nivelNuevo}`);

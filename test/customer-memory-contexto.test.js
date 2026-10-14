@@ -57,7 +57,7 @@ function mockClientesYBloqueados(t, bloqueados = []) {
             if (row) Object.assign(row, { ultima_pregunta: null, ultimas_opciones: null, contexto_actualizado_at: null });
             return { rows: [] };
         }
-        if (/^SELECT phone, nombre FROM customers WHERE saludo_pendiente = true/.test(sql)) {
+        if (/SELECT phone, nombre FROM customers[\s\S]*saludo_pendiente = true/.test(sql)) {
             return { rows: [...customers.values()].map(c => ({ phone: c.phone, nombre: c.nombre })) };
         }
         if (/^SELECT 1 FROM blocked_numbers WHERE phone = \$1/.test(sql)) {

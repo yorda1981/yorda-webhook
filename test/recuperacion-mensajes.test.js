@@ -223,20 +223,24 @@ test("el monto real del candidato (ultimoMonto) nunca aparece literal en ningún
 
 // ── Variedad real ──
 
-test("existen varias variantes por familia (mínimo 4) -- no son 3 frases que solo rotan", () => {
-    for (const familia of Object.keys(FAMILIAS)) {
-        assert.ok(FAMILIAS[familia].variantes.length >= 4, `${familia} debe tener al menos 4 variantes`);
-    }
+test("solo ofrece tres variantes contextuales a una cotización real; no familias de saludos", () => {
+    assert.equal(FAMILIAS.servicio_especifico.variantes.length, 3);
+    assert.deepEqual(familiasElegibles("1-3d", false), []);
+    assert.deepEqual(familiasElegibles("1-3d", true), ["servicio_especifico"]);
+    const preview = generarMensajePreview({ ...CANDIDATO_BASE, tipoFavorito: null });
+    assert.equal(preview, null);
 });
 
-test("elegirFamiliaVariante puede devolver familias distintas según el rng (no siempre la misma)", () => {
-    const c = { ...CANDIDATO_BASE, tipoFavorito: "brl_cup", fechaIntento: horasAtras(200) }; // >7d, más familias
-    const resultados = new Set();
-    for (let i = 0; i < 20; i++) {
-        const rng = rngSecuencia([i / 20, (i * 3 % 20) / 20]);
-        resultados.add(elegirFamiliaVariante(c, { rng }).familia);
-    }
-    assert.ok(resultados.size > 1, "debe haber más de una familia posible entre los resultados");
+test("caso José: cotización CUP antigua produce un seguimiento contextual y útil", () => {
+    const preview = generarMensajePreview({ ...CANDIDATO_BASE, nombre: "José García", tipoFavorito: "brl_cup", fechaIntento: horasAtras(200) }, { rng: rngSecuencia([0, 0]) });
+    assert.match(preview.mensaje, /consultaste un envío a CUP/);
+    assert.match(preview.mensaje, /cálculo actualizado/);
+    assert.doesNotMatch(preview.mensaje, /¿qué tal el día|pasé a saludarte|¿alguna novedad/i);
+});
+
+test("el Director no recurre a saludos si no hay servicio real, aunque la cotización sea antigua", () => {
+    const c = { ...CANDIDATO_BASE, tipoFavorito: null, fechaIntento: horasAtras(200) };
+    assert.equal(elegirFamiliaVariante(c), null);
 });
 
 // ── Selección determinista/inyectable (nunca Math.random() en los tests) ──
@@ -250,26 +254,17 @@ test("selección determinista: la MISMA secuencia de rng produce SIEMPRE el mism
 
 // ── "Otra variante" realmente cambia cuando hay alternativas ──
 
-test('"otra variante": con alternativas disponibles, nunca repite exactamente la familia+índice excluidos', () => {
-    const c = { ...CANDIDATO_BASE, tipoFavorito: null, fechaIntento: horasAtras(120) }; // 4-7d, sin servicio_especifico
-    // Fuerza la primera familia/variante elegible (me_acorde, índice 0) en
-    // los dos primeros valores, y una segunda pareja bien distinta después
-    // -- así se demuestra que, al toparse con el excluido, el motor
-    // reintenta con los siguientes valores del rng en vez de devolverlo.
-    const rng = rngSecuencia([0.05, 0.05, 0.5, 0.5]);
-    const excluir = { familia: "me_acorde", indice: 0 };
+test('"otra variante": puede variar el enfoque contextual, no volver a un saludo vacío', () => {
+    const c = { ...CANDIDATO_BASE, tipoFavorito: "brl_cup", fechaIntento: horasAtras(120) };
+    const rng = rngSecuencia([0, 0.8]);
+    const excluir = { familia: "servicio_especifico", indice: 0 };
     const resultado = elegirFamiliaVariante(c, { rng, excluir });
     assert.notDeepEqual({ familia: resultado.familia, indice: resultado.indice }, excluir);
 });
 
-test('"otra variante": si solo existe UNA opción total, sí puede repetirla (no hay a dónde ir)', () => {
-    // Candidato reciente (2h-24h) sin servicio -- familias posibles son
-    // recordatorio_normal (x2 peso) + me_acorde, pero para aislar el caso
-    // de "una sola opción" se prueba directamente contra una familia con
-    // una sola variante simulando el límite -- ver totalOpciones().
+test('no crea oportunidades solo por antigüedad; sin historial de servicio no hay opciones', () => {
     const c = { ...CANDIDATO_BASE, tipoFavorito: null, fechaIntento: horasAtras(5) };
-    const disponibles = totalOpciones(antiguedadTono(c.fechaIntento), false);
-    assert.ok(disponibles > 1, "con las familias reales de este tono debe haber más de una opción");
+    assert.equal(totalOpciones(antiguedadTono(c.fechaIntento), false), 0);
 });
 
 // ── El backend nunca escribe ni envía WhatsApp (garantía estructural) ──
