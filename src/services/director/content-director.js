@@ -212,10 +212,13 @@ function impactOf(puntuaciones) {
 // Una sola competición: noticias y temas permanentes medidos con la misma vara.
 // Devuelve los candidatos válidos ordenados por impacto comercial.
 async function evaluateCandidates(news, permanentKeys, llm) {
+    const user = candidateLists(news, permanentKeys);
     const { data } = await llm.completeJson({
         tarea: "seleccion",
         system: EVALUATION_SYSTEM,
-        user: candidateLists(news, permanentKeys)
+        user,
+        contextMetrics: { noticiasIncluidas: news.length, temasIncluidos: permanentKeys.length,
+            filasClientesIncluidas: 0, filasOperacionesIncluidas: 0, mensajesConversacionalesIncluidos: 0 }
     });
     const usedNews = new Set();
     const usedTopics = new Set();
@@ -244,11 +247,13 @@ async function evaluateCandidates(news, permanentKeys, llm) {
     return evaluated.sort((a, b) => b.impacto.total - a.impacto.total);
 }
 
-async function writeWithRetry({ llm, system, buildPrompt, verify, temperature }) {
+async function writeWithRetry({ llm, system, buildPrompt, verify, temperature, contextMetrics = {} }) {
     let feedback = null;
     let last = null;
     for (let attempt = 0; attempt < 2; attempt += 1) {
-        const { data } = await llm.completeJson({ tarea: "redaccion", system, user: buildPrompt(feedback), temperature });
+        const user = buildPrompt(feedback);
+        const { data } = await llm.completeJson({ tarea: "redaccion", system, user, temperature,
+            contextMetrics: { ...contextMetrics, intentoValidacion: attempt + 1 } });
         const draft = {
             titulo: String(data?.titulo || "").trim().slice(0, 160),
             cuerpo: String(data?.cuerpo || "").trim(),
@@ -264,12 +269,16 @@ async function writeWithRetry({ llm, system, buildPrompt, verify, temperature })
 const feedbackLine = feedback => (feedback ? `\nTu versión anterior se rechazó por: ${feedback.join(" ")} Corrígelo.\n` : "");
 
 function writeNewsDraft(story, llm) {
-    const blocks = story.textos.map((texto, index) =>
-        `FUENTE ${index + 1} — ${texto.fuenteNombre} — ${texto.titulo}\n${texto.texto}`).join("\n\n");
+    const sources = story.textos.slice(0, 3);
+    const blocks = sources.map((texto, index) =>
+        `FUENTE ${index + 1} — ${texto.fuenteNombre} — ${texto.titulo}\n${String(texto.texto || "").slice(0, 1200)}`).join("\n\n");
     return writeWithRetry({
         llm,
         system: NEWS_WRITING_SYSTEM,
         temperature: 0.4,
+        contextMetrics: { fuentesIncluidas: sources.length, caracteresFuenteOriginal: sources.reduce((sum, source) => sum + String(source.texto || "").length, 0),
+            caracteresFuenteEnviados: sources.reduce((sum, source) => sum + Math.min(1200, String(source.texto || "").length), 0),
+            filasClientesIncluidas: 0, filasOperacionesIncluidas: 0, mensajesConversacionalesIncluidos: 0 },
         verify: draft => verifyNewsDraft(draft, story),
         buildPrompt: feedback => `Categoría: ${NEWS_CATEGORIES[story.categoria]}\nPor qué se eligió hoy (del Director Comercial): ${story.aporte}\n${feedbackLine(feedback)}\n${blocks}`
     });
@@ -277,12 +286,15 @@ function writeNewsDraft(story, llm) {
 
 function writePermanentDraft(topicKey, manual, llm, aporte = null) {
     const topic = PERMANENT_TOPICS[topicKey];
+    const manualText = String(manual.texto || "").slice(0, 3500);
     return writeWithRetry({
         llm,
         system: PERMANENT_WRITING_SYSTEM,
         temperature: 0.5,
+        contextMetrics: { caracteresManualOriginal: String(manual.texto || "").length, caracteresManualEnviados: manualText.length,
+            filasClientesIncluidas: 0, filasOperacionesIncluidas: 0, mensajesConversacionalesIncluidos: 0 },
         verify: draft => verifyPermanentDraft(draft, manual),
-        buildPrompt: feedback => `Tema: ${topic.tema}\nObjeción que debe eliminar: «${topic.objecion}»\n${aporte ? `Por qué se eligió hoy (del Director): ${aporte}\n` : ""}${feedbackLine(feedback)}\nMANUAL DEL PROCESO (versión ${manual.version}):\n${manual.texto}`
+        buildPrompt: feedback => `Tema: ${topic.tema}\nObjeción que debe eliminar: «${topic.objecion}»\n${aporte ? `Por qué se eligió hoy (del Director): ${aporte}\n` : ""}${feedbackLine(feedback)}\nMANUAL DEL PROCESO (versión ${manual.version}):\n${manualText}`
     });
 }
 

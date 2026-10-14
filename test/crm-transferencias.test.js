@@ -106,27 +106,25 @@ test("CRM: columnas pedidas y layout (CRM izquierda; Tasas, Nueva transferencia 
     assert.match(html, /@media \(max-width: 900px\) \{\s*\.crm-tr-filtros/, "responsive en móvil");
 });
 
-test("CRM: al abrir muestra máximo 5; 'Ver todas' muestra el resto y 'Ver menos' vuelve a 5", () => {
+test("CRM: carga transferencias en bloques de 7, conserva total y oculta el botón al completar", () => {
     const { sandbox, el } = sandboxDashboard();
     const muchas = Array.from({ length: 8 }, (_, i) => ({
         id: 500 + i, created_at: "2026-09-20T10:00:00Z", nombre: `Cliente ${i}`, phone: "55119000000" + i, tarjeta: "9205000000000000",
         tipo: "brl_cup", status: "pendiente", transferencia: { moneda: "CUP", brl: 100, destino: 12000 }
     }));
     sandbox.window._ultimasOperaciones = muchas;
-    const filas = () => (el("tablaCrmTransferencias").innerHTML.match(/<tr>/g) || []).length;
+    const filas = () => (el("tablaCrmTransferencias").innerHTML.match(/<tr(?:\s|>)/g) || []).length;
     sandbox.renderCrmTransferencias();
-    assert.equal(filas(), 5);
+    assert.equal(filas(), 7);
     assert.equal(el("countCrmTransferencias").innerText, 8, "el contador sigue mostrando el total");
     assert.equal(el("btnCrmTrVerMas").style.display, "inline-block");
-    assert.equal(el("btnCrmTrVerMas").innerText, "Ver todas (8)");
+    assert.equal(el("btnCrmTrVerMas").innerText, "Cargar más (1)");
     sandbox.toggleCrmTransferenciasVerMas();
     assert.equal(filas(), 8);
-    assert.equal(el("btnCrmTrVerMas").innerText, "Ver menos");
-    sandbox.toggleCrmTransferenciasVerMas();
-    assert.equal(filas(), 5);
+    assert.equal(el("btnCrmTrVerMas").style.display, "none");
 });
 
-test("CRM: con 5 o menos no aparece 'Ver todas'", () => {
+test("CRM: con 7 o menos no aparece 'Cargar más'", () => {
     const { sandbox, el } = sandboxDashboard();
     sandbox.window._ultimasOperaciones = OPS;
     sandbox.renderCrmTransferencias();

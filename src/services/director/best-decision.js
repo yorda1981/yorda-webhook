@@ -20,7 +20,7 @@ const CHANGE_REASONS = new Set([
 
 const DECISION_SYSTEM = `Eres el Director Comercial de YORDA, un servicio de remesas hacia Cuba.
 
-Investiga la situación comercial y genera al menos tres estrategias que sean diferentes por su mecanismo, no por la redacción. No existe un catálogo cerrado de estrategias: puedes proponer cambios de adquisición, conversión, fidelidad, experiencia, recomendación, operación, confianza, canal u otra posibilidad que surja de los hechos.
+Investiga la situación comercial y compara mecanismos distintos; puedes proponer cualquier estrategia apoyada en los hechos, no un catálogo cerrado. Evalúa expresamente estos cuatro candidatos: A) recuperación selectiva de cotizaciones con causa/oportunidad verificable; B) segunda transferencia de clientes de primera remesa; C) referidos con recompensa hipotética 1 % tras la primera remesa; D) mejora de conversión/proceso. No inventes elegibles: si solo hay conteos agregados, dilo.
 
 Reglas:
 1. Usa solo HECHOS con ids; cita los ids en cada estrategia. Distingue hechos de hipótesis y declara datos faltantes.
@@ -28,16 +28,17 @@ Reglas:
 3. El margen aproximado del 5 % es una referencia no verificada, no una autorización para descontar. No inventes ofertas, urgencia, escasez ni beneficios.
 3a. Si evalúas una promoción, utiliza solo los escenarios calculados con la tasa vigente incluidos en los hechos. Puedes comparar descuento sobre BRL con mejora porcentual sobre la tasa; no confundas ambos. El costo BRL de mejora es solo una equivalencia, y el margen restante es teórico mientras falten costos reales. No presentes rentabilidad como verificada ni hagas ejecutable una oferta económica sin costos netos comprobados.
 4. Las estrategias pueden usar cualquier mecanismo comercial; los recursos disponibles describen integración, no limitan las ideas. Si falta una capacidad, declárala en capacidadesFaltantes y prepara lo que sí sea seguro.
-5. Cada estrategia debe incluir trabajo terminado: pasos, materiales concretos, destinatarios/criterio si la evidencia permite seleccionarlos, métricas comerciales y costes conocidos. No envíes ni publiques.
+5. Cada estrategia debe incluir preparación concreta y breve: pasos, material si aplica, criterio de destinatarios, métricas y costos conocidos. No envíes ni publiques.
 6. Elige una única estrategia ganadora. Una idea creativa sin evidencia suficiente o imposible de ejecutar no debe ganar frente a una opción verificable.
 7. Si existe una decisión vigente, protégela: una alternativa ligeramente mejor no la sustituye. Solo REEMPLAZAR por ventaja >=20/100 y mejora clara del impacto, o por EVIDENCIA_INVALIDA, NO_EJECUTABLE o CAMBIO_MATERIAL demostrados.
 8. SIN_DECISION solo cuando no exista evidencia suficiente; aun así, devuelve las estrategias exploradas y qué información falta.
 9. Usa el registro de métricas antes/después de la decisión vigente para aprender; las variaciones son señales observadas, no prueba causal de que la iniciativa las produjo.
-10. En CADA respuesta, también cuando la acción sea MANTENER, devuelve al menos tres alternativas comparables. Deben resolver la oportunidad por mecanismos sustancialmente distintos; cambiar el texto o el segmento de una misma campaña no las hace distintas.
+10. Devuelve cuatro alternativas comparables para cubrir A, B, C y D (puedes añadir una quinta solo si hay otra oportunidad respaldada); incluye obligatoriamente referidos F19. Cada alternativa debe tener mecanismo sustancialmente distinto. Limita materiales a uno por alternativa y su contenido a 500 caracteres; los pasos a tres, cada uno <=160 caracteres. No dupliques en la respuesta los hechos completos.
 11. Evalúa explícitamente el programa de referidos hipotético F19 frente a alternativas de otros mecanismos. La recompensa del 1 % solo se paga tras la primera remesa confirmada; no la recomiendes como activable si costos netos, beneficios acumulados, antifraude y método de entrega no están verificados y aprobados.
+12. No inventes cantidades de clientes elegibles, conversiones, ventas, ingresos, costos o probabilidades. Los valores de impacto, viabilidad, riesgo y confianza son juicios cualitativos, no predicciones ni probabilidades. Si falta una base numérica, dilo.
 
-Devuelve JSON:
-{"accion":"CREAR|MANTENER|REEMPLAZAR|RETIRAR|SIN_DECISION","estrategiaElegidaId":"S1","alternativas":[{"id":"S1","nombre":"...","mecanismo":"...","problema":"...","evidenciaIds":["F1"],"causaProbable":"...","justificacion":"...","accionRecomendada":"...","resultadoEsperado":"...","impacto":0,"viabilidad":0,"riesgo":0,"confianza":0,"costo":{"tipo":"SIN_COSTO|OPERATIVO|ECONOMICO|DESCONOCIDO","estimacion":null,"baseVerificada":false,"explicacion":"..."},"oferta":{"tipo":"NINGUNA|DESCUENTO_TRANSFERENCIA|MEJORA_TASA","porcentaje":0|1|2},"requiereCompromisoEconomico":false,"ejecutable":true,"recursos":["..."],"pasos":["..."],"destinatarios":{"criterio":"...","basadoEnDatos":true},"materiales":[{"tipo":"biblioteca|whatsapp|bot|otro","titulo":"...","contenido":"..."}],"metricas":["remesas completadas", "ganancia neta"],"capacidadesFaltantes":[]}],"ventajaCambio":0,"motivoCambio":"OPORTUNIDAD_SUPERIOR|EVIDENCIA_INVALIDA|NO_EJECUTABLE|CAMBIO_MATERIAL|null","explicacionCambio":"..."}
+Devuelve JSON conciso:
+ {"accion":"CREAR|MANTENER|REEMPLAZAR|RETIRAR|SIN_DECISION","estrategiaElegidaId":"S1","alternativas":[{"id":"S1","nombre":"...","mecanismo":"...","problema":"...","evidenciaIds":["F1"],"causaProbable":"...","justificacion":"...","accionRecomendada":"...","resultadoEsperado":"...","impacto":0,"viabilidad":0,"riesgo":0,"confianza":0,"costo":{"tipo":"SIN_COSTO|OPERATIVO|ECONOMICO|DESCONOCIDO","estimacion":null,"baseVerificada":false,"explicacion":"..."},"oferta":{"tipo":"NINGUNA|DESCUENTO_TRANSFERENCIA|MEJORA_TASA","porcentaje":0|1|2},"requiereCompromisoEconomico":false,"ejecutable":true,"recursos":["..."],"pasos":["..."],"destinatarios":{"criterio":"...","basadoEnDatos":true},"materiales":[{"tipo":"biblioteca|whatsapp|bot|otro","titulo":"...","contenido":"..."}],"metricas":["remesas completadas", "ganancia neta"],"capacidadesFaltantes":[]}],"ventajaCambio":0,"motivoCambio":"OPORTUNIDAD_SUPERIOR|EVIDENCIA_INVALIDA|NO_EJECUTABLE|CAMBIO_MATERIAL|null","explicacionCambio":"..."}
 
 RETIRAR solo es válido si la decisión vigente perdió validez o dejó de ser ejecutable.`;
 
@@ -183,7 +184,22 @@ async function collectCommercialSnapshot(db = pool) {
     };
 }
 
+function compactPromotionEvidence(context) {
+    if (!context?.disponible) return `Sin cálculo promocional: ${context?.motivo || "no hay tasa vigente válida"}.`;
+    const examples = (context.escenarios || []).filter(item => Number(item.nivelVip) === 0).slice(0, 3).map(item => {
+        const discount1 = item.descuentos?.find(option => option.porcentaje === 1);
+        const discount2 = item.descuentos?.find(option => option.porcentaje === 2);
+        const rate1 = item.mejorasTasa?.find(option => option.porcentaje === 1);
+        const rate2 = item.mejorasTasa?.find(option => option.porcentaje === 2);
+        const money = value => value == null ? "pendiente" : Number(value).toFixed(2);
+        return `BRL ${item.importeTransferenciaBRL}: normal ${item.normal.recibeCUP} CUP @${item.normal.tasa}; descuento 1/2% cuesta ${money(discount1?.costoBeneficioBRL)}/${money(discount2?.costoBeneficioBRL)} BRL; mejora de tasa 1/2% da ${rate1?.recibePromocionCUP}/${rate2?.recibePromocionCUP} CUP y costo equivalente ${money(rate1?.costoBeneficioBRL)}/${money(rate2?.costoBeneficioBRL)} BRL`;
+    });
+    return `Tasa vigente real (${context.updatedAt || "fecha no disponible"}), cálculo determinista nivel VIP 0: ${examples.join("; ")}. Costos equivalentes; margen 5 % y remanente son referencias brutas, nunca beneficio neto. Beneficios VIP existentes pueden acumularse; promociones no autorizadas.`;
+}
+
 function snapshotFacts(snapshot) {
+    const referralCases = (snapshot.referralEconomics?.scenarios || []).slice(0, 3).map(item =>
+        `${item.transferBRL}: recompensa ${item.rewardBRL} BRL; restante teórico ${item.remainingReferenceBRL} BRL`);
     return [
         { id: "F1", dato: `${snapshot.conversaciones24h} personas escribieron al bot en 24 h; media diaria anterior: ${snapshot.conversacionesMedia7d}.` },
         { id: "F2", dato: `${snapshot.cotizaciones24h} clientes cotizaron en 24 h; media diaria anterior: ${snapshot.cotizacionesMedia7d}.` },
@@ -198,15 +214,38 @@ function snapshotFacts(snapshot) {
         { id: "F11", dato: `${snapshot.clientesConRemesa30d} clientes completaron al menos una remesa en 30 días; ${snapshot.clientesFrecuentes} están marcados como frecuentes y ${snapshot.clientesVip} tienen nivel VIP.` },
         { id: "F12", dato: `El volumen monetario registrado en remesas completadas durante 30 días es ${snapshot.volumenRemesas30d}; es volumen transaccionado, no ganancia.` },
         { id: "F13", dato: `No existe información suficiente de costos unitarios ni ganancia neta por operación; no se puede verificar la rentabilidad de promociones.` },
-        { id: "F14", dato: snapshot.escenariosPromocion?.disponible
-            ? `Escenarios con tasa vigente de rates (actualizada ${snapshot.escenariosPromocion.updatedAt}; zona São Paulo): ${JSON.stringify(snapshot.escenariosPromocion.escenarios)}. Margen 5 % y restante son referencias teóricas, no rentabilidad neta verificada.`
-            : `No se puede calcular ninguna promoción con una tasa vigente: ${snapshot.escenariosPromocion?.motivo || "tasa no disponible"}` },
+        { id: "F14", dato: compactPromotionEvidence(snapshot.escenariosPromocion) },
         { id: "F15", dato: `Últimos 30 días: ${snapshot.funnel?.clientesNuevosRegistrados30d || 0} registros de clientes; ${snapshot.funnel?.primerasRemesas30d || 0} primeras remesas observables y ${snapshot.funnel?.clientesRecurrentes30d || 0} clientes con remesas recurrentes. El registro de cliente no equivale necesariamente a captación atribuible.` },
         { id: "F16", dato: `Embudo: ${snapshot.funnel?.cotizacionesAbiertas30d || 0} clientes en estado cotizado/esperando PIX en 30 días; ${snapshot.funnel?.abandonosPix30d || 0} esperando PIX. Es estado actual de CRM, no una cohorte de conversión completa.` },
         { id: "F17", dato: `Memoria de contactos disponible desde ${snapshot.contactOutcomes?.memoriaDesde || "sin eventos históricos verificables"}. En los últimos 30 días registrados: ${snapshot.contactOutcomes?.clientesContactados30d || 0} clientes, ${snapshot.contactOutcomes?.enviados30d || 0} envíos confirmados, ${snapshot.contactOutcomes?.respuestas30d || 0} respuestas, ${snapshot.contactOutcomes?.rechazados30d || 0} rechazos y ${snapshot.contactOutcomes?.contactosConOperacionVinculada30d || 0} contactos con operación vinculada. El historial anterior no se reconstruyó; asociación no prueba causalidad.` },
         { id: "F18", dato: `Hay ${snapshot.funnel?.clientesFrecuentesSinOperacionActiva || 0} clientes frecuentes con remesa en 90 días, sin operación activa y sin bloqueo CRM identificable; es un universo potencial, no autorización ni evidencia de que quieran recibir una campaña.` },
-        { id: "F19", dato: `Candidato a programa de referidos: recompensa hipotética del 1 % solo tras primera remesa confirmada. Escenarios: ${JSON.stringify(snapshot.referralEconomics?.scenarios || [])}. El 5 % de margen es referencia bruta no verificada; quedan pendientes costos netos, beneficios acumulados, antifraude, identidad y método de pago. No está autorizado.` }
+        { id: "F19", dato: `Referidos: recompensa hipotética 1 % solo tras primera remesa confirmada. Sensibilidad aritmética (importe BRL; recompensa; restante tras margen bruto referencial 5 %, antes de otros costos): ${referralCases.join(" | ") || "no calculable"}. No es beneficio neto ni previsión. Costos, acumulación VIP, antifraude e identidad/método de pago faltan; no autorizado. Sin datos de referidos históricos, no se justifican escenarios de conversión conservador/central/optimista.` },
+        { id: "F20", dato: `A Recuperación: ${snapshot.cotizacionesSinCierre48h} cotizaciones sin cierre en 48 h y ${snapshot.abandonos7d} estados CRM abandono en 7 días. Conteos pueden solaparse; elegibilidad comercial individual no consultada en este resumen.` },
+        { id: "F21", dato: `B Segunda transferencia: ${snapshot.funnel?.primerasRemesas30d || 0} primeras remesas observadas en 30 días; no hay cohorte de maduración/frecuencia suficiente para predecir recurrencia ni lista elegible verificada.` },
+        { id: "F22", dato: `C Referidos: ${snapshot.clientesConRemesa30d} clientes completaron remesas en 30 días; no hay indicador que verifique quién acepta recomendar. Cifra es universo observado, no destinatarios elegibles.` },
+        { id: "F23", dato: `D Conversión/proceso: ${snapshot.funnel?.cotizacionesAbiertas30d || 0} clientes están hoy cotizado/esperando PIX, de ellos ${snapshot.funnel?.abandonosPix30d || 0} esperando PIX; ${snapshot.operacionesPendientes48h} operaciones recientes siguen pendientes. Estados no prueban fricción ni permiten atribuir una causa.` }
     ];
+}
+
+function buildDecisionContext(facts, current, executionFeedback) {
+    const latestObservation = current?.snapshot?.observacionesResultado?.slice(-1)[0] || null;
+    const selected = current?.snapshot?.estrategiaElegida || null;
+    return JSON.stringify({
+        hechos: facts,
+        decisionVigente: current ? {
+            id: current.id, estado: current.estado, decision: current.decision, problema: current.problema,
+            evidenciaIds: (current.evidencia || []).map(item => item.id).filter(Boolean),
+            impacto: current.impacto, confianza: current.confianza,
+            estrategia: selected ? { id: selected.id, nombre: selected.nombre, mecanismo: selected.mecanismo } : null,
+            ultimaObservacion: latestObservation ? { metricas: latestObservation.metricas, variacionDesdeDecision: latestObservation.variacionDesdeDecision } : null
+        } : null,
+        señalesOperador: {
+            paquete: executionFeedback?.estado || null,
+            tipos: (executionFeedback?.señalesOperador || []).map(signal => ({ tipo: signal.tipo, campos: signal.campos || [] })).slice(-5),
+            ejecucion: executionFeedback?.remesasOContactosEjecutados ?? null,
+            activosBiblioteca: executionFeedback?.activosBibliotecaCreados?.length || 0
+        }
+    });
 }
 
 function mapDecision(row) {
@@ -254,6 +293,13 @@ function referralCandidateEvaluated(alternatives) {
         && /1\s?%|uno por ciento|recompensa/.test(`${item.nombre} ${item.accionRecomendada}`.toLowerCase()));
 }
 
+function opportunityCoverageValid(alternatives, facts) {
+    const factIds = new Set(facts.map(fact => fact.id));
+    if (!["F19", "F20", "F21", "F23"].every(id => factIds.has(id))) return true;
+    const covered = new Set(alternatives.flatMap(item => item.evidencia.map(fact => fact.id)));
+    return ["F19", "F20", "F21", "F23"].every(id => covered.has(id));
+}
+
 function commercialOutcomeMetrics(snapshot) {
     return {
         conversaciones24h: snapshot.conversaciones24h,
@@ -281,7 +327,7 @@ function normalizeProposal(data, facts, promotionContext = null) {
     const evidenceIds = [...new Set(Array.isArray(data?.evidenciaIds) ? data.evidenciaIds.map(String) : [])];
     const factMap = new Map(facts.map(fact => [fact.id, fact]));
     const evidence = evidenceIds.map(id => factMap.get(id)).filter(Boolean);
-    const alternatives = (Array.isArray(data?.alternativas) ? data.alternativas : []).slice(0, 6).map((item, index) => {
+    const alternatives = (Array.isArray(data?.alternativas) ? data.alternativas : []).slice(0, 5).map((item, index) => {
         const ids = [...new Set(Array.isArray(item?.evidenciaIds) ? item.evidenciaIds.map(String) : [])];
         const evidence = ids.map(id => factMap.get(id)).filter(Boolean);
         const costType = ["SIN_COSTO", "OPERATIVO", "ECONOMICO", "DESCONOCIDO"].includes(item?.costo?.tipo)
@@ -307,12 +353,15 @@ function normalizeProposal(data, facts, promotionContext = null) {
         const costPenalty = costType === "SIN_COSTO" ? 0
             : costType === "OPERATIVO" ? 8
                 : verifiedCost ? 12 : 22;
+        const resultExpectation = clean(item?.resultadoEsperado, 600);
+        const hasUnsupportedForecast = /(?:\b\d+(?:[.,]\d+)?\s?%|(?:R\$|\$|BRL|USD|CUP)\s?\d|\b\d+\s+(?:clientes|remesas|transferencias|conversiones|ventas|cotizaciones))/i.test(resultExpectation);
+        const targetCriteria = clean(item?.destinatarios?.criterio, 300);
         const strategy = {
             id: clean(item?.id, 12) || `S${index + 1}`,
             nombre: clean(item?.nombre, 180), mecanismo: clean(item?.mecanismo, 240),
             problema: clean(item?.problema, 600), evidencia: evidence, causaProbable: clean(item?.causaProbable, 600),
             justificacion: clean(item?.justificacion, 800), accionRecomendada: clean(item?.accionRecomendada, 1000),
-            resultadoEsperado: clean(item?.resultadoEsperado, 600),
+            resultadoEsperado: hasUnsupportedForecast ? "Mejora comercial posible, no cuantificable sin una prueba y atribución suficientes." : resultExpectation,
             impacto: score(item?.impacto), viabilidad: score(item?.viabilidad), riesgo: score(item?.riesgo),
             confianza: score(item?.confianza), costo: {
                 tipo: isRateOffer ? "ECONOMICO" : costType,
@@ -321,34 +370,30 @@ function normalizeProposal(data, facts, promotionContext = null) {
                     ? (promotionCostEstimate ? "Estimación del beneficio calculada con la tasa vigente; no es costo neto de liquidación. El margen restante usa la referencia no verificada del 5 %." : "Cálculo pendiente: no hay una tasa diaria vigente válida.")
                     : clean(item?.costo?.explicacion, 400)
             },
+            gananciaIncremental: { estado: "NO_ESTIMABLE", estimacionBRL: null,
+                motivo: "No hay atribución incremental ni costos netos suficientes para calcular ganancia." },
             oferta: offer,
             simulacionPromocion: promotionScenarios,
             requiereCompromisoEconomico: requiresMoney || isRateOffer,
             penalizacionCosto: costPenalty,
             ejecutable: Boolean(item?.ejecutable) && !requiresMoney,
-            recursos: (Array.isArray(item?.recursos) ? item.recursos : []).map(value => clean(value, 120)).filter(Boolean).slice(0, 8),
-            pasos: (Array.isArray(item?.pasos) ? item.pasos : []).map(value => clean(value, 400)).filter(Boolean).slice(0, 12),
-            destinatarios: { criterio: clean(item?.destinatarios?.criterio, 400), basadoEnDatos: Boolean(item?.destinatarios?.basadoEnDatos) },
-            materiales: (Array.isArray(item?.materiales) ? item.materiales : []).slice(0, 8).map(asset => ({
-                tipo: clean(asset?.tipo, 40), titulo: clean(asset?.titulo, 180), contenido: clean(asset?.contenido, 4000)
+            recursos: (Array.isArray(item?.recursos) ? item.recursos : []).map(value => clean(value, 120)).filter(Boolean).slice(0, 5),
+            pasos: (Array.isArray(item?.pasos) ? item.pasos : []).map(value => clean(value, 160)).filter(Boolean).slice(0, 3),
+            destinatarios: { criterio: targetCriteria ? `${targetCriteria} La lista individual y su elegibilidad no se verificaron.` : "No hay destinatarios individuales verificados; solo métricas agregadas.", basadoEnDatos: false },
+            materiales: (Array.isArray(item?.materiales) ? item.materiales : []).slice(0, 1).map(asset => ({
+                tipo: clean(asset?.tipo, 40), titulo: clean(asset?.titulo, 180), contenido: clean(asset?.contenido, 500)
             })),
-            metricas: (Array.isArray(item?.metricas) ? item.metricas : []).map(value => clean(value, 160)).filter(Boolean).slice(0, 8),
-            capacidadesFaltantes: (Array.isArray(item?.capacidadesFaltantes) ? item.capacidadesFaltantes : []).map(value => clean(value, 240)).filter(Boolean).slice(0, 8)
+            metricas: (Array.isArray(item?.metricas) ? item.metricas : []).map(value => clean(value, 160)).filter(Boolean).slice(0, 4),
+            capacidadesFaltantes: (Array.isArray(item?.capacidadesFaltantes) ? item.capacidadesFaltantes : []).map(value => clean(value, 240)).filter(Boolean).slice(0, 5)
         };
-        strategy.puntuacionComercial = Math.max(0, Math.min(100, Math.round(
-            strategy.impacto * 0.35 + strategy.viabilidad * 0.35 + strategy.confianza * 0.3
-            - strategy.riesgo * 0.2 - strategy.penalizacionCosto
-        )));
         if (!strategy.evidencia.length || (isRateOffer && (!promotionScenarios.length || !verifiedCost))) strategy.ejecutable = false;
         if (strategy.ejecutable && (!strategy.pasos.length || !strategy.accionRecomendada)) strategy.ejecutable = false;
         return strategy;
     }).filter(item => item.nombre && item.mecanismo);
     const selectedId = clean(data?.estrategiaElegidaId, 12);
-    const ranked = [...alternatives].sort((a, b) => Number(b.ejecutable) - Number(a.ejecutable)
-        || b.puntuacionComercial - a.puntuacionComercial);
     const modelSelected = alternatives.find(item => item.id === selectedId) || null;
     const selectedStrategy = (modelSelected?.ejecutable ? modelSelected : null)
-        || ranked.find(item => item.ejecutable) || modelSelected || ranked[0] || null;
+        || alternatives.find(item => item.ejecutable) || modelSelected || alternatives[0] || null;
     const decisionData = selectedStrategy || data;
     return {
         action,
@@ -365,17 +410,13 @@ function normalizeProposal(data, facts, promotionContext = null) {
         alternatives, selectedStrategy,
         alternativesValid: alternatives.length >= 3 && mechanismsAreDistinct(alternatives)
             && (!factMap.has("F19") || referralCandidateEvaluated(alternatives))
+            && opportunityCoverageValid(alternatives, facts)
     };
 }
 
-async function generateCommercialProposal(llm, user, facts, promotionContext = null, analysisId = null) {
-    const first = await llm.completeJson({ tarea: "decision", system: DECISION_SYSTEM, user, temperature: 0.1, analysisId });
-    let proposal = normalizeProposal(first.data, facts, promotionContext);
-    if (proposal.alternativesValid) return proposal;
-    const retryUser = `${user}\n\nTU RESPUESTA ANTERIOR NO CUMPLIÓ EL CRITERIO DE COMPARACIÓN. Rehazla completa: entrega al menos tres mecanismos realmente distintos, cita evidencia disponible para cada uno y vuelve a elegir la mejor. No conviertas variaciones de copy o segmentos en estrategias distintas. Evalúa de forma explícita el programa de referidos de F19 como alternativa real, con recompensa hipotética del 1 % después de una primera remesa; marca sus costos y ejecución como pendientes si no están verificados. No lo presentes como aprobado.`;
-    const retry = await llm.completeJson({ tarea: "decision", system: DECISION_SYSTEM, user: retryUser, temperature: 0.1, analysisId });
-    proposal = normalizeProposal(retry.data, facts, promotionContext);
-    return proposal;
+async function generateCommercialProposal(llm, user, facts, promotionContext = null, analysisId = null, contextMetrics = {}) {
+    const first = await llm.completeJson({ tarea: "decision", system: DECISION_SYSTEM, user, temperature: 0.1, analysisId, contextMetrics });
+    return normalizeProposal(first.data, facts, promotionContext);
 }
 
 function validNewDecision(proposal) {
@@ -462,8 +503,11 @@ async function evaluateBestDecision(dependencies = {}) {
         remesasOContactosEjecutados: executionPackage.contenido?.ejecucion?.completados ?? null,
         activosBibliotecaCreados: executionPackage.contenido?.ejecucion?.activosBiblioteca || []
     } : null;
-    const user = `HECHOS DISPONIBLES:\n${facts.map(f => `${f.id}. ${f.dato}`).join("\n")}\n\nESCENARIOS DE OFERTAS CON TASA REAL (úsalos solo si están disponibles; son estimaciones, no rentabilidad comprobada):\n${JSON.stringify(snapshot.escenariosPromocion)}\n\nDECISIÓN VIGENTE Y MÉTRICAS OBSERVADAS:\n${current ? JSON.stringify(current) : "No existe."}\n\nSEÑALES DE REVISIÓN/EJECUCIÓN DEL OPERADOR:\n${JSON.stringify(executionFeedback)}`;
-    const proposal = await generateCommercialProposal(llm, user, facts, snapshot.escenariosPromocion, analysisId);
+    const user = buildDecisionContext(facts, current, executionFeedback);
+    const proposal = await generateCommercialProposal(llm, user, facts, snapshot.escenariosPromocion, analysisId, {
+        hechosAgregados: facts.length, filasClientesIncluidas: 0, filasOperacionesIncluidas: 0,
+        mensajesConversacionalesIncluidos: 0, contextoCrudoIncluido: false
+    });
     if (!proposal.alternativesValid) {
         return { decision: current, changed: false, reason: "ALTERNATIVAS_INSUFICIENTES",
             alternativas: proposal.alternatives, executionPackage };
@@ -508,7 +552,8 @@ function startBestDecision(dependencies = {}) {
 
 module.exports = {
     DECISION_SYSTEM, MIN_CHANGE_ADVANTAGE, MIN_IMPACT_LEAD, collectCommercialSnapshot,
+    buildDecisionContext, compactPromotionEvidence,
     snapshotFacts, commercialOutcomeMetrics, withOutcomeObservation, mechanismsAreDistinct, mapDecision, normalizeProposal,
-    generateCommercialProposal, replacementAllowed, applyProposal, getBestDecision, evaluateBestDecision,
+    opportunityCoverageValid, generateCommercialProposal, replacementAllowed, applyProposal, getBestDecision, evaluateBestDecision,
     referralCandidateEvaluated, refreshBestDecision, closeDecision, startBestDecision
 };

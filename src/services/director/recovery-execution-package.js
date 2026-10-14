@@ -530,7 +530,7 @@ async function resolvePackage(rawId, action, db = pool, dependencies = {}) {
                 titulo: material.titulo, cuerpo: material.contenido, grupo: "permanente",
                 categoria: "iniciativa-comercial",
                 aporte: content.estrategiaElegida?.justificacion || content.objetivo,
-                impacto: { puntuacion: content.estrategiaElegida?.puntuacionComercial || 0 },
+                impacto: { puntuacion: content.estrategiaElegida?.impacto || 0 },
                 fuentes: facts.map(fact => ({ nombre: "Datos internos de YORDA", titulo: fact.dato, url: "" })),
                 origenSistema: `director-pkg-${id}-${index + 1}`
             }, db));

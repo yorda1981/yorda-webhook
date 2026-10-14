@@ -77,6 +77,17 @@ test("rechaza costos afirmados por el modelo y no elige ofertas sin rentabilidad
     assert.equal(normalized.selectedStrategy.id, "S2");
 });
 
+test("no presenta elegibilidad, pronósticos de conversiones ni ganancia como cifras verificadas", () => {
+    const alternatives = proposal().alternativas.map(item => ({ ...item }));
+    alternatives[0].resultadoEsperado = "12 remesas nuevas y R$ 500 de ganancia";
+    alternatives[0].destinatarios = { criterio: "78 clientes listos", basadoEnDatos: true };
+    const normalized = service.normalizeProposal(proposal({ alternativas: alternatives }), facts);
+    assert.match(normalized.alternatives[0].resultadoEsperado, /no cuantificable/);
+    assert.equal(normalized.alternatives[0].gananciaIncremental.estimacionBRL, null);
+    assert.equal(normalized.alternatives[0].destinatarios.basadoEnDatos, false);
+    assert.match(normalized.alternatives[0].destinatarios.criterio, /no se verificaron/);
+});
+
 test("una recompensa de referidos siempre queda como compromiso económico pendiente", () => {
     const alternatives = proposal().alternativas.map(item => ({ ...item }));
     alternatives[0] = { ...alternatives[0], nombre: "Programa de referidos", mecanismo: "Recomendación boca a boca",
@@ -107,16 +118,56 @@ test("la evaluación real no es comparable hasta que el Director analice F19 com
     assert.equal(omitted.alternativesValid, false);
 });
 
-test("reintenta si el modelo no compara oportunidades realmente distintas", async () => {
-    const responses = [proposal({ alternativas: proposal().alternativas.slice(0, 1) }), proposal()];
-    const users = [];
-    const result = await service.generateCommercialProposal({ completeJson: async input => {
-        users.push(input.user);
-        return { data: responses.shift() };
+test("la comparación real exige evidencia para recuperación, segunda remesa, referidos y conversión", () => {
+    const comparisonFacts = ["F19", "F20", "F21", "F23"].map(id => ({ id, dato: `Hecho agregado ${id}` }));
+    const alternatives = [
+        { id: "A", nombre: "Recuperación selectiva", mecanismo: "Retomar cotización abandonada por señal verificable", evidenciaIds: ["F20"], accionRecomendada: "Revisar candidatos", pasos: ["Verificar elegibilidad"] },
+        { id: "B", nombre: "Segunda remesa", mecanismo: "Acompañamiento de recurrencia después de primera operación", evidenciaIds: ["F21"], accionRecomendada: "Medir cohorte", pasos: ["Definir maduración"] },
+        { id: "C", nombre: "Referidos", mecanismo: "Captación por recomendación y recompensa condicionada", evidenciaIds: ["F19"], accionRecomendada: "Evaluar recompensa 1 % después de primera remesa", pasos: ["Validar economía"] },
+        { id: "D", nombre: "Conversión PIX", mecanismo: "Mejora guiada del proceso de pago y cotización", evidenciaIds: ["F23"], accionRecomendada: "Auditar abandono de proceso", pasos: ["Medir embudo"] }
+    ];
+    const complete = service.normalizeProposal(proposal({ alternativas: alternatives, estrategiaElegidaId: "A" }), comparisonFacts);
+    assert.equal(complete.alternativesValid, true);
+    const incomplete = service.normalizeProposal(proposal({ alternativas: alternatives.slice(0, 3), estrategiaElegidaId: "A" }), comparisonFacts);
+    assert.equal(incomplete.alternativesValid, false);
+});
+
+test("una comparación incompleta no dispara una segunda llamada pagada", async () => {
+    let calls = 0;
+    const result = await service.generateCommercialProposal({ completeJson: async () => {
+        calls++;
+        return { data: proposal({ alternativas: proposal().alternativas.slice(0, 1) }) };
     } }, "hechos comerciales", facts);
-    assert.equal(users.length, 2);
-    assert.match(users[1], /mecanismos realmente distintos/);
-    assert.equal(result.alternativesValid, true);
+    assert.equal(calls, 1);
+    assert.equal(result.alternativesValid, false);
+});
+
+test("el contexto compacto no serializa decisiones completas ni conversaciones", () => {
+    const current = { id: 7, estado: "VIGENTE", decision: "Prioridad", problema: "P", evidencia: [{ id: "F3" }],
+        impacto: 70, confianza: 80, snapshot: { estrategiaElegida: { id: "S1", nombre: "X", mecanismo: "Y" },
+            alternativas: [{ material: "texto grande" }], observacionesResultado: [{ metricas: { remesas: 2 }, variacionDesdeDecision: { remesas: 1 } }] } };
+    const context = service.buildDecisionContext(facts, current, { estado: "BORRADOR", señalesOperador: [{ tipo: "EDITADO", campos: ["materiales"], contenido: "PII ignorada" }] });
+    assert.match(context, /VIGENTE/);
+    assert.match(context, /"remesas":2/);
+    assert.doesNotMatch(context, /texto grande|PII ignorada|alternativas/);
+    assert.match(service.DECISION_SYSTEM, /A\).*recuperación/);
+    assert.match(service.DECISION_SYSTEM, /B\).*segunda transferencia/);
+    assert.match(service.DECISION_SYSTEM, /C\).*referidos/);
+    assert.match(service.DECISION_SYSTEM, /D\).*mejora de conversión/);
+});
+
+test("la evidencia de promociones compacta datos económicos calculados y no transmite el catálogo entero", () => {
+    const context = { disponible: true, updatedAt: "2026-10-14T10:00:00Z", escenarios: [
+        { importeTransferenciaBRL: 100, nivelVip: 0, normal: { tasa: 180, recibeCUP: 18000 },
+            descuentos: [{ porcentaje: 1, costoBeneficioBRL: 1 }, { porcentaje: 2, costoBeneficioBRL: 2 }],
+            mejorasTasa: [{ porcentaje: 1, recibePromocionCUP: 18180, costoBeneficioBRL: 1 }, { porcentaje: 2, recibePromocionCUP: 18360, costoBeneficioBRL: 2 }] },
+        { importeTransferenciaBRL: 100, nivelVip: 1, normal: { tasa: 182, recibeCUP: 18200 }, descuentos: [], mejorasTasa: [] }
+    ] };
+    const evidence = service.compactPromotionEvidence(context);
+    assert.match(evidence, /18000 CUP @180/);
+    assert.match(evidence, /cuesta 1\.00\/2\.00 BRL/);
+    assert.match(evidence, /18180\/18360 CUP/);
+    assert.doesNotMatch(evidence, /nivelVip|\[\{/);
 });
 
 test("detecta alternativas que solo parafrasean el mismo mecanismo", () => {
@@ -246,4 +297,7 @@ test("migración, rutas, arranque e interfaz exponen una única decisión vigent
     assert.match(index, /bestDecision\.startBestDecision\(\)/);
     assert.match(ui, /Mejor Decisión Disponible/);
     assert.match(ui, /Por qué cambió la prioridad/);
+    assert.match(ui, /Ganancia incremental:/);
+    assert.match(ui, /no estimable con los datos actuales/);
+    assert.match(ui, /no son predicciones ni probabilidades/);
 });
