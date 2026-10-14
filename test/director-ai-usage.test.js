@@ -40,10 +40,17 @@ test("reutiliza un resultado equivalente y registra el hit sin hacer otra llamad
         return /SELECT id, modelo/.test(sql) ? { rows: [{ id: 4, modelo: "gpt-4o-mini", metadata: { cachedResponse: { accion: "MANTENER" } } }] } : { rows: [] };
     } };
     const cached = await usage.getCachedResponse("hash", "decision", db);
-    assert.deepEqual(cached, { model: "gpt-4o-mini", data: { accion: "MANTENER" } });
+    assert.deepEqual(cached, { usageId: 4, model: "gpt-4o-mini", data: { accion: "MANTENER" } });
     assert.equal(calls.length, 2);
     assert.match(calls[0].sql, /contextHash/);
     assert.match(calls[1].sql, /cacheHits/);
+});
+
+test("vincula una respuesta reutilizada al decision vigente sin crear otra fila de consumo", async () => {
+    let statement;
+    await usage.linkDecisionByUsageId(4, 1, { query: async (sql, params) => { statement = { sql: String(sql), params }; return { rows: [] }; } });
+    assert.match(statement.sql, /WHERE id = \$1 AND \(decision_id IS NULL OR decision_id = \$2\)/);
+    assert.deepEqual(statement.params, [4, 1]);
 });
 
 test("un costo no configurado queda NULL (no cero) y el razonamiento no informado queda explícitamente desconocido", async () => {

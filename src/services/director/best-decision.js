@@ -485,7 +485,7 @@ function normalizeProposal(data, facts, promotionContext = null) {
 async function generateCommercialProposal(llm, user, facts, promotionContext = null, analysisId = null, contextMetrics = {}, referralContext = null) {
     const first = await llm.completeJson({ tarea: "decision", system: DECISION_SYSTEM, user, temperature: 0.1, analysisId, contextMetrics });
     const prepared = prepareMandatoryComparison(first.data, facts, referralContext);
-    return normalizeProposal(prepared, facts, promotionContext);
+    return { ...normalizeProposal(prepared, facts, promotionContext), usageId: first.usageId || null };
 }
 
 function validNewDecision(proposal) {
@@ -582,7 +582,11 @@ async function evaluateBestDecision(dependencies = {}) {
             alternativas: proposal.alternatives, executionPackage };
     }
     const result = await applyProposal(db, current, proposal, snapshot);
-    if (result.decision?.id) await require("./ai-usage").linkDecision(analysisId, result.decision.id, db);
+    if (result.decision?.id) {
+        const usage = require("./ai-usage");
+        if (proposal.usageId) await usage.linkDecisionByUsageId(proposal.usageId, result.decision.id, db);
+        else await usage.linkDecision(analysisId, result.decision.id, db);
+    }
     if (result.decision) {
         result.executionPackage = await executionPackages.ensureCommercialPackage(result.decision, db, dependencies);
     }

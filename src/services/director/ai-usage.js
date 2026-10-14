@@ -143,6 +143,11 @@ async function linkDecision(analysisId, decisionId, db = pool) {
     await db.query("UPDATE director_ai_usage SET decision_id = $2 WHERE analysis_id = $1", [analysisId, decisionId]);
 }
 
+async function linkDecisionByUsageId(usageId, decisionId, db = pool) {
+    if (!usageId || !decisionId) return;
+    await db.query("UPDATE director_ai_usage SET decision_id = $2 WHERE id = $1 AND (decision_id IS NULL OR decision_id = $2)", [usageId, decisionId]);
+}
+
 async function settle(id, { usage = null, model, tarea = null, error = null, responseChars = null,
     cacheResponse = null, db = pool, env = process.env }) {
     const rates = configuredRates(env, tarea);
@@ -182,7 +187,7 @@ async function getCachedResponse(contextHash, tarea = "decision", db = pool) {
     if (!row) return null;
     await db.query(`UPDATE director_ai_usage SET metadata = jsonb_set(metadata,
         '{cacheHits}', to_jsonb(COALESCE((metadata->>'cacheHits')::int, 0) + 1), true) WHERE id = $1`, [row.id]);
-    return { model: row.modelo, data: row.metadata.cachedResponse };
+    return { usageId: Number(row.id), model: row.modelo, data: row.metadata.cachedResponse };
 }
 
 async function getDailySummary(db = pool) {
@@ -202,4 +207,4 @@ async function getDailySummary(db = pool) {
 }
 
 module.exports = { maxOutputTokens, estimateTokens, configuredRates, configuredCostLimit, costFromUsage, reserve, settle,
-    getCachedResponse, linkDecision, getDailySummary };
+    getCachedResponse, linkDecision, linkDecisionByUsageId, getDailySummary };

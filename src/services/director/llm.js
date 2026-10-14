@@ -31,11 +31,11 @@ async function completeJson({ tarea, system, user, temperature = 0.2, analysisId
     const contextHash = createHash("sha256").update(`${model}\n${system || ""}\n${user || ""}`).digest("hex");
     if (tarea === "decision" || tarea === "seleccion") {
         const cached = await aiUsage.getCachedResponse(contextHash, tarea);
-        if (cached) return { data: cached.data, model: cached.model, usage: null, cacheHit: true };
+        if (cached) return { data: cached.data, model: cached.model, usage: null, cacheHit: true, usageId: cached.usageId };
     }
     const reservation = await aiUsage.reserve({ tarea, modelo: model, system, user, analysisId: analysisId || undefined,
         contextHash, contextMetrics, outputLimit });
-    if (reservation.cacheHit) return { data: reservation.data, model: reservation.model, usage: null, cacheHit: true };
+    if (reservation.cacheHit) return { data: reservation.data, model: reservation.model, usage: null, cacheHit: true, usageId: reservation.id };
     let response = null;
     try {
         response = await getClient().chat.completions.create({
