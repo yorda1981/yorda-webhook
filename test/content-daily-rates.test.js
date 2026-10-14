@@ -3,7 +3,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
-    renderDailyRates, localParts, ensureDailyRatesSchedule, getDailyRatesSettings,
+    renderDailyRates, localParts, ensureDailyRatesSchedule, ensureDailyAdminRatesSchedule, sendAdminRates, getDailyRatesSettings,
     updateDailyRatesSettings
 } = require("../src/services/content-daily-rates");
 
@@ -89,4 +89,56 @@ test("horario configurable valida y persiste la hora local", async () => {
     assert.deepEqual(parameters, [true, "10:25"]);
     assert.equal(result.time, "10:25");
     await assert.rejects(() => updateDailyRatesSettings({ enabled: true, time: "25:99" }, db), { code: "CONTENT_DAILY_RATES_VALIDATION" });
+});
+
+test("restaura la entrega administrativa diaria a las 10:15 con idempotencia propia", async () => {
+    const calls = [];
+    let inserted = false;
+    const db = {
+        async query(sql) {
+            calls.push(String(sql));
+            if (/SELECT id, estado FROM content_schedules/.test(sql)) return { rows: inserted ? [{ id: "49", estado: "PENDIENTE" }] : [] };
+            throw new Error(`Consulta inesperada: ${sql}`);
+        },
+        async connect() {
+            return {
+                async query(sql, params) {
+                    calls.push(String(sql));
+                    if (/SELECT pg_advisory_xact_lock/.test(sql)) return { rows: [] };
+                    if (/SELECT id, estado FROM content_schedules/.test(sql)) return { rows: inserted ? [{ id: "49", estado: "PENDIENTE" }] : [] };
+                    if (/SELECT \* FROM rates/.test(sql)) return { rows: [RATES] };
+                    if (/SELECT id FROM content_items WHERE origen_sistema/.test(sql)) return { rows: [{ id: "12" }] };
+                    if (/SELECT numero, cuerpo FROM content_revisions/.test(sql)) return { rows: [{ numero: 3, cuerpo: "anterior" }] };
+                    if (/INSERT INTO content_schedules/.test(sql)) { inserted = true; return { rows: [{ id: "49" }] }; }
+                    return { rows: [] };
+                },
+                release() {}
+            };
+        }
+    };
+    const result = await ensureDailyAdminRatesSchedule({ db, now: new Date("2026-10-15T13:15:20Z") });
+    assert.equal(result.status, "SCHEDULED");
+    assert.ok(calls.some(sql => /INSERT INTO content_schedules/.test(sql)));
+    assert.ok(calls.some(sql => /INSERT INTO content_events/.test(sql)));
+    assert.equal((await ensureDailyAdminRatesSchedule({ db, now: new Date("2026-10-15T13:16:00Z") })).status, "ALREADY_SCHEDULED");
+});
+
+test("el envío administrativo usa el cuerpo vigente y registra éxito o fallo separado", async () => {
+    const calls = [];
+    const db = { async query(sql, params) {
+        calls.push({ sql: String(sql), params });
+        if (/SELECT cuerpo FROM content_revisions/.test(sql)) return { rows: [{ cuerpo: renderDailyRates(RATES) }] };
+        return { rows: [] };
+    } };
+    const schedule = { scheduleId: 51, contentId: 12 };
+    const success = await sendAdminRates(schedule, { pool: db, adminPhone: "5511999", send: async (phone, body) => {
+        assert.equal(phone, "5511999");
+        assert.match(body, /CUP 160/);
+        return true;
+    } });
+    assert.equal(success.code, "PUBLISHED");
+    assert.ok(calls.some(call => /CONTENT_DAILY_RATES_ADMIN_SENT/.test(call.sql)));
+    const failure = await sendAdminRates(schedule, { pool: db, adminPhone: "5511999", send: async () => false });
+    assert.equal(failure.code, "SEND_FAILED");
+    assert.ok(calls.some(call => /CONTENT_DAILY_RATES_ADMIN_SEND_FAILED/.test(call.sql)));
 });

@@ -5,6 +5,9 @@ const { ZONA_NEGOCIO } = require("../utils/timezone");
 
 const RATE_ITEM_KEY = "daily-remittance-rates";
 const SEND_WINDOW_MINUTES = 0;
+// Conserva el horario del flujo administrativo previo (13:15 UTC = 10:15 en
+// São Paulo) usando la cola persistente que ya procesa el grupo.
+const ADMIN_SEND_TIME = "10:15";
 
 function settingsError(message) {
     const error = new Error(message);
@@ -195,7 +198,108 @@ async function ensureDailyRatesSchedule({ db = pool, now = new Date() } = {}) {
     }
 }
 
+// El WhatsApp administrativo es un segundo destino del mismo programador,
+// con su propia clave diaria y su propio resultado. Su fallo nunca cambia el
+// estado ni impide ejecutar la publicación del grupo.
+async function ensureDailyAdminRatesSchedule({ db = pool, now = new Date() } = {}) {
+    const local = localParts(now, ZONA_NEGOCIO);
+    const targetMinutes = minutesOfDay(ADMIN_SEND_TIME);
+    const nowMinutes = Number(local.time.slice(0, 2)) * 60 + Number(local.time.slice(3, 5));
+    if (nowMinutes < targetMinutes) return { status: "NOT_DUE" };
+    const key = `daily-rates-admin-${local.date}`;
+    const existing = await db.query("SELECT id, estado FROM content_schedules WHERE idempotency_key = $1 LIMIT 1", [key]);
+    if (existing.rows[0]) return { status: "ALREADY_SCHEDULED", scheduleId: Number(existing.rows[0].id), state: existing.rows[0].estado };
+
+    const client = await db.connect();
+    try {
+        await client.query("BEGIN");
+        await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [key]);
+        const raced = await client.query("SELECT id, estado FROM content_schedules WHERE idempotency_key = $1 LIMIT 1", [key]);
+        if (raced.rows[0]) {
+            await client.query("COMMIT");
+            return { status: "ALREADY_SCHEDULED", scheduleId: Number(raced.rows[0].id), state: raced.rows[0].estado };
+        }
+
+        let state = "PENDIENTE", resultCode = null, error = null, contentId = null;
+        if (nowMinutes - targetMinutes > SEND_WINDOW_MINUTES) {
+            state = "FALLIDA";
+            resultCode = "MISSED_SEND_WINDOW";
+            error = `La ventana administrativa de ${ADMIN_SEND_TIME} (${ZONA_NEGOCIO}) pasó; no se envió fuera del horario.`;
+        } else {
+            try {
+                const ratesResult = await client.query("SELECT * FROM rates WHERE id = 1");
+                contentId = await ensureDailyRatesContent(client, renderDailyRates(ratesResult.rows[0]));
+            } catch (ratesError) {
+                state = "FALLIDA";
+                resultCode = "INVALID_RATES";
+                error = String(ratesError.message || ratesError).slice(0, 1000);
+            }
+        }
+        const secondsIntoMinute = now.getUTCSeconds() * 1000 + now.getUTCMilliseconds();
+        const scheduledAt = new Date(now.getTime() - (nowMinutes - targetMinutes) * 60_000 - secondsIntoMinute);
+        const inserted = await client.query(`
+            INSERT INTO content_schedules
+                (idioma, programada_para, estado, idempotency_key, content_item_id, result_code, error,
+                 ejecutada_at)
+            VALUES ('es', $1, $2, $3, $4, $5, $6, CASE WHEN $7 THEN NOW() ELSE NULL END)
+            ON CONFLICT (idempotency_key) DO NOTHING
+            RETURNING id
+        `, [scheduledAt, state, key, contentId, resultCode, error, state === "FALLIDA"]);
+        const scheduleId = Number(inserted.rows[0]?.id || 0);
+        if (scheduleId) {
+            await client.query(`
+                INSERT INTO content_events (entity_type, entity_id, event_type, actor, datos)
+                VALUES ('SCHEDULE', $1, $2, 'system', $3::jsonb)
+            `, [scheduleId, state === "PENDIENTE" ? "CONTENT_DAILY_RATES_ADMIN_SCHEDULED" : "CONTENT_DAILY_RATES_ADMIN_FAILED",
+                JSON.stringify({ date: local.date, time: ADMIN_SEND_TIME, timeZone: ZONA_NEGOCIO,
+                    destination: "ADMIN_PHONE", contentId, resultCode, error })]);
+        }
+        await client.query("COMMIT");
+        return { status: state === "PENDIENTE" ? "SCHEDULED" : "MISSED_WINDOW", scheduleId, error };
+    } catch (error) {
+        try { await client.query("ROLLBACK"); } catch (_) {}
+        throw error;
+    } finally {
+        client.release();
+    }
+}
+
+async function sendAdminRates(schedule, dependencies = {}) {
+    const db = dependencies.pool || pool;
+    const started = async () => db.query(`
+        INSERT INTO content_events (entity_type, entity_id, event_type, actor, datos)
+        VALUES ('SCHEDULE', $1, 'CONTENT_DAILY_RATES_ADMIN_STARTED', 'system',
+                jsonb_build_object('destination', 'ADMIN_PHONE', 'contentId', $2))
+    `, [schedule.scheduleId, schedule.contentId]);
+    await started();
+    try {
+        const [{ getAdminPhone, enviarSeguro }, revision] = await Promise.all([
+            Promise.resolve(dependencies.transport || require("../flows/shared")),
+            db.query(`SELECT cuerpo FROM content_revisions WHERE content_item_id = $1 ORDER BY numero DESC LIMIT 1`, [schedule.contentId])
+        ]);
+        const phone = dependencies.adminPhone || getAdminPhone();
+        if (!phone) throw Object.assign(new Error("ADMIN_PHONE no está configurado."), { code: "ADMIN_PHONE_NOT_CONFIGURED" });
+        if (!revision.rows[0]?.cuerpo) throw new Error("No se encontró el contenido vigente de las tasas.");
+        const delivered = await (dependencies.send || enviarSeguro)(phone, revision.rows[0].cuerpo);
+        if (delivered === false) throw Object.assign(new Error("El transporte rechazó el envío al WhatsApp administrativo."), { code: "SEND_FAILED" });
+        await db.query(`
+            INSERT INTO content_events (entity_type, entity_id, event_type, actor, datos)
+            VALUES ('SCHEDULE', $1, 'CONTENT_DAILY_RATES_ADMIN_SENT', 'system',
+                    jsonb_build_object('destination', 'ADMIN_PHONE', 'contentId', $2, 'resultCode', 'SENT'))
+        `, [schedule.scheduleId, schedule.contentId]);
+        return { ok: true, code: "PUBLISHED", publication: null };
+    } catch (error) {
+        await db.query(`
+            INSERT INTO content_events (entity_type, entity_id, event_type, actor, datos)
+            VALUES ('SCHEDULE', $1, 'CONTENT_DAILY_RATES_ADMIN_SEND_FAILED', 'system', $2::jsonb)
+        `, [schedule.scheduleId, JSON.stringify({ destination: "ADMIN_PHONE", contentId: schedule.contentId,
+            resultCode: error.code || "SEND_FAILED", error: String(error.message || error).slice(0, 1000) })]);
+        return { ok: false, code: error.code || "SEND_FAILED", error: String(error.message || error).slice(0, 1000) };
+    }
+}
+
 module.exports = {
     RATE_ITEM_KEY, SEND_WINDOW_MINUTES, localParts, formatRate, renderDailyRates,
-    minutesOfDay, getDailyRatesSettings, updateDailyRatesSettings, ensureDailyRatesSchedule
+    minutesOfDay, getDailyRatesSettings, updateDailyRatesSettings, ensureDailyRatesSchedule,
+    ADMIN_SEND_TIME, ensureDailyAdminRatesSchedule, sendAdminRates
 };

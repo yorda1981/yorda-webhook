@@ -240,9 +240,18 @@ async function executeClaimedSchedule(schedule, dependencies = {}) {
     const finishFn = dependencies.finishFn || finishSchedule;
     let result;
     try {
-        const input = { idioma: schedule.idioma, idempotencyKey: schedule.idempotencyKey };
-        if (schedule.contentId) input.contentId = schedule.contentId;
-        result = await publisher.publishSelectedContent(input);
+        if (String(schedule.idempotencyKey || "").startsWith("daily-rates-admin-")) {
+            result = await (dependencies.sendAdminRates || dailyRates.sendAdminRates)(schedule, {
+                pool: db,
+                transport: dependencies.adminTransport,
+                send: dependencies.sendAdminMessage,
+                adminPhone: dependencies.adminPhone
+            });
+        } else {
+            const input = { idioma: schedule.idioma, idempotencyKey: schedule.idempotencyKey };
+            if (schedule.contentId) input.contentId = schedule.contentId;
+            result = await publisher.publishSelectedContent(input);
+        }
     } catch (error) {
         result = { ok: false, code: "UNEXPECTED_ERROR", error: error.message };
     }
@@ -252,10 +261,17 @@ async function executeClaimedSchedule(schedule, dependencies = {}) {
 async function runDueSchedulesOnce(dependencies = {}) {
     const db = dependencies.pool || pool;
     const prepareRates = dependencies.ensureDailyRatesSchedule || dailyRates.ensureDailyRatesSchedule;
+    const prepareAdminRates = dependencies.ensureDailyAdminRatesSchedule || dailyRates.ensureDailyAdminRatesSchedule;
     try {
         await prepareRates({ db, now: dependencies.now || new Date() });
     } catch (error) {
         console.error("❌ Publicación diaria de tasas:", error.message);
+    }
+    // Cada destino se prepara de forma aislada; el fallo de uno no bloquea al otro.
+    try {
+        await prepareAdminRates({ db, now: dependencies.now || new Date() });
+    } catch (error) {
+        console.error("❌ Tasas diarias al destino administrativo:", error.message);
     }
     const claimed = await claimDueSchedules({ limit: dependencies.limit || 10 }, db);
     const results = [];

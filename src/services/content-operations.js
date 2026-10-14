@@ -26,6 +26,7 @@ function schemaBlockedSnapshot(schema) {
         destinations: [],
         dailyRates: null,
         latestDailyRatesSchedule: null,
+        latestDailyRatesAdminSchedule: null,
         schema,
         services: {
             scheduler: SCHEDULER_LABEL_BY_SCHEMA[schema.estado] || "ESQUEMA NO VERIFICADO",
@@ -36,7 +37,7 @@ function schemaBlockedSnapshot(schema) {
 
 async function getOperationsSnapshot(db = pool, { schedulerStarted = false, schema = null } = {}) {
     if (schema && schema.estado !== SCHEMA_STATES.COMPLETO) return schemaBlockedSnapshot(schema);
-    const [counts, latest, next, events, destinations, ratesSettings, latestRatesSchedule] = await Promise.all([
+    const [counts, latest, next, events, destinations, ratesSettings, latestRatesSchedule, latestAdminRatesSchedule] = await Promise.all([
         db.query(`
             SELECT
                 COUNT(*) FILTER (WHERE estado = 'PENDIENTE')::int AS programadas,
@@ -74,7 +75,12 @@ async function getOperationsSnapshot(db = pool, { schedulerStarted = false, sche
         dailyRates.getDailyRatesSettings(db),
         db.query(`
             SELECT id, programada_para, ejecutada_at, estado, result_code, error, idempotency_key
-            FROM content_schedules WHERE idempotency_key LIKE 'daily-rates-%'
+            FROM content_schedules WHERE idempotency_key LIKE 'daily-rates-____-__-__'
+            ORDER BY id DESC LIMIT 1
+        `),
+        db.query(`
+            SELECT id, programada_para, ejecutada_at, estado, result_code, error, idempotency_key
+            FROM content_schedules WHERE idempotency_key LIKE 'daily-rates-admin-%'
             ORDER BY id DESC LIMIT 1
         `)
     ]);
@@ -87,6 +93,7 @@ async function getOperationsSnapshot(db = pool, { schedulerStarted = false, sche
         destinations: destinations.rows,
         dailyRates: ratesSettings,
         latestDailyRatesSchedule: latestRatesSchedule.rows[0] || null,
+        latestDailyRatesAdminSchedule: latestAdminRatesSchedule.rows[0] || null,
         schema,
         services: {
             scheduler: schedulerStarted ? "INICIADO" : "NO INICIADO",

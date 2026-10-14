@@ -19,7 +19,9 @@
         <section class="panel"><h2>Publicación diaria de tasas</h2><div class="content">
             <label style="display:flex;align-items:center;gap:10px;margin-bottom:14px;color:var(--text)"><input id="ratesEnabled" type="checkbox" style="flex:0;width:auto"> Publicar automáticamente las tasas vigentes</label>
             <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><label for="ratesTime" style="margin:0">Hora local del grupo</label><input id="ratesTime" type="time" value="09:00" style="flex:0;width:150px"><button id="saveRates" type="button">Guardar horario</button></div>
-            <div class="small" id="ratesInfo">La zona horaria es America/Sao_Paulo. Se usa la tabla rates y el publicador existente; el Director IA no puede bloquear esta publicación.</div>
+            <div class="small" id="ratesInfo">Grupo: horario configurable (actualmente 09:00, America/Sao_Paulo). WhatsApp administrativo: horario histórico 10:15, America/Sao_Paulo. Ambos usan los mismos valores de la tabla rates y se registran de forma independiente.</div>
+            <div class="small" id="groupRatesStatus"></div>
+            <div class="small" id="adminRatesStatus"></div>
             <div class="status" id="ratesStatus"></div>
         </div></section>
         <div class="columns">
@@ -60,9 +62,12 @@ function render(data){renderPulse(data.pulse);for(const [key,id] of [["programad
     const rates=data.dailyRates;
     byId("ratesEnabled").checked=Boolean(rates?.enabled);
     byId("ratesTime").value=rates?.time||"09:00";
-    const latestRates=data.latestDailyRatesSchedule;
-    const latestLabel=latestRates?` Último intento: ${latestRates.estado} · ${date(latestRates.ejecutada_at||latestRates.programada_para)}${latestRates.result_code?` · ${latestRates.result_code}`:""}${latestRates.error?` · ${latestRates.error}`:""}.`:" Aún no hay intentos automáticos registrados.";
-    byId("ratesStatus").textContent=rates?`${rates.destinationName} · zona ${rates.timeZone} · la cola registra cada intento, éxito o fallo.${latestLabel}`:"No hay un grupo activo configurado para publicar tasas.";
+    const groupRates=data.latestDailyRatesSchedule;
+    const adminRates=data.latestDailyRatesAdminSchedule;
+    const scheduleLabel=item=>item?`${item.estado} · ${date(item.ejecutada_at||item.programada_para)}${item.result_code?` · ${item.result_code}`:""}${item.error?` · ${item.error}`:""}`:"Sin intentos registrados";
+    byId("groupRatesStatus").textContent=`Grupo ${rates?.destinationName||"(sin destino activo)"} · ${rates?.time||"09:00"} ${rates?.timeZone||"America/Sao_Paulo"} · ${scheduleLabel(groupRates)}`;
+    byId("adminRatesStatus").textContent=`WhatsApp administrativo · 10:15 America/Sao_Paulo · ${scheduleLabel(adminRates)}`;
+    byId("ratesStatus").textContent="Cada destino mantiene su propio intento y resultado; un fallo no bloquea al otro.";
     const latest=data.latestPublication;replace("latest",latest?[row(latest.titulo,`${date(latest.publicada_at)} · ${latest.canal} · ${latest.destino_ref}`)]:[],"Todavía no hay publicaciones ejecutadas.");
     const next=data.nextSchedule;replace("next",next?[row(`Idioma ${next.idioma}`,`${date(next.programada_para)} · el contenido se seleccionará al ejecutar`)]:[],"No hay publicaciones pendientes.");
     replace("events",data.events.map(e=>row(e.event_type,`${e.entity_type} #${e.entity_id} · ${date(e.ocurrido_at)} · ${e.actor}`)),"No hay eventos registrados.");

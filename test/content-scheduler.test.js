@@ -144,6 +144,22 @@ test("al ejecutar reenvía el activo programado al mismo Motor de Publicación",
     assert.deepEqual(input, { idioma: "es", idempotencyKey: "library-10-a", contentId: 10 });
 });
 
+test("el envío administrativo usa una ejecución independiente dentro del scheduler existente", async () => {
+    const calls = [];
+    const schedule = { scheduleId: 50, idioma: "es", idempotencyKey: "daily-rates-admin-2026-10-15", contentId: 12 };
+    await executeClaimedSchedule(schedule, {
+        pool: {},
+        publisher: { async publishSelectedContent() { assert.fail("El destino administrativo no debe publicarse al grupo"); } },
+        sendAdminRates: async (received, deps) => {
+            calls.push([received, deps]);
+            return { ok: true, code: "PUBLISHED", publication: null };
+        },
+        finishFn: async (received, result) => ({ received, result })
+    });
+    assert.equal(calls[0][0].scheduleId, 50);
+    assert.equal(calls[0][1].pool !== undefined, true);
+});
+
 test("migración 0028: activo opcional en programaciones y un único destino activo", () => {
     const migration = fs.readFileSync(path.join(__dirname, "..", "migrations", "0028_content_library_publishing.sql"), "utf8");
     assert.match(migration, /ADD COLUMN IF NOT EXISTS content_item_id BIGINT REFERENCES content_items\(id\)/);
