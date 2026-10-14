@@ -308,9 +308,9 @@ async function reconciliarBorradorRecuperacion(row, db, dependencies = {}) {
     if (JSON.stringify(content) === JSON.stringify(previous)) return row;
     const updated = await db.query(`
         UPDATE director_execution_packages SET contenido = $2::jsonb, actualizado_at = NOW()
-        WHERE id = $1 AND estado = 'BORRADOR' AND actualizado_at IS NOT DISTINCT FROM $3
+        WHERE id = $1 AND estado = 'BORRADOR' AND contenido = $3::jsonb
         RETURNING *
-    `, [row.id, JSON.stringify(content), row.actualizado_at]);
+    `, [row.id, JSON.stringify(content), JSON.stringify(previous)]);
     if (updated.rows[0]) return updated.rows[0];
     const latest = await db.query("SELECT * FROM director_execution_packages WHERE id = $1", [row.id]);
     return latest.rows[0] || row;
