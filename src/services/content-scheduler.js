@@ -3,6 +3,7 @@
 const pool = require("../../db");
 const contentPublisher = require("./content-publisher");
 const contentSelector = require("./content-selector");
+const dailyRates = require("./content-daily-rates");
 
 const SCHEDULE_STATES = Object.freeze({
     PENDING: "PENDIENTE",
@@ -250,6 +251,12 @@ async function executeClaimedSchedule(schedule, dependencies = {}) {
 
 async function runDueSchedulesOnce(dependencies = {}) {
     const db = dependencies.pool || pool;
+    const prepareRates = dependencies.ensureDailyRatesSchedule || dailyRates.ensureDailyRatesSchedule;
+    try {
+        await prepareRates({ db, now: dependencies.now || new Date() });
+    } catch (error) {
+        console.error("❌ Publicación diaria de tasas:", error.message);
+    }
     const claimed = await claimDueSchedules({ limit: dependencies.limit || 10 }, db);
     const results = [];
     for (const schedule of claimed) {

@@ -16,6 +16,12 @@
     <div class="status" id="status" role="status"></div>
     <section id="panel" hidden>
         <div class="grid"><article class="metric"><span>Programadas</span><strong id="scheduled">0</strong></article><article class="metric"><span>Ejecutadas</span><strong id="executed">0</strong></article><article class="metric"><span>Fallidas</span><strong id="failed">0</strong></article><article class="metric"><span>Canceladas</span><strong id="canceled">0</strong></article></div>
+        <section class="panel"><h2>Publicación diaria de tasas</h2><div class="content">
+            <label style="display:flex;align-items:center;gap:10px;margin-bottom:14px;color:var(--text)"><input id="ratesEnabled" type="checkbox" style="flex:0;width:auto"> Publicar automáticamente las tasas vigentes</label>
+            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><label for="ratesTime" style="margin:0">Hora local del grupo</label><input id="ratesTime" type="time" value="09:00" style="flex:0;width:150px"><button id="saveRates" type="button">Guardar horario</button></div>
+            <div class="small" id="ratesInfo">La zona horaria es America/Sao_Paulo. Se usa la tabla rates y el publicador existente; el Director IA no puede bloquear esta publicación.</div>
+            <div class="status" id="ratesStatus"></div>
+        </div></section>
         <div class="columns">
             <div>
                 <section class="panel"><h2>Pulso del grupo</h2><div class="content" id="pulse"></div></section>
@@ -51,6 +57,12 @@ function renderPulse(p){
     replace("pulseLeaves",p.bajasPorPublicacion.map(x=>row(`${x.bajas} ${x.bajas===1?"baja":"bajas"} · ${x.titulo}`,date(x.publicadaAt))),"Todavía no hay publicaciones en el grupo.");
 }
 function render(data){renderPulse(data.pulse);for(const [key,id] of [["programadas","scheduled"],["ejecutadas","executed"],["fallidas","failed"],["canceladas","canceled"]])byId(id).textContent=data.counts[key]??0;
+    const rates=data.dailyRates;
+    byId("ratesEnabled").checked=Boolean(rates?.enabled);
+    byId("ratesTime").value=rates?.time||"09:00";
+    const latestRates=data.latestDailyRatesSchedule;
+    const latestLabel=latestRates?` Último intento: ${latestRates.estado} · ${date(latestRates.ejecutada_at||latestRates.programada_para)}${latestRates.result_code?` · ${latestRates.result_code}`:""}${latestRates.error?` · ${latestRates.error}`:""}.`:" Aún no hay intentos automáticos registrados.";
+    byId("ratesStatus").textContent=rates?`${rates.destinationName} · zona ${rates.timeZone} · la cola registra cada intento, éxito o fallo.${latestLabel}`:"No hay un grupo activo configurado para publicar tasas.";
     const latest=data.latestPublication;replace("latest",latest?[row(latest.titulo,`${date(latest.publicada_at)} · ${latest.canal} · ${latest.destino_ref}`)]:[],"Todavía no hay publicaciones ejecutadas.");
     const next=data.nextSchedule;replace("next",next?[row(`Idioma ${next.idioma}`,`${date(next.programada_para)} · el contenido se seleccionará al ejecutar`)]:[],"No hay publicaciones pendientes.");
     replace("events",data.events.map(e=>row(e.event_type,`${e.entity_type} #${e.entity_id} · ${date(e.ocurrido_at)} · ${e.actor}`)),"No hay eventos registrados.");
@@ -60,6 +72,7 @@ function render(data){renderPulse(data.pulse);for(const [key,id] of [["programad
     replace("destinations",data.destinations.map(d=>row(d.nombre,`${d.tipo} · ${d.external_id} · ${d.activo?"Activo":"Inactivo"} · validado ${date(d.validado_at)}`)),"No hay destinos registrados.");
 }
 byId("connect").addEventListener("click",async()=>{const token=byId("token").value.trim();if(!token){byId("status").textContent="Introduce el token administrativo.";return}byId("status").textContent="Cargando estado...";try{const response=await fetch("/admin/content-operations",{headers:{Authorization:`Bearer ${token}`}});const data=await response.json();if(!response.ok)throw new Error(data.error||"No se pudo cargar el estado.");render(data.operations);byId("panel").hidden=false;byId("status").textContent=`Actualizado ${date(new Date())}.`;}catch(error){byId("panel").hidden=true;byId("status").textContent=error.message}});
+byId("saveRates").addEventListener("click",async()=>{const token=byId("token").value.trim();byId("ratesStatus").textContent="Guardando...";try{const response=await fetch("/admin/content-library/daily-rates",{method:"PUT",headers:{Authorization:`Bearer ${token}`,"Content-Type":"application/json"},body:JSON.stringify({enabled:byId("ratesEnabled").checked,time:byId("ratesTime").value})});const data=await response.json();if(!response.ok)throw new Error(data.error||"No se pudo guardar el horario.");byId("ratesStatus").textContent=`Guardado: ${data.settings.enabled?"activo":"pausado"} · ${data.settings.time} · ${data.settings.timeZone}.`; }catch(error){byId("ratesStatus").textContent=error.message}});
 </script>
 </body>
 </html>

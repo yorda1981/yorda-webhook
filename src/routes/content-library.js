@@ -5,6 +5,7 @@ const contentLibrary = require("../services/content-library");
 const contentSelector = require("../services/content-selector");
 const contentPublisher = require("../services/content-publisher");
 const contentScheduler = require("../services/content-scheduler");
+const dailyRates = require("../services/content-daily-rates");
 const contentDestinations = require("../services/content-destinations");
 const contentDirector = require("../services/director/content-director");
 const directorConfig = require("../services/director/director-config");
@@ -14,7 +15,7 @@ const { verificarToken } = require("../middleware/admin-auth");
 const { adminReadLimiter, adminWriteLimiter } = require("../middleware/admin-rate-limiters");
 
 function sendError(res, error) {
-    if (error?.code === "CONTENT_LIBRARY_VALIDATION" || error?.code === "CONTENT_SELECTOR_VALIDATION" || error?.code === "CONTENT_PUBLISHER_VALIDATION" || error?.code === "CONTENT_SCHEDULER_VALIDATION" || error?.code === "CONTENT_DESTINATION_VALIDATION" || error?.code === "CONTENT_DIRECTOR_VALIDATION") {
+    if (error?.code === "CONTENT_LIBRARY_VALIDATION" || error?.code === "CONTENT_SELECTOR_VALIDATION" || error?.code === "CONTENT_PUBLISHER_VALIDATION" || error?.code === "CONTENT_SCHEDULER_VALIDATION" || error?.code === "CONTENT_DESTINATION_VALIDATION" || error?.code === "CONTENT_DIRECTOR_VALIDATION" || error?.code === "CONTENT_DAILY_RATES_VALIDATION") {
         return res.status(400).json({ error: error.message });
     }
     if (error?.code === "CONTENT_DESTINATION_PROVIDER") return res.status(502).json({ error: error.message });
@@ -22,7 +23,7 @@ function sendError(res, error) {
     return res.status(500).json({ error: "No se pudo completar la operación." });
 }
 
-function createContentLibraryRouter({ service = contentLibrary, selector = contentSelector, publisher = contentPublisher, scheduler = contentScheduler, destinations = contentDestinations, director = contentDirector, config = directorConfig, decision = bestDecision, executionPackage = recoveryExecutionPackage } = {}) {
+function createContentLibraryRouter({ service = contentLibrary, selector = contentSelector, publisher = contentPublisher, scheduler = contentScheduler, destinations = contentDestinations, rates = dailyRates, director = contentDirector, config = directorConfig, decision = bestDecision, executionPackage = recoveryExecutionPackage } = {}) {
     const router = express.Router();
 
     router.get("/", adminReadLimiter, verificarToken, async (req, res) => {
@@ -217,6 +218,22 @@ function createContentLibraryRouter({ service = contentLibrary, selector = conte
             if (!result.schedule) return res.status(404).json({ error: "Programación no encontrada." });
             if (!result.canceled) return res.status(409).json(result);
             res.json(result);
+        } catch (error) {
+            sendError(res, error);
+        }
+    });
+
+    router.get("/daily-rates", adminReadLimiter, verificarToken, async (_req, res) => {
+        try {
+            res.json({ settings: await rates.getDailyRatesSettings() });
+        } catch (error) {
+            sendError(res, error);
+        }
+    });
+
+    router.put("/daily-rates", adminWriteLimiter, verificarToken, async (req, res) => {
+        try {
+            res.json({ settings: await rates.updateDailyRatesSettings(req.body || {}) });
         } catch (error) {
             sendError(res, error);
         }

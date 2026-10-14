@@ -64,6 +64,7 @@ async function selectContent(criteria = {}, db = pool) {
         ) cr ON TRUE
         WHERE ci.estado = 'ACTIVO'
           AND ${filter}
+          AND ci.origen_sistema IS NULL
         ORDER BY
           ci.prioridad DESC,
           ci.ultima_utilizacion_at ASC NULLS FIRST,
