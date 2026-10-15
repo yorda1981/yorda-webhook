@@ -2,6 +2,8 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const {
     renderDailyRates, localParts, ensureDailyRatesSchedule, ensureDailyAdminRatesSchedule, sendAdminRates, getDailyRatesSettings,
     updateDailyRatesSettings
@@ -28,7 +30,7 @@ test("fecha y hora del trabajo diario se interpretan en la zona del grupo", () =
     assert.deepEqual(localParts(new Date("2026-10-15T12:00:00Z")), { date: "2026-10-15", time: "09:00" });
 });
 
-test("programa una sola publicación diaria usando la cola persistente existente", async () => {
+test("recupera en la cola persistente si el scheduler despierta después de la hora", async () => {
     const calls = [];
     let insertParams;
     const db = {
@@ -56,27 +58,82 @@ test("programa una sola publicación diaria usando la cola persistente existente
             };
         }
     };
-    const result = await ensureDailyRatesSchedule({ db, now: new Date("2026-10-15T12:00:20Z") });
+    const result = await ensureDailyRatesSchedule({ db, now: new Date("2026-10-15T12:01:15Z") });
     assert.equal(result.status, "SCHEDULED");
     assert.equal(result.scheduleId, 48);
     assert.ok(calls.some(sql => /INSERT INTO content_schedules/.test(sql)));
     assert.ok(calls.some(sql => /INSERT INTO content_events/.test(sql)));
     assert.equal(new Date(insertParams[0]).toISOString(), "2026-10-15T12:00:00.000Z");
+    assert.equal(insertParams[1], "PENDIENTE");
+    assert.equal(insertParams[2], "daily-rates-2026-10-15");
 });
 
-test("no crea ni envía la programación diaria fuera del minuto configurado", async () => {
-    let connected = false;
-    const db = { async query(sql) {
-        if (/SELECT id, nombre, tasas_habilitadas/.test(sql)) return { rows: [{ id: "1", nombre: "Grupo", tasas_habilitadas: true, tasas_hora: "09:00" }] };
-        return { rows: [] };
-    },
-        async connect() { connected = true; return { async query(sql) {
-            if (/INSERT INTO content_schedules/.test(sql)) return { rows: [{ id: "49" }] };
-            return { rows: [] };
-        }, release() {} }; } };
-    const result = await ensureDailyRatesSchedule({ db, now: new Date("2026-10-15T12:01:00Z") });
-    assert.equal(result.status, "MISSED_WINDOW");
-    assert.equal(connected, true); // registra el fallo en la cola, sin invocar el publicador
+test("tasas idénticas pueden publicarse al día siguiente con una nueva clave diaria", async () => {
+    const insertedKeys = [];
+    let nextId = 60;
+    const db = {
+        async query(sql) {
+            if (/SELECT id, nombre, tasas_habilitadas/.test(sql)) return { rows: [{ id: "1", nombre: "Grupo", tasas_habilitadas: true, tasas_hora: "09:00" }] };
+            if (/SELECT id, estado FROM content_schedules/.test(sql)) return { rows: [] };
+            throw new Error(`Consulta inesperada: ${sql}`);
+        },
+        async connect() {
+            return { async query(sql, params) {
+                if (/SELECT \* FROM rates/.test(sql)) return { rows: [RATES] };
+                if (/SELECT id FROM content_items WHERE origen_sistema/.test(sql)) return { rows: [{ id: "12" }] };
+                if (/SELECT numero, cuerpo FROM content_revisions/.test(sql)) return { rows: [{ numero: 3, cuerpo: renderDailyRates(RATES) }] };
+                if (/INSERT INTO content_schedules/.test(sql)) { insertedKeys.push(params[2]); return { rows: [{ id: String(nextId++) }] }; }
+                return { rows: [] };
+            }, release() {} };
+        }
+    };
+    const first = await ensureDailyRatesSchedule({ db, now: new Date("2026-10-15T12:01:15Z") });
+    const second = await ensureDailyRatesSchedule({ db, now: new Date("2026-10-16T12:01:15Z") });
+    assert.equal(first.status, "SCHEDULED");
+    assert.equal(second.status, "SCHEDULED");
+    assert.deepEqual(insertedKeys, ["daily-rates-2026-10-15", "daily-rates-2026-10-16"]);
+});
+
+test("una publicación de tasas del mismo grupo y día no se programa dos veces", async () => {
+    let connects = 0;
+    const db = {
+        async query(sql) {
+            if (/SELECT id, nombre, tasas_habilitadas/.test(sql)) return { rows: [{ id: "1", nombre: "Grupo", tasas_habilitadas: true, tasas_hora: "09:00" }] };
+            if (/SELECT id, estado FROM content_schedules/.test(sql)) return { rows: [{ id: "62", estado: "PENDIENTE" }] };
+            throw new Error(`Consulta inesperada: ${sql}`);
+        },
+        async connect() { connects += 1; throw new Error("No debe abrir transacción al encontrar la clave diaria existente."); }
+    };
+    const result = await ensureDailyRatesSchedule({ db, now: new Date("2026-10-15T13:00:00Z") });
+    assert.deepEqual(result, { status: "ALREADY_SCHEDULED", scheduleId: 62, state: "PENDIENTE" });
+    assert.equal(connects, 0);
+});
+
+test("el destino administrativo recupera tarde de forma independiente y conserva su propia idempotencia", async () => {
+    const keys = [];
+    const db = {
+        async query(sql) {
+            if (/SELECT id, estado FROM content_schedules/.test(sql)) return { rows: [] };
+            throw new Error(`Consulta inesperada: ${sql}`);
+        },
+        async connect() {
+            return { async query(sql, params) {
+                if (/SELECT \* FROM rates/.test(sql)) return { rows: [RATES] };
+                if (/SELECT id FROM content_items WHERE origen_sistema/.test(sql)) return { rows: [{ id: "12" }] };
+                if (/SELECT numero, cuerpo FROM content_revisions/.test(sql)) return { rows: [{ numero: 3, cuerpo: renderDailyRates(RATES) }] };
+                if (/INSERT INTO content_schedules/.test(sql)) { keys.push(params[2]); return { rows: [{ id: "61" }] }; }
+                return { rows: [] };
+            }, release() {} };
+        }
+    };
+    const result = await ensureDailyAdminRatesSchedule({ db, now: new Date("2026-10-15T13:16:15Z") });
+    assert.equal(result.status, "SCHEDULED");
+    assert.deepEqual(keys, ["daily-rates-admin-2026-10-15"]);
+});
+
+test("la migración permite el origen system requerido por el activo diario de tasas", () => {
+    const migration = fs.readFileSync(path.join(__dirname, "..", "migrations", "0039_daily_rates_system_content_origin.sql"), "utf8");
+    assert.match(migration, /CHECK\s*\(origen IN \('operador', 'director', 'system'\)\)/i);
 });
 
 test("horario configurable valida y persiste la hora local", async () => {

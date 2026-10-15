@@ -4,7 +4,6 @@ const pool = require("../../db");
 const { ZONA_NEGOCIO } = require("../utils/timezone");
 
 const RATE_ITEM_KEY = "daily-remittance-rates";
-const SEND_WINDOW_MINUTES = 0;
 // Conserva el horario del flujo administrativo previo (13:15 UTC = 10:15 en
 // São Paulo) usando la cola persistente que ya procesa el grupo.
 const ADMIN_SEND_TIME = "10:15";
@@ -127,8 +126,9 @@ async function ensureDailyRatesContent(client, body) {
     return contentId;
 }
 
-// Crea una sola programación diaria en la cola ya existente. Si el proceso
-// perdió la ventana, registra el fallo y no envía una tasa fuera de horario.
+// Crea una sola programación diaria en la cola ya existente. Si un reinicio o
+// demora del scheduler ocurre después de la hora prevista, encola la publicación
+// vencida para recuperarla el mismo día. La clave por fecha impide duplicados.
 async function ensureDailyRatesSchedule({ db = pool, now = new Date() } = {}) {
     const config = await getDailyRatesSettings(db);
     if (!config?.enabled) return { status: config ? "DISABLED" : "NO_DESTINATION" };
@@ -154,21 +154,16 @@ async function ensureDailyRatesSchedule({ db = pool, now = new Date() } = {}) {
         let resultCode = null;
         let error = null;
         let contentId = null;
-        if (lateness > SEND_WINDOW_MINUTES) {
+        let body;
+        const ratesResult = await client.query("SELECT * FROM rates WHERE id = 1");
+        try {
+            body = renderDailyRates(ratesResult.rows[0]);
+        } catch (ratesError) {
             state = "FALLIDA";
-            resultCode = "MISSED_SEND_WINDOW";
-            error = `La ventana de publicación de ${config.time} (${config.timeZone}) pasó; no se envió fuera del horario.`;
-        } else {
-            try {
-                const ratesResult = await client.query("SELECT * FROM rates WHERE id = 1");
-                const body = renderDailyRates(ratesResult.rows[0]);
-                contentId = await ensureDailyRatesContent(client, body);
-            } catch (ratesError) {
-                state = "FALLIDA";
-                resultCode = "INVALID_RATES";
-                error = String(ratesError.message || ratesError).slice(0, 1000);
-            }
+            resultCode = "INVALID_RATES";
+            error = String(ratesError.message || ratesError).slice(0, 1000);
         }
+        if (body) contentId = await ensureDailyRatesContent(client, body);
         const secondsIntoMinute = now.getUTCSeconds() * 1000 + now.getUTCMilliseconds();
         const scheduledAt = new Date(now.getTime() - (nowMinutes - targetMinutes) * 60_000 - secondsIntoMinute);
         const inserted = await client.query(`
@@ -186,10 +181,11 @@ async function ensureDailyRatesSchedule({ db = pool, now = new Date() } = {}) {
                 VALUES ('SCHEDULE', $1, $2, 'system', $3::jsonb)
             `, [scheduleId, state === "PENDIENTE" ? "CONTENT_DAILY_RATES_SCHEDULED" : "CONTENT_DAILY_RATES_FAILED",
                 JSON.stringify({ date: local.date, time: config.time, timeZone: config.timeZone,
-                    destination: config.destinationName, contentId, resultCode, error })]);
+                    destination: config.destinationName, contentId, resultCode, error,
+                    recoveredAfterScheduledTime: lateness > 0, latenessMinutes: lateness })]);
         }
         await client.query("COMMIT");
-        return { status: state === "PENDIENTE" ? "SCHEDULED" : "MISSED_WINDOW", scheduleId, error };
+        return { status: state === "PENDIENTE" ? "SCHEDULED" : "INVALID_RATES", scheduleId, error };
     } catch (error) {
         try { await client.query("ROLLBACK"); } catch (_) {}
         throw error;
@@ -221,20 +217,16 @@ async function ensureDailyAdminRatesSchedule({ db = pool, now = new Date() } = {
         }
 
         let state = "PENDIENTE", resultCode = null, error = null, contentId = null;
-        if (nowMinutes - targetMinutes > SEND_WINDOW_MINUTES) {
+        const ratesResult = await client.query("SELECT * FROM rates WHERE id = 1");
+        let body;
+        try {
+            body = renderDailyRates(ratesResult.rows[0]);
+        } catch (ratesError) {
             state = "FALLIDA";
-            resultCode = "MISSED_SEND_WINDOW";
-            error = `La ventana administrativa de ${ADMIN_SEND_TIME} (${ZONA_NEGOCIO}) pasó; no se envió fuera del horario.`;
-        } else {
-            try {
-                const ratesResult = await client.query("SELECT * FROM rates WHERE id = 1");
-                contentId = await ensureDailyRatesContent(client, renderDailyRates(ratesResult.rows[0]));
-            } catch (ratesError) {
-                state = "FALLIDA";
-                resultCode = "INVALID_RATES";
-                error = String(ratesError.message || ratesError).slice(0, 1000);
-            }
+            resultCode = "INVALID_RATES";
+            error = String(ratesError.message || ratesError).slice(0, 1000);
         }
+        if (body) contentId = await ensureDailyRatesContent(client, body);
         const secondsIntoMinute = now.getUTCSeconds() * 1000 + now.getUTCMilliseconds();
         const scheduledAt = new Date(now.getTime() - (nowMinutes - targetMinutes) * 60_000 - secondsIntoMinute);
         const inserted = await client.query(`
@@ -252,10 +244,12 @@ async function ensureDailyAdminRatesSchedule({ db = pool, now = new Date() } = {
                 VALUES ('SCHEDULE', $1, $2, 'system', $3::jsonb)
             `, [scheduleId, state === "PENDIENTE" ? "CONTENT_DAILY_RATES_ADMIN_SCHEDULED" : "CONTENT_DAILY_RATES_ADMIN_FAILED",
                 JSON.stringify({ date: local.date, time: ADMIN_SEND_TIME, timeZone: ZONA_NEGOCIO,
-                    destination: "ADMIN_PHONE", contentId, resultCode, error })]);
+                    destination: "ADMIN_PHONE", contentId, resultCode, error,
+                    recoveredAfterScheduledTime: nowMinutes > targetMinutes,
+                    latenessMinutes: nowMinutes - targetMinutes })]);
         }
         await client.query("COMMIT");
-        return { status: state === "PENDIENTE" ? "SCHEDULED" : "MISSED_WINDOW", scheduleId, error };
+        return { status: state === "PENDIENTE" ? "SCHEDULED" : "INVALID_RATES", scheduleId, error };
     } catch (error) {
         try { await client.query("ROLLBACK"); } catch (_) {}
         throw error;
@@ -299,7 +293,7 @@ async function sendAdminRates(schedule, dependencies = {}) {
 }
 
 module.exports = {
-    RATE_ITEM_KEY, SEND_WINDOW_MINUTES, localParts, formatRate, renderDailyRates,
+    RATE_ITEM_KEY, localParts, formatRate, renderDailyRates,
     minutesOfDay, getDailyRatesSettings, updateDailyRatesSettings, ensureDailyRatesSchedule,
     ADMIN_SEND_TIME, ensureDailyAdminRatesSchedule, sendAdminRates
 };
