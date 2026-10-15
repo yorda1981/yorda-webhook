@@ -200,6 +200,58 @@
         <div class="decision-actions" id="decisionEmptyActions"><button id="decisionFirstRefreshButton" type="button">Buscar la mejor decisión ahora</button></div>
     </section>
 
+    <section class="panel execution-package" id="acquisitionPanel" hidden>
+        <div class="decision-head">
+            <div><div class="eyebrow">Captación y recurrencia</div><h2>Referidos y segunda remesa</h2></div>
+            <div class="package-badge" id="referralProgramState">DESACTIVADO</div>
+        </div>
+        <p class="intro">Los códigos y recompensas se registran de forma idempotente. Ningún pago o mensaje comercial sale automáticamente.</p>
+        <div class="package-summary">
+            <div class="package-stat"><strong id="refLinked">0</strong>referencias vinculadas</div>
+            <div class="package-stat"><strong id="refEligible">0</strong>recompensas elegibles</div>
+            <div class="package-stat"><strong id="refPaid">0</strong>liquidadas manualmente</div>
+            <div class="package-stat"><strong id="secondCandidatesCount">0</strong>candidatos a segunda remesa</div>
+        </div>
+        <div class="package-section">
+            <h3>Configuración del programa</h3>
+            <p class="helper">La recompensa es 1 % de la primera remesa válida. Completa los límites antes de activar. La activación requiere confirmación expresa y no autoriza pagos.</p>
+            <div class="config-grid">
+                <div><label for="refRewardPct">Recompensa (%)</label><input id="refRewardPct" type="number" min="1" max="1" step="0.01" value="1" disabled></div>
+                <div><label for="refMaxReward">Máximo por recompensa (R$)</label><input id="refMaxReward" type="number" min="0.01" step="0.01" placeholder="Pendiente de configurar"></div>
+                <div><label for="refCampaignLimit">Límite del programa (R$)</label><input id="refCampaignLimit" type="number" min="0.01" step="0.01" placeholder="Pendiente de configurar"></div>
+                <div><label for="refPeriodLimit">Límite mensual (R$)</label><input id="refPeriodLimit" type="number" min="0.01" step="0.01" placeholder="Pendiente de configurar"></div>
+            </div>
+            <label style="display:flex;align-items:center;gap:9px;margin-top:14px;text-transform:none;letter-spacing:0"><input id="referralProgramEnabled" type="checkbox" style="width:auto"> Activar el programa públicamente (requiere confirmación)</label>
+            <label style="display:flex;align-items:center;gap:9px;margin-top:10px;text-transform:none;letter-spacing:0"><input id="referralUnknownProfitAck" type="checkbox" style="width:auto"> Reconozco que los costos reales y el beneficio neto no están verificados</label>
+            <div class="draft-actions"><button id="referralConfigButton" type="button">Guardar configuración</button></div>
+        </div>
+        <div class="package-section">
+            <h3>Referencias y recompensas</h3>
+            <div class="package-clients" id="referralList"><div class="empty">Sin referencias registradas.</div></div>
+        </div>
+        <div class="package-section">
+            <h3>Clientes con señal de segunda remesa</h3>
+            <p class="helper" id="secondTransferRule"></p>
+            <div class="package-clients" id="secondTransferList"><div class="empty">Sin candidatos que cumplan los criterios actuales.</div></div>
+        </div>
+        <div class="package-section">
+            <h3>Código de un cliente</h3>
+            <p class="helper">Genera o consulta el código individual para entregarlo al cliente. El bot también responde al comando «mi código de referido» solo cuando el programa esté activo.</p>
+            <div class="publish-row"><input id="referralCodePhone" inputmode="numeric" placeholder="Teléfono del cliente"><button class="secondary" id="referralCodeButton" type="button">Consultar código</button></div>
+            <div class="helper" id="referralCodeResult" aria-live="polite"></div>
+        </div>
+        <div class="package-section">
+            <h3>Vinculación manual verificada</h3>
+            <p class="helper">Solo antes de la primera remesa, con evidencia registrada. No permite cambiar un referente existente.</p>
+            <div class="config-grid">
+                <div><label for="manualReferralPhone">Teléfono del referido</label><input id="manualReferralPhone" inputmode="numeric"></div>
+                <div><label for="manualReferralCode">Código del referente</label><input id="manualReferralCode" maxlength="10"></div>
+                <div style="grid-column:span 2"><label for="manualReferralEvidence">Evidencia revisada por el operador</label><input id="manualReferralEvidence" maxlength="500" placeholder="Qué verificaste para confirmar la recomendación"></div>
+            </div>
+            <div class="draft-actions"><button class="secondary" id="manualReferralButton" type="button">Registrar vinculación verificada</button></div>
+        </div>
+    </section>
+
     <details class="panel config" id="directorConfigPanel" hidden>
         <summary id="configSummary">Criterio comercial del Director</summary>
         <div class="helper" id="configCurrent"></div>
@@ -386,10 +438,12 @@
         byId("destinationsPanel").hidden = false;
         byId("directorPanel").hidden = false;
         byId("bestDecisionPanel").hidden = false;
+        byId("acquisitionPanel").hidden = false;
         byId("directorConfigPanel").hidden = false;
         loadBestDecision().catch(() => {});
         loadDirectorConfig().catch(() => {});
         loadDirectorStatus().catch(() => {});
+        loadAcquisition().catch(error => setStatus(`No se pudo cargar captación y recurrencia: ${error.message}`, "error"));
         await loadActiveDestination();
         renderList();
         setStatus("Biblioteca conectada.", "ok");
@@ -410,6 +464,125 @@
         if (!response.ok) throw new Error(data.error || "No se pudo completar la operación.");
         return data;
     }
+
+    const moneyBRL = value => value == null ? "Sin límite configurado" : `R$ ${Number(value).toFixed(2)}`;
+    function appendText(parent, tag, text, className = "") {
+        const element = document.createElement(tag);
+        element.textContent = text == null ? "" : String(text);
+        if (className) element.className = className;
+        parent.appendChild(element);
+        return element;
+    }
+    function referralActionButton(label, id, action, className = "secondary") {
+        const button = document.createElement("button");
+        button.type = "button"; button.className = className; button.textContent = label;
+        button.addEventListener("click", async () => {
+            button.disabled = true;
+            try {
+                let body = {};
+                if (action === "settle") {
+                    const method = window.prompt("Método de liquidación (se registra; no se ejecuta ningún pago):");
+                    if (!method) return;
+                    const reference = window.prompt("Referencia verificable de liquidación:");
+                    if (!reference) return;
+                    if (!window.confirm("Confirma que la recompensa ya fue liquidada manualmente y que esta referencia permite verificarlo.")) return;
+                    body = { method, reference };
+                } else if (action === "approve" && !window.confirm("Aprobar la recompensa para liquidación manual posterior? No se enviará dinero.")) return;
+                else if (action === "reject" && !window.confirm("Rechazar esta recompensa?")) return;
+                else if (action === "cancel" && !window.confirm("Cancelar el registro pendiente? No se podrá cambiar el referente posteriormente.")) return;
+                await requestJson(`/admin/content-library/acquisition/referrals/${id}/${action}`, { method:"POST", body:JSON.stringify(body) });
+                setStatus("Estado de la recompensa actualizado.", "ok");
+                await loadAcquisition();
+            } catch (error) { setStatus(error.message, "error"); }
+            finally { button.disabled = false; }
+        });
+        return button;
+    }
+    async function loadAcquisition() {
+        const data = await requestJson("/admin/content-library/acquisition");
+        const overview = data.overview || {};
+        const cfg = overview.config || {};
+        const summary = overview.referrals || {};
+        byId("referralProgramState").textContent = cfg.enabled ? "ACTIVO · SIN PAGOS AUTOMÁTICOS" : "DESACTIVADO";
+        byId("refLinked").textContent = summary.vinculados || 0;
+        byId("refEligible").textContent = summary.elegibles || 0;
+        byId("refPaid").textContent = summary.liquidadas || 0;
+        byId("secondCandidatesCount").textContent = overview.secondTransferCandidates || 0;
+        byId("refRewardPct").value = Number(cfg.reward_pct || 1);
+        byId("refMaxReward").value = cfg.max_reward_brl ?? "";
+        byId("refCampaignLimit").value = cfg.campaign_limit_brl ?? "";
+        byId("refPeriodLimit").value = cfg.period_limit_brl ?? "";
+        byId("referralProgramEnabled").checked = !!cfg.enabled;
+        byId("referralUnknownProfitAck").checked = !!cfg.unknown_net_profit_acknowledged;
+        byId("secondTransferRule").textContent = overview.secondTransferWindow || "";
+
+        const referralList = byId("referralList"); referralList.replaceChildren();
+        if (!(data.referrals || []).length) appendText(referralList, "div", "Sin referencias registradas.", "empty");
+        for (const row of data.referrals || []) {
+            const card = document.createElement("div"); card.className = "group-row";
+            const detail = document.createElement("div");
+            appendText(detail, "div", `${row.referrer_name || "Referente"} · ${row.referrer_phone} → ${row.referred_name || "Cliente referido"} · ${row.referred_phone}`, "group-name");
+            appendText(detail, "div", `${row.status} · ${row.first_operation_id ? `operación #${row.first_operation_id}` : "sin primera remesa"} · recompensa ${moneyBRL(row.reward_brl)} · ${row.status_reason || ""}`, "group-id");
+            card.appendChild(detail);
+            const actions = document.createElement("div"); actions.className = "draft-actions";
+            if (row.status === "ELEGIBLE") actions.append(referralActionButton("Aprobar", row.id, "approve"), referralActionButton("Rechazar", row.id, "reject"));
+            if (row.status === "PENDIENTE") actions.append(referralActionButton("Rechazar", row.id, "reject"), referralActionButton("Cancelar", row.id, "cancel"));
+            if (row.status === "REVISION") actions.append(referralActionButton("Revalidar límites", row.id, "validate"), referralActionButton("Rechazar", row.id, "reject"));
+            if (row.status === "APROBADA") actions.append(referralActionButton("Registrar liquidación manual", row.id, "settle"));
+            if (Number(row.first_amount_brl) > 0 && Number(row.reward_brl) >= 0) {
+                const gross = Number(row.first_amount_brl) * 0.05;
+                appendText(detail, "div", `Referencia económica: margen bruto 5 % R$ ${gross.toFixed(2)} − recompensa R$ ${Number(row.reward_brl).toFixed(2)} = R$ ${(gross - Number(row.reward_brl)).toFixed(2)} antes de otros costos. Beneficio neto: desconocido.`, "helper");
+            }
+            card.appendChild(actions); referralList.appendChild(card);
+        }
+
+        const secondList = byId("secondTransferList"); secondList.replaceChildren();
+        if (!(data.secondTransferCandidates || []).length) appendText(secondList, "div", "Sin candidatos que cumplan los criterios actuales.", "empty");
+        for (const row of data.secondTransferCandidates || []) {
+            const card = document.createElement("div"); card.className = "package-section";
+            appendText(card, "strong", `${row.nombre || "Cliente"} · ${row.phone}`);
+            appendText(card, "div", `Primera remesa: ${formatDate(row.first_completed_at)} · ${row.first_service_type || "servicio no indicado"} · señal posterior: ${row.has_quote_signal ? "cotización" : "cotización abierta con mensaje entrante"}`, "helper");
+            const message = document.createElement("textarea"); message.readOnly = true; message.value = row.preparedMessage || ""; message.setAttribute("aria-label", "Borrador para revisar; aún no enviado"); message.style.minHeight = "90px";
+            card.appendChild(message);
+            appendText(card, "div", "Borrador preparado, no enviado. Contactar requiere aprobación y la memoria comercial debe revalidarse justo antes del envío.", "helper");
+            secondList.appendChild(card);
+        }
+    }
+
+    byId("referralConfigButton").addEventListener("click", async () => {
+        const enabled = byId("referralProgramEnabled").checked;
+        if (enabled && !window.confirm("Confirmas activar el programa de referidos aun cuando el beneficio neto no está verificado? No se liquidará dinero ni se enviará una campaña.")) return;
+        const numberOrNull = id => byId(id).value.trim() === "" ? null : Number(byId(id).value);
+        try {
+            await requestJson("/admin/content-library/acquisition/config", { method:"POST", body:JSON.stringify({
+                enabled, rewardPct:1, maxRewardBRL:numberOrNull("refMaxReward"),
+                campaignLimitBRL:numberOrNull("refCampaignLimit"), periodLimitBRL:numberOrNull("refPeriodLimit"),
+                acknowledgeUnknownNetProfit:byId("referralUnknownProfitAck").checked
+            }) });
+            setStatus(enabled ? "Programa activado. Sin pagos automáticos ni campaña de difusión." : "Configuración guardada; programa desactivado.", "ok");
+            await loadAcquisition();
+        } catch (error) { setStatus(error.message, "error"); }
+    });
+    byId("referralCodeButton").addEventListener("click", async () => {
+        const phone = byId("referralCodePhone").value.trim();
+        try {
+            const data = await requestJson(`/admin/content-library/acquisition/customers/${encodeURIComponent(phone)}/code`, { method:"POST", body:"{}" });
+            byId("referralCodeResult").textContent = `Código: ${data.code}`;
+        } catch (error) { byId("referralCodeResult").textContent = error.message; }
+    });
+    byId("manualReferralButton").addEventListener("click", async () => {
+        const referredPhone = byId("manualReferralPhone").value.trim();
+        const code = byId("manualReferralCode").value.trim();
+        const evidenceNote = byId("manualReferralEvidence").value.trim();
+        if (!referredPhone || !code || !evidenceNote) return setStatus("Completa teléfono, código y evidencia revisada.", "error");
+        if (!window.confirm("Confirmas que verificaste esta recomendación antes de la primera remesa? No se permite asociar retroactivamente.")) return;
+        try {
+            await requestJson("/admin/content-library/acquisition/referrals/manual", { method:"POST", body:JSON.stringify({ referredPhone, code, evidenceNote }) });
+            byId("manualReferralEvidence").value = "";
+            setStatus("Vinculación manual auditada.", "ok");
+            await loadAcquisition();
+        } catch (error) { setStatus(error.message, "error"); }
+    });
 
     function renderGroups(groups) {
         const list = byId("groupList");

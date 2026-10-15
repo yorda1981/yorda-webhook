@@ -12,6 +12,7 @@ const directorConfig = require("../services/director/director-config");
 const bestDecision = require("../services/director/best-decision");
 const recoveryExecutionPackage = require("../services/director/recovery-execution-package");
 const directorAiUsage = require("../services/director/ai-usage");
+const customerAcquisition = require("../services/customer-acquisition");
 const { verificarToken } = require("../middleware/admin-auth");
 const { adminReadLimiter, adminWriteLimiter } = require("../middleware/admin-rate-limiters");
 
@@ -24,7 +25,7 @@ function sendError(res, error) {
     return res.status(500).json({ error: "No se pudo completar la operación." });
 }
 
-function createContentLibraryRouter({ service = contentLibrary, selector = contentSelector, publisher = contentPublisher, scheduler = contentScheduler, destinations = contentDestinations, rates = dailyRates, director = contentDirector, config = directorConfig, decision = bestDecision, executionPackage = recoveryExecutionPackage } = {}) {
+function createContentLibraryRouter({ service = contentLibrary, selector = contentSelector, publisher = contentPublisher, scheduler = contentScheduler, destinations = contentDestinations, rates = dailyRates, director = contentDirector, config = directorConfig, decision = bestDecision, executionPackage = recoveryExecutionPackage, acquisition = customerAcquisition } = {}) {
     const router = express.Router();
 
     router.get("/", adminReadLimiter, verificarToken, async (req, res) => {
@@ -65,6 +66,71 @@ function createContentLibraryRouter({ service = contentLibrary, selector = conte
                 : 200;
             res.status(status).json(result);
         } catch (error) {
+            sendError(res, error);
+        }
+    });
+
+    // Referidos y segunda remesa: análisis y control administrativo; no hay
+    // endpoints que envíen campañas o liquiden pagos automáticamente.
+    router.get("/acquisition", adminReadLimiter, verificarToken, async (_req, res) => {
+        try {
+            const [overview, referrals, secondTransferCandidates] = await Promise.all([
+                acquisition.getAcquisitionOverview(), acquisition.listReferrals({ limit: 100 }),
+                acquisition.getSecondTransferCandidates({ limit: 100 })
+            ]);
+            res.json({ overview, referrals, secondTransferCandidates });
+        } catch (error) { sendError(res, error); }
+    });
+
+    router.get("/acquisition/referrals", adminReadLimiter, verificarToken, async (req, res) => {
+        try { res.json({ referrals: await acquisition.listReferrals({ status: req.query.status || null, limit: req.query.limit }) }); }
+        catch (error) { sendError(res, error); }
+    });
+
+    router.post("/acquisition/referrals/manual", adminWriteLimiter, verificarToken, async (req, res) => {
+        try {
+            const result = await acquisition.recordReferralLink({
+                referredPhone: req.body?.referredPhone, code: req.body?.code,
+                evidence: "ADMIN_VERIFIED", evidenceNote: req.body?.evidenceNote, actor: "admin"
+            });
+            if (!result.linked) return res.status(409).json({ error: result.reason });
+            res.status(201).json({ referral: result });
+        } catch (error) { sendError(res, error); }
+    });
+
+    router.get("/acquisition/second-transfer-candidates", adminReadLimiter, verificarToken, async (req, res) => {
+        try { res.json({ candidates: await acquisition.getSecondTransferCandidates({ limit: req.query.limit }) }); }
+        catch (error) { sendError(res, error); }
+    });
+
+    router.post("/acquisition/customers/:phone/code", adminWriteLimiter, verificarToken, async (req, res) => {
+        try {
+            const program = await acquisition.getProgramConfig();
+            if (!program.enabled) return res.status(409).json({ error: "El programa de referidos está desactivado; no se generan códigos para compartir." });
+            const code = await acquisition.ensureReferralCode(req.params.phone);
+            if (!code) return res.status(404).json({ error: "Cliente no encontrado" });
+            res.json({ code });
+        } catch (error) { sendError(res, error); }
+    });
+
+    router.post("/acquisition/config", adminWriteLimiter, verificarToken, async (req, res) => {
+        try {
+            const saved = await acquisition.saveProgramConfig(req.body || {}, "admin");
+            res.json({ config: saved });
+        } catch (error) {
+            if (error.status) return res.status(error.status).json({ error: error.message, code: error.code });
+            sendError(res, error);
+        }
+    });
+
+    router.post("/acquisition/referrals/:id/:action", adminWriteLimiter, verificarToken, async (req, res) => {
+        try {
+            const referral = await acquisition.transitionReferral(req.params.id, req.params.action, {
+                actor: "admin", method: req.body?.method, reference: req.body?.reference
+            });
+            res.json({ referral });
+        } catch (error) {
+            if (error.status) return res.status(error.status).json({ error: error.message });
             sendError(res, error);
         }
     });

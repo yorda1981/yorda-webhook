@@ -8,7 +8,7 @@ require("dotenv").config();
 const pool = require("./db");
 
 const openaiService = require("./src/services/openai");
-const { obtenerTodos, obtenerCliente } = require("./src/services/customer-memory");
+const { guardarCliente, obtenerTodos, obtenerCliente } = require("./src/services/customer-memory");
 const { obtenerTodas, confirmarOperacion, completarOperacion, cancelarOperacion, obtenerEstadisticas } = require("./src/services/operations");
 const crm = require("./src/services/crm");
 const recuperacionService = require("./src/services/recuperacion");
@@ -38,6 +38,7 @@ const { createSchemaGate } = require("./src/services/schema-status");
 const communityPulse = require("./src/services/community-pulse");
 const contentDirector = require("./src/services/director/content-director");
 const bestDecision = require("./src/services/director/best-decision");
+const customerAcquisition = require("./src/services/customer-acquisition");
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -220,6 +221,12 @@ const schemaGate = createSchemaGate({
         communityPulse.startCommunityPulse();
         contentDirector.startContentDirector();
         bestDecision.startBestDecision();
+        const reconcileReferrals = () => conLockExclusivo("referralReconciliation", async () => {
+            const result = await customerAcquisition.reconcilePendingReferralAccruals();
+            if (result.processed) log("REFERRAL_RECONCILIATION", result);
+        }).catch(error => console.error("⚠️ Reconciliación de referidos:", error.message));
+        setTimeout(reconcileReferrals, 60 * 1000).unref?.();
+        setInterval(reconcileReferrals, 15 * 60 * 1000).unref?.();
     }
 });
 app.use("/admin/content-operations", createContentOperationsRouter({
@@ -343,6 +350,20 @@ app.post("/webhook", verificarSecretoWebhook, webhookLimiter, validarPayloadWebh
         }
 
         if (!textMessage) return;
+
+        // Referidos: solo comandos explícitos solicitados por el cliente o
+        // códigos declarados expresamente. Nunca se infiere una recomendación
+        // mediante IA ni se interrumpe el flujo de pagos/operaciones.
+        try {
+            const referralMessage = await customerAcquisition.processReferralCodeMessage(phoneRaw, textMessage);
+            if (referralMessage.handled) {
+                await guardarCliente({ phone: phoneRaw, nombre: pushName });
+                await enviarSeguro(phoneRaw, referralMessage.message);
+                return;
+            }
+        } catch (error) {
+            console.error("⚠️ No se pudo procesar el código de referido:", error.message);
+        }
 
         // Pedido generado por la calculadora web (entrega o transferencia) — se procesa aparte, sin pasar por GPT.
         if (esPedidoWeb(textMessage)) {

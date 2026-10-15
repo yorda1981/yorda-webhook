@@ -103,6 +103,15 @@ async function completarOperacion(id, operadorId) {
         }
         console.log(`🏁 Operación COMPLETADA: ${id}`);
         log("OPERATION_COMPLETED", { operationId: id });
+        // Seguimiento comercial independiente: un error de la recompensa no
+        // puede revertir ni interrumpir una remesa ya completada.
+        try {
+            const acquisition = require("./customer-acquisition");
+            const result = await acquisition.onOperationCompleted(operacion);
+            if (result.processed) log("REFERRAL_FIRST_REMITTANCE_VALIDATED", { referralId: result.referralId, status: result.status, operationId: operacion.id });
+        } catch (error) {
+            console.error("⚠️ No se pudo actualizar la elegibilidad de referido:", error.message);
+        }
         return operacion;
     } catch (err) {
         if (err instanceof operatorBalances.SaldoInsuficienteError) throw err;

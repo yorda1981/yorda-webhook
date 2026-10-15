@@ -6,6 +6,7 @@ const llmGateway = require("./llm");
 const executionPackages = require("./recovery-execution-package");
 const promotionCalculator = require("./promotion-calculator");
 const referralEconomics = require("./referral-economics");
+const customerAcquisition = require("../customer-acquisition");
 const { conLockExclusivo } = require("../job-lock");
 
 const REVIEW_INTERVAL_MS = 60 * 60 * 1000;
@@ -134,7 +135,11 @@ async function collectCommercialSnapshot(db = pool) {
             NOW() AS capturado_at
     `);
     const row = result.rows[0] || {};
-    const escenariosPromocion = await promotionCalculator.getCurrentPromotionScenarios(db);
+    const [escenariosPromocion, referralSummary, secondTransferCandidates] = await Promise.all([
+        promotionCalculator.getCurrentPromotionScenarios(db),
+        customerAcquisition.getReferralSummary(db),
+        customerAcquisition.getSecondTransferSummary(db)
+    ]);
     const referral = referralEconomics.evaluateReferralEconomics({
         costsKnown: false, vipBenefitsKnown: !escenariosPromocion.beneficiosExistentesConCostoDesconocido
     });
@@ -168,6 +173,13 @@ async function collectCommercialSnapshot(db = pool) {
             clientesFrecuentesSinOperacionActiva: n(row.clientes_frecuentes_sin_operacion_activa),
             remesasConImporte30d: n(row.remesas_con_importe_30d)
         },
+        referralSummary: {
+            vinculados: n(referralSummary.vinculados), esperandoPrimeraRemesa: n(referralSummary.esperando_primera_remesa),
+            elegibles: n(referralSummary.elegibles), aprobadas: n(referralSummary.aprobadas),
+            liquidadas: n(referralSummary.liquidadas), enRevision: n(referralSummary.en_revision),
+            costoComprometidoBRL: n(referralSummary.costo_comprometido_brl)
+        },
+        secondTransferCandidates,
         contactOutcomes: {
             clientesContactados30d: n(row.clientes_contactados_30d),
             enviados30d: n(row.contactos_comerciales_enviados_30d),
@@ -223,7 +235,9 @@ function snapshotFacts(snapshot) {
         { id: "F20", dato: `A Recuperación: ${snapshot.cotizacionesSinCierre48h} cotizaciones sin cierre en 48 h y ${snapshot.abandonos7d} estados CRM abandono en 7 días. Conteos pueden solaparse; elegibilidad comercial individual no consultada en este resumen.` },
         { id: "F21", dato: `B Segunda transferencia: ${snapshot.funnel?.primerasRemesas30d || 0} primeras remesas observadas en 30 días; no hay cohorte de maduración/frecuencia suficiente para predecir recurrencia ni lista elegible verificada.` },
         { id: "F22", dato: `C Referidos: ${snapshot.clientesConRemesa30d} clientes completaron remesas en 30 días; no hay indicador que verifique quién acepta recomendar. Cifra es universo observado, no destinatarios elegibles.` },
-        { id: "F23", dato: `D Conversión/proceso: ${snapshot.funnel?.cotizacionesAbiertas30d || 0} clientes están hoy cotizado/esperando PIX, de ellos ${snapshot.funnel?.abandonosPix30d || 0} esperando PIX; ${snapshot.operacionesPendientes48h} operaciones recientes siguen pendientes. Estados no prueban fricción ni permiten atribuir una causa.` }
+        { id: "F23", dato: `D Conversión/proceso: ${snapshot.funnel?.cotizacionesAbiertas30d || 0} clientes están hoy cotizado/esperando PIX, de ellos ${snapshot.funnel?.abandonosPix30d || 0} esperando PIX; ${snapshot.operacionesPendientes48h} operaciones recientes siguen pendientes. Estados no prueban fricción ni permiten atribuir una causa.` },
+        { id: "F24", dato: `Referidos operativos: ${snapshot.referralSummary?.vinculados || 0} vinculados; ${snapshot.referralSummary?.esperandoPrimeraRemesa || 0} esperan primera remesa; ${snapshot.referralSummary?.elegibles || 0} elegibles; ${snapshot.referralSummary?.aprobadas || 0} aprobados; ${snapshot.referralSummary?.liquidadas || 0} liquidados; ${snapshot.referralSummary?.enRevision || 0} en revisión. Compromisos registrados: BRL ${snapshot.referralSummary?.costoComprometidoBRL || 0}; no representa ganancia neta. Programa sujeto a autorización.` },
+        { id: "F25", dato: `Segunda remesa: ${snapshot.secondTransferCandidates || 0} candidatos actuales cumplen ventana 7–45 días, exactamente una remesa completada e interés posterior verificable; se excluyen opt-out, bloqueo, pausa, operación activa y contacto comercial de los últimos 14 días. Candidato no equivale a autorización de contacto ni a conversión.` }
     ];
 }
 

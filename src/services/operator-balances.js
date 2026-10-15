@@ -149,6 +149,11 @@ async function reintegrarPorReversion(operationId, nuevoEstado = "confirmada") {
         );
         await client.query("UPDATE operations SET status = $2, completed_at = NULL WHERE id = $1", [operationId, nuevoEstado]);
         await client.query("COMMIT");
+        try {
+            await require("./customer-acquisition").reviewReversedOperation(operationId);
+        } catch (error) {
+            console.error("⚠️ No se pudo marcar para revisión la recompensa asociada a una operación revertida:", error.message);
+        }
         return { reintegrado: cantidad, moneda, saldo: posterior };
     } catch (e) {
         await client.query("ROLLBACK");
