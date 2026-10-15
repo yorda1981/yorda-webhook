@@ -335,7 +335,7 @@ app.post("/webhook", verificarSecretoWebhook, webhookLimiter, validarPayloadWebh
             body.type === "document"        ||
             body.image || body.document;
 
-        const textMessage = body.text?.message || body.body || body.caption || "";
+        let textMessage = body.text?.message || body.body || body.caption || "";
 
         if (esMultimedia) {
             const mediaUrl = body.image?.imageUrl || body.document?.documentUrl || null;
@@ -359,7 +359,10 @@ app.post("/webhook", verificarSecretoWebhook, webhookLimiter, validarPayloadWebh
             if (referralMessage.handled) {
                 await guardarCliente({ phone: phoneRaw, nombre: pushName });
                 await enviarSeguro(phoneRaw, referralMessage.message);
-                return;
+                if (!referralMessage.continueText) return;
+                // El código queda registrado, pero el resto de la solicitud del
+                // cliente continúa por el flujo normal de cotización/operación.
+                textMessage = referralMessage.continueText;
             }
         } catch (error) {
             console.error("⚠️ No se pudo procesar el código de referido:", error.message);

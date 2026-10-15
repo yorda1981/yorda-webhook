@@ -106,10 +106,12 @@ function createContentLibraryRouter({ service = contentLibrary, selector = conte
     router.post("/acquisition/customers/:phone/code", adminWriteLimiter, verificarToken, async (req, res) => {
         try {
             const program = await acquisition.getProgramConfig();
-            if (!program.enabled) return res.status(409).json({ error: "El programa de referidos está desactivado; no se generan códigos para compartir." });
+            if (!program.enabled || !program.expires_at || new Date(program.expires_at).getTime() <= Date.now()) return res.status(409).json({ error: "El programa de referidos está desactivado o vencido; no se generan enlaces para compartir." });
             const code = await acquisition.ensureReferralCode(req.params.phone);
             if (!code) return res.status(404).json({ error: "Cliente no encontrado" });
-            res.json({ code });
+            const shareLink = acquisition.referralShareLink(code, await acquisition.getOfficialWhatsAppNumber());
+            await acquisition.recordLinkGenerated(req.params.phone, Boolean(shareLink));
+            res.json({ code, shareLink, shareLinkAvailable: Boolean(shareLink) });
         } catch (error) { sendError(res, error); }
     });
 

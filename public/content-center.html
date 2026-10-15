@@ -205,25 +205,40 @@
             <div><div class="eyebrow">Captación y recurrencia</div><h2>Referidos y segunda remesa</h2></div>
             <div class="package-badge" id="referralProgramState">DESACTIVADO</div>
         </div>
-        <p class="intro">Los códigos y recompensas se registran de forma idempotente. Ningún pago o mensaje comercial sale automáticamente.</p>
+        <p class="intro">Piloto preparado, pero desactivado. El compromiso se reserva antes de vincular cada referido; ningún pago o mensaje comercial sale automáticamente.</p>
         <div class="package-summary">
             <div class="package-stat"><strong id="refLinked">0</strong>referencias vinculadas</div>
+            <div class="package-stat"><strong id="refPending">0</strong>pendientes de primera remesa</div>
             <div class="package-stat"><strong id="refEligible">0</strong>recompensas elegibles</div>
+            <div class="package-stat"><strong id="refApproved">0</strong>aprobadas para liquidación</div>
             <div class="package-stat"><strong id="refPaid">0</strong>liquidadas manualmente</div>
             <div class="package-stat"><strong id="secondCandidatesCount">0</strong>candidatos a segunda remesa</div>
+            <div class="package-stat"><strong id="refBudgetCommitted">R$0,00</strong>presupuesto comprometido</div>
+            <div class="package-stat"><strong id="refBudgetAvailable">R$200,00</strong>presupuesto disponible</div>
+            <div class="package-stat"><strong id="refFirstVolume">R$0,00</strong>volumen de primeras remesas</div>
+            <div class="package-stat"><strong id="refGrossMargin">R$0,00</strong>margen bruto de referencia (5 %)</div>
+            <div class="package-stat"><strong id="refLinkRequests">0</strong>enlaces generados (no confirma que se compartieron)</div>
         </div>
         <div class="package-section">
             <h3>Configuración del programa</h3>
-            <p class="helper">La recompensa es 1 % de la primera remesa válida. Completa los límites antes de activar. La activación requiere confirmación expresa y no autoriza pagos.</p>
+            <p class="helper">Piloto fijo: 1 % de la primera remesa válida (máximo R$20), presupuesto total estricto R$200, duración de 30 días desde una activación explícita. Las obligaciones se reservan al registrar la referencia. La liquidación siempre es manual.</p>
             <div class="config-grid">
                 <div><label for="refRewardPct">Recompensa (%)</label><input id="refRewardPct" type="number" min="1" max="1" step="0.01" value="1" disabled></div>
-                <div><label for="refMaxReward">Máximo por recompensa (R$)</label><input id="refMaxReward" type="number" min="0.01" step="0.01" placeholder="Pendiente de configurar"></div>
-                <div><label for="refCampaignLimit">Límite del programa (R$)</label><input id="refCampaignLimit" type="number" min="0.01" step="0.01" placeholder="Pendiente de configurar"></div>
-                <div><label for="refPeriodLimit">Límite mensual (R$)</label><input id="refPeriodLimit" type="number" min="0.01" step="0.01" placeholder="Pendiente de configurar"></div>
+                <div><label for="refMaxReward">Máximo por referido (R$)</label><input id="refMaxReward" type="number" value="20" disabled></div>
+                <div><label for="refCampaignLimit">Presupuesto total (R$)</label><input id="refCampaignLimit" type="number" value="200" disabled></div>
+                <div><label>Duración</label><input value="30 días · sin renovación automática" disabled></div>
             </div>
-            <label style="display:flex;align-items:center;gap:9px;margin-top:14px;text-transform:none;letter-spacing:0"><input id="referralProgramEnabled" type="checkbox" style="width:auto"> Activar el programa públicamente (requiere confirmación)</label>
+            <div class="helper" id="referralPilotDates">Sin fecha de activación ni vencimiento.</div>
+            <label style="display:flex;align-items:center;gap:9px;margin-top:14px;text-transform:none;letter-spacing:0"><input id="referralProgramEnabled" type="checkbox" style="width:auto"> Activar el piloto públicamente (acción administrativa explícita de 30 días)</label>
             <label style="display:flex;align-items:center;gap:9px;margin-top:10px;text-transform:none;letter-spacing:0"><input id="referralUnknownProfitAck" type="checkbox" style="width:auto"> Reconozco que los costos reales y el beneficio neto no están verificados</label>
             <div class="draft-actions"><button id="referralConfigButton" type="button">Guardar configuración</button></div>
+        </div>
+        <div class="package-section">
+            <h3>Propuesta de lanzamiento · borrador no enviado</h3>
+            <p class="helper" id="referralLaunchAudience"></p>
+            <p class="helper" id="referralLaunchTerms"></p>
+            <textarea id="referralLaunchDraft" readonly style="min-height:100px" aria-label="Borrador comercial no enviado"></textarea>
+            <p class="helper">Canal: WhatsApp individual mediante enlace personal. Métricas: referidos vinculados, primeras remesas confirmadas, volumen y compromisos dentro del presupuesto. Revisión semanal por el operador; sin contactos automáticos ni publicaciones en grupo.</p>
         </div>
         <div class="package-section">
             <h3>Referencias y recompensas</h3>
@@ -236,7 +251,7 @@
         </div>
         <div class="package-section">
             <h3>Código de un cliente</h3>
-            <p class="helper">Genera o consulta el código individual para entregarlo al cliente. El bot también responde al comando «mi código de referido» solo cuando el programa esté activo.</p>
+            <p class="helper">Consulta el enlace personal de un cliente que ya completó una remesa. El bot lo comparte al cliente elegible que solicite «mi código de referido» cuando el piloto esté activo.</p>
             <div class="publish-row"><input id="referralCodePhone" inputmode="numeric" placeholder="Teléfono del cliente"><button class="secondary" id="referralCodeButton" type="button">Consultar código</button></div>
             <div class="helper" id="referralCodeResult" aria-live="polite"></div>
         </div>
@@ -503,17 +518,33 @@
         const overview = data.overview || {};
         const cfg = overview.config || {};
         const summary = overview.referrals || {};
-        byId("referralProgramState").textContent = cfg.enabled ? "ACTIVO · SIN PAGOS AUTOMÁTICOS" : "DESACTIVADO";
+        byId("referralProgramState").textContent = cfg.program_status || (cfg.enabled ? "ACTIVO · SIN PAGOS AUTOMÁTICOS" : "DESACTIVADO");
         byId("refLinked").textContent = summary.vinculados || 0;
+        byId("refPending").textContent = summary.esperando_primera_remesa || 0;
         byId("refEligible").textContent = summary.elegibles || 0;
+        byId("refApproved").textContent = summary.aprobadas || 0;
         byId("refPaid").textContent = summary.liquidadas || 0;
         byId("secondCandidatesCount").textContent = overview.secondTransferCandidates || 0;
+        const economics = overview.referralEconomics || {};
+        const metrics = overview.referralMetrics || {};
+        byId("refBudgetCommitted").textContent = moneyBRL(economics.committedBRL);
+        byId("refBudgetAvailable").textContent = moneyBRL(economics.availableBRL);
+        byId("refFirstVolume").textContent = moneyBRL(metrics.firstRemittanceVolumeBRL);
+        byId("refGrossMargin").textContent = moneyBRL(metrics.grossMarginReferenceBRL);
+        byId("refLinkRequests").textContent = metrics.linksRequested || 0;
         byId("refRewardPct").value = Number(cfg.reward_pct || 1);
-        byId("refMaxReward").value = cfg.max_reward_brl ?? "";
-        byId("refCampaignLimit").value = cfg.campaign_limit_brl ?? "";
-        byId("refPeriodLimit").value = cfg.period_limit_brl ?? "";
+        byId("refMaxReward").value = Number(cfg.max_reward_brl || 20);
+        byId("refCampaignLimit").value = Number(cfg.campaign_limit_brl || 200);
         byId("referralProgramEnabled").checked = !!cfg.enabled;
         byId("referralUnknownProfitAck").checked = !!cfg.unknown_net_profit_acknowledged;
+        window.referralProgramConfig = cfg;
+        byId("referralPilotDates").textContent = cfg.enabled_at
+            ? `Inicio: ${formatDate(cfg.enabled_at)} · vencimiento: ${cfg.expires_at ? formatDate(cfg.expires_at) : "no registrado"} · renovación nunca automática.`
+            : "Sin fecha de activación ni vencimiento. El piloto permanece desactivado.";
+        const proposal = overview.launchProposal || {};
+        byId("referralLaunchAudience").textContent = `Público elegible estimado: ${proposal.audienceCount || 0}. ${proposal.audience || ""} Propuesta: ${proposal.status || "BORRADOR_NO_ENVIADO"}.`;
+        byId("referralLaunchTerms").textContent = proposal.terms || "";
+        byId("referralLaunchDraft").value = proposal.draft || "";
         byId("secondTransferRule").textContent = overview.secondTransferWindow || "";
 
         const referralList = byId("referralList"); referralList.replaceChildren();
@@ -552,11 +583,16 @@
     byId("referralConfigButton").addEventListener("click", async () => {
         const enabled = byId("referralProgramEnabled").checked;
         if (enabled && !window.confirm("Confirmas activar el programa de referidos aun cuando el beneficio neto no está verificado? No se liquidará dinero ni se enviará una campaña.")) return;
-        const numberOrNull = id => byId(id).value.trim() === "" ? null : Number(byId(id).value);
+        const expired = window.referralProgramConfig?.expires_at && new Date(window.referralProgramConfig.expires_at).getTime() <= Date.now();
+        let renewPilot = false;
+        if (enabled && expired) {
+            renewPilot = window.confirm("El piloto venció. ¿Confirmas iniciar explícitamente otro período de 30 días, sin renovación automática?");
+            if (!renewPilot) return;
+        }
         try {
             await requestJson("/admin/content-library/acquisition/config", { method:"POST", body:JSON.stringify({
-                enabled, rewardPct:1, maxRewardBRL:numberOrNull("refMaxReward"),
-                campaignLimitBRL:numberOrNull("refCampaignLimit"), periodLimitBRL:numberOrNull("refPeriodLimit"),
+                enabled, rewardPct:1, maxRewardBRL:20,
+                campaignLimitBRL:200, periodLimitBRL:200, renewPilot,
                 acknowledgeUnknownNetProfit:byId("referralUnknownProfitAck").checked
             }) });
             setStatus(enabled ? "Programa activado. Sin pagos automáticos ni campaña de difusión." : "Configuración guardada; programa desactivado.", "ok");
@@ -567,7 +603,9 @@
         const phone = byId("referralCodePhone").value.trim();
         try {
             const data = await requestJson(`/admin/content-library/acquisition/customers/${encodeURIComponent(phone)}/code`, { method:"POST", body:"{}" });
-            byId("referralCodeResult").textContent = `Código: ${data.code}`;
+            byId("referralCodeResult").textContent = data.shareLink
+                ? `Código: ${data.code} · Enlace: ${data.shareLink}`
+                : `Código: ${data.code} · No se pudo verificar el número oficial; no hay enlace disponible.`;
         } catch (error) { byId("referralCodeResult").textContent = error.message; }
     });
     byId("manualReferralButton").addEventListener("click", async () => {

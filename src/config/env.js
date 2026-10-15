@@ -5,6 +5,9 @@ module.exports = {
     ZAPI_INSTANCE:      process.env.ZAPI_INSTANCE,
     ZAPI_TOKEN:         process.env.ZAPI_TOKEN,
     ZAPI_CLIENT_TOKEN:  process.env.ZAPI_CLIENT_TOKEN,
+    // Opcional; si no se define, el número público se obtiene del dispositivo
+    // Z-API conectado (nunca se sustituye por ADMIN_PHONE).
+    WHATSAPP_OFFICIAL_NUMBER: process.env.WHATSAPP_OFFICIAL_NUMBER || null,
     PIX_KEY:            process.env.PIX_KEY,
     PIX_HOLDER_NAME:    process.env.PIX_HOLDER_NAME,
     PIX_BANK:           process.env.PIX_BANK,
