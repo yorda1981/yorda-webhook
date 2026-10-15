@@ -263,10 +263,10 @@ async function sendAdminRates(schedule, dependencies = {}) {
     const started = async () => db.query(`
         INSERT INTO content_events (entity_type, entity_id, event_type, actor, datos)
         VALUES ('SCHEDULE', $1, 'CONTENT_DAILY_RATES_ADMIN_STARTED', 'system',
-                jsonb_build_object('destination', 'ADMIN_PHONE', 'contentId', $2))
+                jsonb_build_object('destination', 'ADMIN_PHONE', 'contentId', $2::bigint))
     `, [schedule.scheduleId, schedule.contentId]);
-    await started();
     try {
+        await started();
         const [{ getAdminPhone, enviarSeguro }, revision] = await Promise.all([
             Promise.resolve(dependencies.transport || require("../flows/shared")),
             db.query(`SELECT cuerpo FROM content_revisions WHERE content_item_id = $1 ORDER BY numero DESC LIMIT 1`, [schedule.contentId])
@@ -279,7 +279,7 @@ async function sendAdminRates(schedule, dependencies = {}) {
         await db.query(`
             INSERT INTO content_events (entity_type, entity_id, event_type, actor, datos)
             VALUES ('SCHEDULE', $1, 'CONTENT_DAILY_RATES_ADMIN_SENT', 'system',
-                    jsonb_build_object('destination', 'ADMIN_PHONE', 'contentId', $2, 'resultCode', 'SENT'))
+                    jsonb_build_object('destination', 'ADMIN_PHONE', 'contentId', $2::bigint, 'resultCode', 'SENT'))
         `, [schedule.scheduleId, schedule.contentId]);
         return { ok: true, code: "PUBLISHED", publication: null };
     } catch (error) {

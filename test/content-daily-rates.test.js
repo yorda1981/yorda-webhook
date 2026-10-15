@@ -195,7 +195,27 @@ test("el envío administrativo usa el cuerpo vigente y registra éxito o fallo s
     } });
     assert.equal(success.code, "PUBLISHED");
     assert.ok(calls.some(call => /CONTENT_DAILY_RATES_ADMIN_SENT/.test(call.sql)));
+    assert.ok(calls.some(call => /CONTENT_DAILY_RATES_ADMIN_STARTED/.test(call.sql) && /\$2::bigint/.test(call.sql)));
+    assert.ok(calls.some(call => /CONTENT_DAILY_RATES_ADMIN_SENT/.test(call.sql) && /\$2::bigint/.test(call.sql)));
     const failure = await sendAdminRates(schedule, { pool: db, adminPhone: "5511999", send: async () => false });
     assert.equal(failure.code, "SEND_FAILED");
     assert.ok(calls.some(call => /CONTENT_DAILY_RATES_ADMIN_SEND_FAILED/.test(call.sql)));
+});
+
+test("un fallo registrando el inicio queda trazado y no llama a Z-API", async () => {
+    const calls = [];
+    let sent = false;
+    const db = { async query(sql) {
+        calls.push(String(sql));
+        if (/CONTENT_DAILY_RATES_ADMIN_STARTED/.test(sql)) throw new Error("audit write failed");
+        return { rows: [] };
+    } };
+    const result = await sendAdminRates({ scheduleId: 52, contentId: 12 }, {
+        pool: db,
+        adminPhone: "5511999",
+        send: async () => { sent = true; return true; }
+    });
+    assert.equal(result.ok, false);
+    assert.equal(sent, false);
+    assert.ok(calls.some(sql => /CONTENT_DAILY_RATES_ADMIN_SEND_FAILED/.test(sql)));
 });
