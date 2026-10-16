@@ -15,14 +15,22 @@ const RATES = {
     updated_at: "2026-10-14T12:00:00Z"
 };
 
-test("las tasas se preparan exclusivamente con los valores reales recibidos", () => {
+test("renderiza el formato corto con las tasas reales y omite la antigüedad", () => {
     const body = renderDailyRates(RATES);
-    assert.match(body, /CUP 160/);
-    assert.match(body, /USD 5,5/);
-    assert.match(body, /USD 5,4/);
-    assert.match(body, /MLC 5/);
-    assert.match(body, /Efectivo en CUP: R\$ 1 = CUP 120/);
-    assert.match(body, /Escríbele al bot de YORDA por privado/);
+    assert.match(body, /🇨🇺 \*YORDA \| TASAS DE HOY\* 🇧🇷/);
+    assert.match(body, /🇧🇷 R\$1 = 🇨🇺 CUP/);
+    assert.match(body, /• Menos de R\$100 → 160/);
+    assert.match(body, /• Desde R\$100 → 178/);
+    assert.match(body, /• Desde R\$500 → 180/);
+    assert.match(body, /• Desde R\$1\.000 → 182/);
+    assert.match(body, /💵 USD tarjeta: 5,5 \/ prepago: 5,4/);
+    assert.match(body, /🪙 MLC: 5/);
+    assert.match(body, /🏠 CUP efectivo: 120/);
+    assert.match(body, /📲 \*¿Quieres enviar dinero\? Escríbenos por privado\.\*/);
+    assert.doesNotMatch(body, /Actualizadas|actualizad|días? sin cambio|sin cambios/i);
+    assert.doesNotMatch(body, /2026/);
+    assert.match(renderDailyRates({ ...RATES, usd2: 5.5 }), /💵 USD tarjeta \/ prepago: 5,5/);
+    assert.doesNotThrow(() => renderDailyRates({ ...RATES, updated_at: null }));
     assert.throws(() => renderDailyRates({ ...RATES, brl_500: null }), /no son válidas/);
 });
 
@@ -190,7 +198,7 @@ test("el envío administrativo usa el cuerpo vigente y registra éxito o fallo s
     const schedule = { scheduleId: 51, contentId: 12 };
     const success = await sendAdminRates(schedule, { pool: db, adminPhone: "5511999", send: async (phone, body) => {
         assert.equal(phone, "5511999");
-        assert.match(body, /CUP 160/);
+        assert.match(body, /• Menos de R\$100 → 160/);
         return true;
     } });
     assert.equal(success.code, "PUBLISHED");

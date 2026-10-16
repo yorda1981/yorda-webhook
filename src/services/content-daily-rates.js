@@ -31,26 +31,27 @@ function formatRate(value) {
 
 function renderDailyRates(rates) {
     if (!rates) throw new Error("No hay tasas vigentes disponibles en la base de datos.");
-    const updated = rates.updated_at ? new Date(rates.updated_at) : null;
-    if (!updated || Number.isNaN(updated.getTime())) throw new Error("La fecha de actualización de las tasas no es válida.");
-    const updatedLabel = new Intl.DateTimeFormat("es", {
-        dateStyle: "medium", timeStyle: "short", timeZone: ZONA_NEGOCIO
-    }).format(updated);
+    const usdCard = formatRate(rates.usd1);
+    const usdPrepaid = formatRate(rates.usd2);
+    const usdLine = usdCard === usdPrepaid
+        ? `💵 USD tarjeta / prepago: ${usdCard}`
+        : `💵 USD tarjeta: ${usdCard} / prepago: ${usdPrepaid}`;
     return [
-        "*Tasas vigentes de YORDA*",
+        "🇨🇺 *YORDA | TASAS DE HOY* 🇧🇷",
         "",
-        `🇧🇷 R$ 1 = CUP ${formatRate(rates.brl_0)} para envíos menores de R$ 100`,
-        `🇧🇷 R$ 1 = CUP ${formatRate(rates.brl_100)} para envíos de R$ 100 a R$ 499`,
-        `🇧🇷 R$ 1 = CUP ${formatRate(rates.brl_500)} para envíos de R$ 500 a R$ 999`,
-        `🇧🇷 R$ 1 = CUP ${formatRate(rates.brl_1000)} para envíos desde R$ 1.000`,
-        `💵 USD a tarjeta: R$ 1 = USD ${formatRate(rates.usd1)}`,
-        `💳 USD prepago: R$ 1 = USD ${formatRate(rates.usd2)}`,
-        `🪙 MLC: R$ 1 = MLC ${formatRate(rates.mlc)}`,
-        `🏠 Efectivo en CUP: R$ 1 = CUP ${formatRate(rates.efectivo)}`,
+        "💰 *Envíos a Cuba*",
+        "🇧🇷 R$1 = 🇨🇺 CUP",
         "",
-        `Actualizadas: ${updatedLabel}`,
+        `• Menos de R$100 → ${formatRate(rates.brl_0)}`,
+        `• Desde R$100 → ${formatRate(rates.brl_100)}`,
+        `• Desde R$500 → ${formatRate(rates.brl_500)}`,
+        `• Desde R$1.000 → ${formatRate(rates.brl_1000)}`,
         "",
-        "¿Quieres enviar a tu familia? Escríbele al bot de YORDA por privado para recibir una cotización con la tasa vigente y comenzar tu remesa."
+        usdLine,
+        `🪙 MLC: ${formatRate(rates.mlc)}`,
+        `🏠 CUP efectivo: ${formatRate(rates.efectivo)}`,
+        "",
+        "📲 *¿Quieres enviar dinero? Escríbenos por privado.*"
     ].join("\n");
 }
 
