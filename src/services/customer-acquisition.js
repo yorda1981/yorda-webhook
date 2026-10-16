@@ -620,6 +620,8 @@ async function getReferralInviteCandidates(db = pool, limit = 20) {
           AND o.monto > 0 AND COALESCE(o.es_prueba,FALSE) = FALSE
           AND o.completed_at >= NOW() - INTERVAL '365 days'
           AND NOT COALESCE(c.marketing_opt_out,FALSE)
+          AND c.marketing_consent_at IS NOT NULL
+          AND EXISTS (SELECT 1 FROM bot_inbound_messages bi WHERE bi.phone=c.phone AND bi.recibido_at > NOW() - INTERVAL '24 hours')
           AND (c.pausa_hasta IS NULL OR c.pausa_hasta <= NOW())
           AND NOT EXISTS (SELECT 1 FROM blocked_numbers b WHERE b.phone = c.phone)
           AND NOT EXISTS (SELECT 1 FROM operations active WHERE active.phone = c.phone AND active.status IN ('pendiente','confirmada'))
@@ -635,6 +637,28 @@ async function getReferralInviteCandidates(db = pool, limit = 20) {
         selectionEvidence: `${Number(row.remittances_365d)} remesa(s) válida(s) completada(s) en los últimos 365 días; última: ${row.last_completed_at || "sin fecha verificable"}.`,
         requiresComplaintCheck: true,
         limitation: "YORDA no tiene un registro estructurado de reclamaciones; verificar incidencias manualmente antes de cualquier invitación." }));
+}
+
+async function getReferralInviteConsentSummary(db = pool) {
+    const result = await db.query(`WITH eligible AS (
+        SELECT DISTINCT c.phone, c.marketing_consent_at,
+          EXISTS (SELECT 1 FROM bot_inbound_messages bi WHERE bi.phone=c.phone AND bi.recibido_at > NOW() - INTERVAL '24 hours') AS window_open
+        FROM customers c JOIN operations o ON o.phone = c.phone
+        WHERE o.status = 'completada' AND o.tipo = ANY($1::text[])
+          AND o.monto > 0 AND COALESCE(o.es_prueba,FALSE) = FALSE
+          AND o.completed_at >= NOW() - INTERVAL '365 days'
+          AND NOT COALESCE(c.marketing_opt_out,FALSE)
+          AND (c.pausa_hasta IS NULL OR c.pausa_hasta <= NOW())
+          AND NOT EXISTS (SELECT 1 FROM blocked_numbers b WHERE b.phone=c.phone)
+          AND NOT EXISTS (SELECT 1 FROM operations active WHERE active.phone=c.phone AND active.status IN ('pendiente','confirmada'))
+          AND NOT EXISTS (SELECT 1 FROM commercial_contact_events ce WHERE ce.phone=c.phone
+              AND ce.occurred_at >= NOW() - INTERVAL '30 days' AND ce.provider_status IN ('SENDING','SENT','UNKNOWN'))
+          AND NOT EXISTS (SELECT 1 FROM commercial_contact_events ce WHERE ce.phone=c.phone AND ce.response_status='DECLINED')
+    ) SELECT COUNT(*) FILTER(WHERE marketing_consent_at IS NOT NULL AND window_open)::int AS with_consent_and_window,
+             COUNT(*) FILTER(WHERE marketing_consent_at IS NOT NULL AND NOT window_open)::int AS with_consent_without_window,
+             COUNT(*) FILTER(WHERE marketing_consent_at IS NULL)::int AS without_consent
+      FROM eligible`, [VALID_REMITTANCE_TYPES]);
+    return result.rows[0] || { with_consent_and_window: 0, with_consent_without_window: 0, without_consent: 0 };
 }
 
 function buildReferralLaunchCopy(config = {}) {
@@ -671,21 +695,13 @@ async function ensureReferralLaunchDraft(db = pool) {
 }
 
 async function getAcquisitionOverview(db = pool) {
-    const [config, referrals, secondTransferCandidates, inviteCandidates] = await Promise.all([
-        getProgramConfig(db), getReferralSummary(db), getSecondTransferSummary(db), getReferralInviteCandidates(db, 20)
+    const [config, referrals, secondTransferCandidates, inviteCandidates, inviteConsent] = await Promise.all([
+        getProgramConfig(db), getReferralSummary(db), getSecondTransferSummary(db), getReferralInviteCandidates(db, 20), getReferralInviteConsentSummary(db)
     ]);
     const budget = Math.min(PILOT.budgetBRL, Number(config.campaign_limit_brl || PILOT.budgetBRL), Number(config.period_limit_brl || PILOT.budgetBRL));
     const committed = Number(referrals.costo_comprometido_brl || 0);
     const events = await db.query(`SELECT COUNT(*) FILTER (WHERE action = 'ENLACE_GENERADO' AND details->>'linkAvailable' = 'true')::int AS links_requested
         FROM referral_program_events`);
-    const eligibleReferrers = await db.query(`SELECT COUNT(DISTINCT o.phone)::int AS count FROM operations o
-        JOIN customers c ON c.phone = o.phone WHERE o.status = 'completada' AND o.tipo = ANY($1::text[])
-        AND o.monto > 0 AND COALESCE(o.es_prueba,FALSE) = FALSE
-        AND NOT COALESCE(c.marketing_opt_out,FALSE) AND (c.pausa_hasta IS NULL OR c.pausa_hasta <= NOW())
-        AND NOT EXISTS (SELECT 1 FROM blocked_numbers b WHERE b.phone=c.phone)
-        AND NOT EXISTS (SELECT 1 FROM operations active WHERE active.phone=c.phone AND active.status IN ('pendiente','confirmada'))
-        AND NOT EXISTS (SELECT 1 FROM commercial_contact_events ce WHERE ce.phone=c.phone
-            AND ce.provider_status IN ('SENDING','SENT','UNKNOWN') AND ce.occurred_at >= NOW() - INTERVAL '14 days')`, [VALID_REMITTANCE_TYPES]);
     const volume = Number(referrals.volumen_primeras_remesas_brl || 0);
     const invited = await db.query(`SELECT COUNT(DISTINCT phone)::int AS count FROM commercial_contact_events
         WHERE source = 'REFERRAL_PILOT' AND provider_status IN ('SENDING','SENT','UNKNOWN')`);
@@ -696,8 +712,8 @@ async function getAcquisitionOverview(db = pool) {
     return { config: { ...config, program_status: programStatus }, referrals, secondTransferCandidates,
         secondTransferWindow: "Una remesa válida hace 7–45 días, exactamente una remesa completada, e interés posterior comprobable; sin operación activa, opt-out, pausa, bloqueo ni contacto comercial enviado en 14 días.",
         referralEconomics: { rewardPct: PILOT.rewardPct, maxRewardBRL: Math.min(PILOT.maxRewardBRL, Number(config.max_reward_brl || PILOT.maxRewardBRL)), campaignLimitBRL: budget, committedBRL: committed, availableBRL: Math.max(0, money(budget - committed)), periodLimitBRL: budget, durationDays: PILOT.durationDays, participationDays: PILOT.participationDays, scenarios: calculateReferralScenarios(), netProfitKnown: false, unknownNetProfitAcknowledged: Boolean(config.unknown_net_profit_acknowledged) },
-        referralMetrics: { invited: Number(invited.rows[0]?.count || 0), inviteCandidates: inviteCandidates.length, linksRequested: Number(events.rows[0]?.links_requested || 0), registeredReferrals: Number(referrals.vinculados || 0), convertedReferrals: Number(referrals.primeras_remesas_completadas || 0), firstRemittanceVolumeBRL: volume, committedRewardBRL: committed, approvedRewardBRL: Number(referrals.recompensas_aprobadas_brl || 0), paidRewardBRL: Number(referrals.recompensas_liquidadas_brl || 0), expiredParticipations: Number(referrals.participaciones_vencidas || 0), acquisitionCostPerConvertedClientBRL: acquisitionCost, grossMarginReferenceBRL: money(volume * 0.05), otherCostsKnown: false, netProfitBRL: null, aiCostBRL: null },
-        launchProposal: { status: "BORRADOR_NO_ENVIADO", audience: "Hasta 20 clientes con remesas legítimas, sin operación activa, bloqueo, opt-out, pausa humana, contacto comercial reciente o rechazo registrado. Revisión manual de reclamaciones pendiente porque no hay registro estructurado.", audienceCount: inviteCandidates.length, channels: ["WhatsApp individual mediante enlace personal"], terms: `${Number(config.duration_days || PILOT.durationDays)} días desde activación explícita para nuevos registros; cada referido dispone de ${PILOT.participationDays} días desde su vinculación para completar la primera remesa; recompensa ${Number(config.reward_pct || PILOT.rewardPct)} % con máximo R$ ${Number(config.max_reward_brl || PILOT.maxRewardBRL).toFixed(2)} por referido; presupuesto total R$ ${budget.toFixed(2)}.`, draft: buildReferralLaunchCopy(config), successCriteria: ["Referidos nuevos con primera remesa válida", "Volumen BRL confirmado", "Compromisos dentro del presupuesto", "Costo de adquisición por conversión liquidada"], followUp: "Revisión semanal por el operador; no se envían recordatorios automáticos.", candidates: inviteCandidates, candidateLimitations: ["No existe un registro estructurado de reclamaciones; confirmar manualmente que cada candidato no tenga una incidencia abierta antes de invitarlo.", "La atribución solo cuenta códigos validados y primeras remesas completadas; ningún mensaje está autorizado por esta propuesta."] }
+        referralMetrics: { invited: Number(invited.rows[0]?.count || 0), inviteCandidates: inviteCandidates.length, eligibleWithConsentAndWindow: Number(inviteConsent.with_consent_and_window || 0), excludedWithoutConsent: Number(inviteConsent.without_consent || 0), consentedWithoutOpenWindow: Number(inviteConsent.with_consent_without_window || 0), linksRequested: Number(events.rows[0]?.links_requested || 0), registeredReferrals: Number(referrals.vinculados || 0), convertedReferrals: Number(referrals.primeras_remesas_completadas || 0), firstRemittanceVolumeBRL: volume, committedRewardBRL: committed, approvedRewardBRL: Number(referrals.recompensas_aprobadas_brl || 0), paidRewardBRL: Number(referrals.recompensas_liquidadas_brl || 0), expiredParticipations: Number(referrals.participaciones_vencidas || 0), acquisitionCostPerConvertedClientBRL: acquisitionCost, grossMarginReferenceBRL: money(volume * 0.05), otherCostsKnown: false, netProfitBRL: null, aiCostBRL: null },
+        launchProposal: { status: "BORRADOR_NO_ENVIADO", audience: "Hasta 20 clientes con remesas legítimas, consentimiento comercial explícito verificable y ventana de conversación abierta; sin operación activa, bloqueo, opt-out, pausa humana, contacto comercial reciente o rechazo registrado. Revisión manual de reclamaciones pendiente porque no hay registro estructurado.", audienceCount: inviteCandidates.length, eligibleWithConsentCount: Number(inviteConsent.with_consent_and_window || 0), excludedWithoutConsentCount: Number(inviteConsent.without_consent || 0), consentedWithoutOpenWindowCount: Number(inviteConsent.with_consent_without_window || 0), channels: ["WhatsApp individual mediante enlace personal"], terms: `${Number(config.duration_days || PILOT.durationDays)} días desde activación explícita para nuevos registros; cada referido dispone de ${PILOT.participationDays} días desde su vinculación para completar la primera remesa; recompensa ${Number(config.reward_pct || PILOT.rewardPct)} % con máximo R$ ${Number(config.max_reward_brl || PILOT.maxRewardBRL).toFixed(2)} por referido; presupuesto total R$ ${budget.toFixed(2)}.`, draft: buildReferralLaunchCopy(config), successCriteria: ["Referidos nuevos con primera remesa válida", "Volumen BRL confirmado", "Compromisos dentro del presupuesto", "Costo de adquisición por conversión liquidada"], followUp: "Revisión semanal por el operador; no se envían recordatorios automáticos.", candidates: inviteCandidates, candidateLimitations: ["Los clientes sin consentimiento comercial verificable se excluyen de la lista de invitación proactiva.", "Aunque tengan consentimiento, los clientes sin ventana abierta se excluyen hasta integrar plantillas aprobadas.", "No existe un registro estructurado de reclamaciones; confirmar manualmente que cada candidato no tenga una incidencia abierta antes de cualquier invitación.", "La atribución solo cuenta códigos validados y primeras remesas completadas; ningún mensaje está autorizado por esta propuesta."] }
     };
 }
 
@@ -707,6 +723,6 @@ module.exports = {
     processReferralCodeMessage, onOperationCompleted, reviewReversedOperation,
     reconcilePendingReferralAccruals, expirePendingReferralReservations,
     transitionReferral, listReferrals, getReferralSummary,
-    getSecondTransferCandidates, getSecondTransferSummary, getAcquisitionOverview, getReferralInviteCandidates,
+    getSecondTransferCandidates, getSecondTransferSummary, getAcquisitionOverview, getReferralInviteCandidates, getReferralInviteConsentSummary,
     calculateReferralScenarios, buildReferralLaunchCopy, ensureReferralLaunchDraft, followupMessage
 };

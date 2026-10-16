@@ -562,7 +562,7 @@
             ? `Inicio: ${formatDate(cfg.enabled_at)} · vencimiento: ${cfg.expires_at ? formatDate(cfg.expires_at) : "no registrado"} · renovación nunca automática.`
             : "Sin fecha de activación ni vencimiento. El piloto permanece desactivado.";
         const proposal = overview.launchProposal || {};
-        byId("referralLaunchAudience").textContent = `Público elegible estimado: ${proposal.audienceCount || 0}. ${proposal.audience || ""} Propuesta: ${proposal.status || "BORRADOR_NO_ENVIADO"}.`;
+        byId("referralLaunchAudience").textContent = `Con consentimiento y ventana abierta: ${proposal.eligibleWithConsentCount ?? proposal.audienceCount ?? 0}; lista piloto preparada: ${proposal.audienceCount || 0}; excluidos por falta de consentimiento: ${proposal.excludedWithoutConsentCount ?? "sin desglose"}; con consentimiento pero sin ventana abierta: ${proposal.consentedWithoutOpenWindowCount ?? "sin desglose"}. ${proposal.audience || ""} Propuesta: ${proposal.status || "BORRADOR_NO_ENVIADO"}.`;
         byId("referralLaunchTerms").textContent = proposal.terms || "";
         byId("referralLaunchDraft").value = proposal.draft || "";
         byId("referralCandidateLimitations").textContent = (proposal.candidateLimitations || []).join(" ");

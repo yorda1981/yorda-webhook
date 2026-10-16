@@ -231,6 +231,23 @@ test("enlace wa.me codifica mensaje y no contiene teléfono administrativo ni da
     assert.equal(acquisition.referralShareLink("AB23456789", null), null);
 });
 
+test("la lista piloto de referidos solo admite clientes con consentimiento y separa elegibles sin consentimiento", async () => {
+    let candidateSql = "";
+    const db = { query: async sql => {
+        const q = String(sql).replace(/\s+/g, " ");
+        if (q.includes("FROM customers c") && q.includes("GROUP BY c.phone")) {
+            candidateSql = q;
+            return { rows: [{ phone: "5511888887777", nombre: "Test", nivel_vip: 1, remittances_365d: 2, last_completed_at: new Date() }] };
+        }
+        return { rows: [{ with_consent_and_window: 1, with_consent_without_window: 2, without_consent: 4 }] };
+    } };
+    const candidates = await acquisition.getReferralInviteCandidates(db, 20);
+    const summary = await acquisition.getReferralInviteConsentSummary(db);
+    assert.equal(candidates.length, 1);
+    assert.match(candidateSql, /c\.marketing_consent_at IS NOT NULL/);
+    assert.deepEqual(summary, { with_consent_and_window: 1, with_consent_without_window: 2, without_consent: 4 });
+});
+
 test("reserva el máximo de R$50 de forma serializada; con R$500 solo admite diez referidos", async () => {
     const db = makeLinkDb();
     const outcomes = await Promise.all(Array.from({ length: 12 }, (_, index) => acquisition.recordReferralLink({
@@ -402,6 +419,8 @@ test("la selección de invitaciones limita a 20 y excluye opt-out, bloqueo, oper
     assert.equal(candidates.length, 1);
     assert.equal(params[1], 20);
     assert.match(sql, /marketing_opt_out/);
+    assert.match(sql, /marketing_consent_at IS NOT NULL/);
+    assert.match(sql, /bot_inbound_messages/);
     assert.match(sql, /blocked_numbers/);
     assert.match(sql, /status IN \('pendiente','confirmada'\)/);
     assert.match(sql, /pausa_hasta/);
@@ -417,6 +436,7 @@ test("la interfaz y rutas administrativas no contienen ejecución automática de
     assert.match(ui, /Registrar liquidación manual/);
     assert.match(ui, /Borrador preparado, no enviado/);
     assert.match(ui, /Guardar borrador en Biblioteca/);
+    assert.match(ui, /con consentimiento y ventana abierta/i);
     assert.match(ui, /hasta 20 clientes, sin contactar/);
     assert.doesNotMatch(router, /enviarMensaje|enviarSeguro|pagarRecompensa/);
     const migration = fs.readFileSync(path.join(__dirname, "../migrations/0040_referral_pilot_50_500_participation_expiry.sql"), "utf8");

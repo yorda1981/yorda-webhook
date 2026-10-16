@@ -125,6 +125,7 @@ async function nextAvailableAt(client, settings) {
 async function validateQueuedContact(client, row, now = new Date()) {
     const check = await client.query(`SELECT c.marketing_opt_out,c.marketing_consent_at,c.pausa_hasta,c.estado_crm,c.fecha_cotizacion,
         EXISTS(SELECT 1 FROM operations o WHERE o.phone=c.phone AND o.status IN ('pendiente','confirmada')) AS active_operation,
+        EXISTS(SELECT 1 FROM bot_inbound_messages bi WHERE bi.phone=c.phone AND bi.recibido_at > NOW() - INTERVAL '24 hours') AS whatsapp_window_open,
         EXISTS(SELECT 1 FROM blocked_numbers b WHERE b.phone=c.phone) AS blocked
         FROM customers c WHERE c.phone=$1`, [row.phone]);
     const customer = check.rows[0];
@@ -134,6 +135,10 @@ async function validateQueuedContact(client, row, now = new Date()) {
     if (SUPPRESSION_SOURCES.has(row.source) && !customer.marketing_consent_at) return "NO_VERIFIABLE_MARKETING_CONSENT";
     if (customer.pausa_hasta && new Date(customer.pausa_hasta) > now) return "HUMAN_PAUSE";
     if (customer.active_operation) return "ACTIVE_OPERATION";
+    // El transporte solo envía texto libre y no tiene un adaptador de plantillas
+    // aprobadas. Por tanto, ningún mensaje proactivo de esta cola puede salir
+    // fuera de la ventana abierta por un mensaje reciente del cliente.
+    if (!customer.whatsapp_window_open) return "WHATSAPP_WINDOW_CLOSED";
     if (row.expires_at && new Date(row.expires_at) <= now) return "EXPIRED";
     if (row.source === "QUOTE_FOLLOWUP") {
         if (!row.metadata?.quoteAt || !customer.fecha_cotizacion || new Date(row.metadata.quoteAt).getTime() !== new Date(customer.fecha_cotizacion).getTime()) return "QUOTE_CHANGED";

@@ -6,7 +6,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const queue = require("../src/services/commercial-outbound-queue");
 
-function workerDb({ paused = false, sentToday = 0, lastSent = null, state = "PENDING", size = 50, source = "QUOTE_FOLLOWUP", optedOut = false, consent = null, active = false, blocked = false } = {}) {
+function workerDb({ paused = false, sentToday = 0, lastSent = null, state = "PENDING", size = 50, source = "QUOTE_FOLLOWUP", optedOut = false, consent = null, active = false, blocked = false, windowOpen = true } = {}) {
     const now = new Date();
     const settings = { paused, daily_limit: 10, opening_time: "00:00", closing_time: "23:59", time_zone: "America/Sao_Paulo", consecutive_failures: 0 };
     const rows = Array.from({ length: size }, (_, i) => ({ id: i + 1, phone: `551199999${String(i).padStart(4, "0")}`, source, reason: "quote", strategy: "followup", content: "¿Quieres que revisemos tu cotización?", state, scheduled_at: new Date(now - 60000), expires_at: new Date(now.getTime() + 86400000), metadata: { quoteAt: now.toISOString(), approved: true }, recovery_attempt_id: null }));
@@ -22,7 +22,7 @@ function workerDb({ paused = false, sentToday = 0, lastSent = null, state = "PEN
                     const pending = rows.find(item => item.state === "PENDING");
                     return { rows: pending ? [pending] : [] };
                 }
-                if (/SELECT c\.marketing_opt_out/.test(q)) return { rows: [{ marketing_opt_out: optedOut, marketing_consent_at: consent, pausa_hasta: null, estado_crm: "cotizado", fecha_cotizacion: new Date(rows[0].metadata.quoteAt), active_operation: active, blocked }] };
+                if (/SELECT c\.marketing_opt_out/.test(q)) return { rows: [{ marketing_opt_out: optedOut, marketing_consent_at: consent, pausa_hasta: null, estado_crm: "cotizado", fecha_cotizacion: new Date(rows[0].metadata.quoteAt), active_operation: active, whatsapp_window_open: windowOpen, blocked }] };
                 if (/WITH cfg AS/.test(q)) return { rows: [{ now_at: now, local_now: now, today_open: new Date(now.getTime() - 3600000), today_close: new Date(now.getTime() + 3600000), tomorrow_open: new Date(now.getTime() + 86400000), attempts_today: sentToday, last_attempt: lastSent }] };
                 if (/UPDATE commercial_outbound_queue SET state='SENDING'/.test(q)) { const item = rows.find(x => x.id === params[0]); item.state = "SENDING"; return { rows: [] }; }
                 if (/UPDATE commercial_outbound_queue SET state='CANCELLED'/.test(q)) { const item = rows.find(x => x.id === params[0]); item.state = "CANCELLED"; return { rows: [] }; }
@@ -48,6 +48,15 @@ test("el límite diario lleno pospone el envío y nunca llama al proveedor", asy
     const db = workerDb({ sentToday: 10 }); let sent = 0;
     const result = await queue.processNext({ pool: db, sendFn: async () => { sent++; return true; } });
     assert.equal(result.code, "WAITING_FOR_SLOT"); assert.equal(sent, 0); assert.equal(db.rows[0].state, "PENDING");
+});
+
+test("no envía texto libre si cerró la ventana de WhatsApp y no existe adaptador de plantillas", async () => {
+    const db = workerDb({ size: 1, windowOpen: false }); let sent = 0;
+    const result = await queue.processNext({ pool: db, sendFn: async () => { sent++; return true; } });
+    assert.equal(result.code, "CANCELLED");
+    assert.equal(result.reason, "WHATSAPP_WINDOW_CLOSED");
+    assert.equal(db.rows[0].state, "CANCELLED");
+    assert.equal(sent, 0);
 });
 
 test("el panel diferencia intentos, aceptación de Z-API y envíos de la cola", () => {
@@ -109,6 +118,14 @@ test("la cola exige consentimiento registrable para marketing y no admite opt-ou
     assert.match(migration, /idx_commercial_outbound_one_pending_per_phone/);
     assert.match(service, /NO_VERIFIABLE_MARKETING_CONSENT/);
     assert.match(service, /OPTED_OUT/);
+});
+
+test("campañas, referidos y Director no pueden entrar a la cola sin aprobación explícita", async () => {
+    const db = { connect: async () => { throw new Error("No debe tocar DB sin aprobación"); } };
+    for (const source of ["CAMPAIGN", "REFERRAL", "DIRECTOR"]) {
+        const result = await queue.enqueue({ phone: "5511999999999", source, reason: "test", strategy: "test", content: "test", idempotencyKey: `test-${source}` }, { pool: db });
+        assert.deepEqual(result, { queued: false, code: "APPROVAL_REQUIRED" });
+    }
 });
 
 test("las respuestas del cliente cancelan pendientes; cotización, PIX, entregas y tasas quedan fuera del dispatcher comercial", () => {
