@@ -223,7 +223,7 @@ const schemaGate = createSchemaGate({
         bestDecision.startBestDecision();
         const reconcileReferrals = () => conLockExclusivo("referralReconciliation", async () => {
             const result = await customerAcquisition.reconcilePendingReferralAccruals();
-            if (result.processed) log("REFERRAL_RECONCILIATION", result);
+            if (result.processed || result.expired) log("REFERRAL_RECONCILIATION", result);
         }).catch(error => console.error("⚠️ Reconciliación de referidos:", error.message));
         setTimeout(reconcileReferrals, 60 * 1000).unref?.();
         setInterval(reconcileReferrals, 15 * 60 * 1000).unref?.();

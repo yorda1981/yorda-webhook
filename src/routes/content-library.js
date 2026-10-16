@@ -82,6 +82,13 @@ function createContentLibraryRouter({ service = contentLibrary, selector = conte
         } catch (error) { sendError(res, error); }
     });
 
+    router.post("/acquisition/launch-draft", adminWriteLimiter, verificarToken, async (_req, res) => {
+        try {
+            const asset = await acquisition.ensureReferralLaunchDraft();
+            res.status(201).json({ asset, published: false, sent: false });
+        } catch (error) { sendError(res, error); }
+    });
+
     router.get("/acquisition/referrals", adminReadLimiter, verificarToken, async (req, res) => {
         try { res.json({ referrals: await acquisition.listReferrals({ status: req.query.status || null, limit: req.query.limit }) }); }
         catch (error) { sendError(res, error); }
@@ -91,7 +98,8 @@ function createContentLibraryRouter({ service = contentLibrary, selector = conte
         try {
             const result = await acquisition.recordReferralLink({
                 referredPhone: req.body?.referredPhone, code: req.body?.code,
-                evidence: "ADMIN_VERIFIED", evidenceNote: req.body?.evidenceNote, actor: "admin"
+                evidence: "ADMIN_VERIFIED", evidenceNote: req.body?.evidenceNote,
+                termsCommunicated: req.body?.termsCommunicated === true, actor: "admin"
             });
             if (!result.linked) return res.status(409).json({ error: result.reason });
             res.status(201).json({ referral: result });

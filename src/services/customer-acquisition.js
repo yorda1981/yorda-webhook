@@ -9,7 +9,7 @@ const VALID_REMITTANCE_TYPES = ["brl_cup", "cup_transferencia"];
 const money = value => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 const normalizeCode = value => String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 const phoneDigits = value => String(value || "").replace(/\D/g, "");
-const PILOT = Object.freeze({ rewardPct: 1, maxRewardBRL: 20, budgetBRL: 200, durationDays: 30 });
+const PILOT = Object.freeze({ rewardPct: 1, maxRewardBRL: 50, budgetBRL: 500, durationDays: 30, participationDays: 30 });
 
 function programAcceptingReferrals(config, now = Date.now()) {
     return Boolean(config?.enabled && config?.expires_at && new Date(config.expires_at).getTime() > now);
@@ -47,6 +47,11 @@ async function ensureReferralCode(phone, db = pool, generate = randomCode) {
     if (!phone) throw new Error("Teléfono requerido");
     const program = await db.query("SELECT * FROM referral_program_config WHERE id = 1");
     if (!programAcceptingReferrals(program.rows[0])) return null;
+    const limits = program.rows[0];
+    const committed = await db.query(`SELECT COALESCE(SUM(reserved_reward_brl),0)::numeric AS total
+        FROM customer_referrals WHERE status NOT IN ('RECHAZADA','CANCELADA')`);
+    const available = Math.min(PILOT.budgetBRL, Number(limits.campaign_limit_brl || PILOT.budgetBRL), Number(limits.period_limit_brl || PILOT.budgetBRL)) - Number(committed.rows[0]?.total || 0);
+    if (available < Math.min(PILOT.maxRewardBRL, Number(limits.max_reward_brl || PILOT.maxRewardBRL))) return null;
     const eligible = await db.query(`SELECT 1 FROM operations WHERE phone = $1 AND status = 'completada'
         AND tipo = ANY($2::text[]) AND monto > 0 AND COALESCE(es_prueba,FALSE) = FALSE LIMIT 1`, [phone, VALID_REMITTANCE_TYPES]);
     if (!eligible.rows.length) return null;
@@ -80,7 +85,7 @@ async function saveProgramConfig(input, actor, db = pool) {
     const periodLimit = Number(input.periodLimitBRL ?? PILOT.budgetBRL);
     const unknownNetProfitAcknowledged = input.acknowledgeUnknownNetProfit === true;
     if (rewardPct !== PILOT.rewardPct || maxReward !== PILOT.maxRewardBRL || campaignLimit !== PILOT.budgetBRL || periodLimit !== PILOT.budgetBRL) {
-        throw Object.assign(new Error("La configuración aprobada del piloto es fija: 1 %, máximo R$20 por referido y presupuesto total R$200."), { status: 400, code: "PILOT_CONFIG_FIXED" });
+        throw Object.assign(new Error("La configuración aprobada del piloto es fija: 1 %, máximo R$50 por referido y presupuesto total R$500."), { status: 400, code: "PILOT_CONFIG_FIXED" });
     }
     if (enabled && !unknownNetProfitAcknowledged) {
         throw Object.assign(new Error("Los costos netos no están verificados. Para activar, reconoce expresamente que la rentabilidad neta seguirá siendo desconocida."), { status: 409, code: "UNKNOWN_NET_PROFIT_ACK_REQUIRED" });
@@ -95,7 +100,7 @@ async function saveProgramConfig(input, actor, db = pool) {
             const committed = await client.query(`SELECT COALESCE(SUM(reserved_reward_brl),0)::numeric AS total
                 FROM customer_referrals WHERE status NOT IN ('RECHAZADA','CANCELADA')`);
             if (Number(committed.rows[0]?.total || 0) > PILOT.budgetBRL) {
-                throw Object.assign(new Error("Los compromisos históricos superan R$200; no se puede activar el piloto sin revisar esas obligaciones."), { status: 409, code: "EXISTING_COMMITMENTS_OVER_BUDGET" });
+                throw Object.assign(new Error("Los compromisos históricos superan R$500; no se puede activar el piloto sin revisar esas obligaciones."), { status: 409, code: "EXISTING_COMMITMENTS_OVER_BUDGET" });
             }
         }
         const now = Date.now();
@@ -124,12 +129,13 @@ async function saveProgramConfig(input, actor, db = pool) {
     } finally { client.release(); }
 }
 
-async function recordReferralLink({ referredPhone, code, evidence = "WHATSAPP_CODE", evidenceNote = null, actor = null, customerWasNew = false }, db = pool) {
+async function recordReferralLink({ referredPhone, code, evidence = "WHATSAPP_CODE", evidenceNote = null, actor = null, customerWasNew = false, termsCommunicated = evidence === "WHATSAPP_CODE" }, db = pool) {
     const referralCode = normalizeCode(code);
     if (!referredPhone || !REFERRAL_CODE_RE.test(referralCode)) return { linked: false, reason: "INVALID_CODE_FORMAT" };
     if (!["WHATSAPP_CODE", "ADMIN_VERIFIED"].includes(evidence)) return { linked: false, reason: "INVALID_EVIDENCE" };
     evidenceNote = String(evidenceNote || "").trim().slice(0, 500) || null;
     if (evidence === "ADMIN_VERIFIED" && !evidenceNote) return { linked: false, reason: "EVIDENCE_REQUIRED" };
+    if (evidence === "ADMIN_VERIFIED" && termsCommunicated !== true) return { linked: false, reason: "TERMS_NOT_COMMUNICATED" };
     const client = await db.connect();
     try {
         await client.query("BEGIN");
@@ -179,21 +185,31 @@ async function recordReferralLink({ referredPhone, code, evidence = "WHATSAPP_CO
         const budget = await client.query(`SELECT COALESCE(SUM(reserved_reward_brl),0)::numeric AS committed
             FROM customer_referrals WHERE status NOT IN ('RECHAZADA','CANCELADA')`);
         const committed = Number(budget.rows[0]?.committed || 0);
-        const budgetCap = Math.min(PILOT.budgetBRL, Number(cfg.campaign_limit_brl || PILOT.budgetBRL));
+        const budgetCap = Math.min(PILOT.budgetBRL, Number(cfg.campaign_limit_brl || PILOT.budgetBRL), Number(cfg.period_limit_brl || PILOT.budgetBRL));
         if (committed + PILOT.maxRewardBRL > budgetCap) {
             await client.query("ROLLBACK");
             return { linked: false, reason: "BUDGET_EXHAUSTED" };
         }
         const inserted = await client.query(`
-            INSERT INTO customer_referrals (referral_code, referrer_phone, referred_phone, evidence, evidence_note, reward_pct, reserved_reward_brl, status_reason)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,'Reserva de hasta R$20; esperando primera remesa válida completada') RETURNING *
-        `, [referralCode, referrer.rows[0].phone, referredPhone, evidence, String(evidenceNote || "").trim() || null, PILOT.rewardPct, PILOT.maxRewardBRL]);
+            INSERT INTO customer_referrals
+                (referral_code, referrer_phone, referred_phone, evidence, evidence_note, reward_pct,
+                 reserved_reward_brl, participation_expires_at, status_reason)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,NOW() + ($8 * INTERVAL '1 day'),
+                'Reserva hasta R$50; primera remesa válida debe completarse dentro de 30 días del registro')
+            RETURNING *
+        `, [referralCode, referrer.rows[0].phone, referredPhone, evidence, String(evidenceNote || "").trim() || null,
+            PILOT.rewardPct, PILOT.maxRewardBRL, PILOT.participationDays]);
         const row = inserted.rows[0];
         await client.query(`INSERT INTO customer_referral_events (referral_id, actor, action, to_status, details)
             VALUES ($1,$2,'VINCULACION_CREADA',$3,$4::jsonb)`,
-        [row.id, actor || (evidence === "WHATSAPP_CODE" ? "whatsapp" : "admin"), row.status, JSON.stringify({ evidence, evidenceNote: row.evidence_note })]);
+        [row.id, actor || (evidence === "WHATSAPP_CODE" ? "whatsapp" : "admin"), row.status, JSON.stringify({ evidence, evidenceNote: row.evidence_note,
+            participationExpiresAt: row.participation_expires_at, rewardPct: PILOT.rewardPct, reservedRewardBRL: PILOT.maxRewardBRL,
+            termsCommunicated: true })]);
+        await client.query(`INSERT INTO customer_referral_events (referral_id, actor, action, from_status, to_status, details)
+            VALUES ($1,$2,'RESERVA_CREADA',NULL,$3,$4::jsonb)`,
+        [row.id, actor || "system", row.status, JSON.stringify({ amountBRL: PILOT.maxRewardBRL, reason: "Compromiso máximo reservado antes de prometer beneficio" })]);
         await client.query("COMMIT");
-        return { linked: true, referralId: row.id, status: row.status, reservedRewardBRL: Number(row.reserved_reward_brl || PILOT.maxRewardBRL) };
+        return { linked: true, referralId: row.id, status: row.status, reservedRewardBRL: Number(row.reserved_reward_brl || PILOT.maxRewardBRL), participationExpiresAt: row.participation_expires_at };
     } catch (error) {
         try { await client.query("ROLLBACK"); } catch {}
         if (error.code === "23505") return { linked: false, reason: "ALREADY_LINKED_OR_DUPLICATE" };
@@ -220,7 +236,7 @@ async function processReferralCodeMessage(phone, text, db = pool) {
         const shareLink = code ? referralShareLink(code, await getOfficialWhatsAppNumber()) : null;
         if (code) await recordLinkGenerated(phone, Boolean(shareLink), db);
         return { handled: true, message: code
-            ? `Tu enlace personal para compartir es: ${shareLink || `código ${code} (enlace no disponible ahora)`}. Si un cliente nuevo completa su primera remesa válida dentro del piloto, la recompensa es el 1 % (máximo R$20), sujeta a validación y aprobación manual. No se paga automáticamente.`
+            ? `Tu enlace personal para compartir es: ${shareLink || `código ${code} (enlace no disponible ahora)`}. Si un cliente nuevo registra tu código y completa su primera remesa válida dentro de los 30 días siguientes, puedes recibir el 1 % (máximo R$50), sujeto a presupuesto disponible, validación y aprobación manual. No se paga automáticamente.`
             : "No encontré tu registro para generar el código. Escríbenos y lo revisamos." };
     }
     const result = await recordReferralLink({ referredPhone: phone, code: match[1], evidenceNote: "Código comunicado directamente por el cliente por WhatsApp", customerWasNew }, db);
@@ -234,11 +250,13 @@ async function processReferralCodeMessage(phone, text, db = pool) {
         EXISTING_CUSTOMER: "Ese código solo puede vincularse durante el primer contacto con YORDA y antes de una remesa. Continúo ayudándote con tu solicitud.",
         BUDGET_EXHAUSTED: "El presupuesto disponible para nuevas referencias ya está comprometido. No registré una recompensa.",
         ACTIVE_OPERATION: "Ya hay una operación en curso asociada a este número; no puedo vincular una recompensa a una remesa iniciada antes del registro.",
+        TERMS_NOT_COMMUNICATED: "Antes de registrar manualmente, informa al cliente que tiene 30 días desde la vinculación para completar su primera remesa.",
         ALREADY_COMPLETED_REMITTANCE: "No puedo vincular un referido después de que ya se completó una remesa; no hacemos asociaciones retroactivas."
     };
-    const continueText = raw.replace(match[0], "").replace(/^[\s,;:.!?-]+/, "").trim();
+    const continueText = raw.replace(match[0], "").replace(/^[\s,;:.!?-]+/, "")
+        .replace(/([,;:])(?:\s*[,;:])+/g, "$1").trim();
     return { handled: true, linked: result.linked, continueText, message: result.linked
-        ? "Código registrado. Si completas tu primera remesa válida durante el piloto, el referente podrá recibir 1 % (máximo R$20), sujeto a aprobación manual."
+        ? "Código registrado. Para que la referencia sea válida, completa tu primera remesa dentro de los 30 días siguientes. Tu referente podrá recibir el 1 % (máximo R$50), sujeto a presupuesto disponible, validación y aprobación manual."
         : (messages[result.reason] || "No pude registrar la referencia. Escríbenos para que el equipo la revise.") };
 }
 
@@ -269,32 +287,75 @@ async function onOperationCompleted(operation, db = pool) {
             await client.query(`INSERT INTO customer_referral_events (referral_id, actor, action, from_status, to_status, details)
                 VALUES ($1,'system','VINCULACION_POSTERIOR_A_OPERACION',$2,'CANCELADA',$3::jsonb)`,
             [row.id, row.status, JSON.stringify({ operationId: first.rows[0].id, operationCreatedAt: first.rows[0].created_at, linkedAt: row.linked_at })]);
+            await client.query(`INSERT INTO customer_referral_events (referral_id, actor, action, from_status, to_status, details)
+                VALUES ($1,'system','RESERVA_LIBERADA',$2,'CANCELADA',$3::jsonb)`,
+            [row.id, row.status, JSON.stringify({ amountBRL: Number(row.reserved_reward_brl || 0), reason: "La operación se inició antes de registrar la referencia" })]);
             await client.query("COMMIT");
             return { processed: false, reason: "OPERATION_PRECEDES_REFERRAL" };
+        }
+        const completedAt = first.rows[0].completed_at ? new Date(first.rows[0].completed_at) : null;
+        const participationExpiresAt = row.participation_expires_at ? new Date(row.participation_expires_at) : null;
+        if (participationExpiresAt && completedAt && completedAt.getTime() > participationExpiresAt.getTime()) {
+            await client.query(`UPDATE customer_referrals SET status = 'CANCELADA', reserved_reward_brl = 0,
+                expired_at = NOW(), status_reason = 'La primera remesa no se completó dentro de los 30 días comunicados', updated_at = NOW()
+                WHERE id = $1`, [row.id]);
+            await client.query(`INSERT INTO customer_referral_events (referral_id, actor, action, from_status, to_status, details)
+                VALUES ($1,'system','PARTICIPACION_VENCIDA',$2,'CANCELADA',$3::jsonb)`,
+            [row.id, row.status, JSON.stringify({ operationId: first.rows[0].id, completedAt: completedAt?.toISOString() || null,
+                participationExpiresAt: participationExpiresAt.toISOString() })]);
+            await client.query(`INSERT INTO customer_referral_events (referral_id, actor, action, from_status, to_status, details)
+                VALUES ($1,'system','RESERVA_LIBERADA_VENCIMIENTO',$2,'CANCELADA',$3::jsonb)`,
+            [row.id, row.status, JSON.stringify({ amountBRL: Number(row.reserved_reward_brl || 0), reason: "Primera remesa ausente o posterior al vencimiento de participación" })]);
+            await client.query("COMMIT");
+            return { processed: false, reason: "PARTICIPATION_EXPIRED" };
         }
         const config = await client.query("SELECT * FROM referral_program_config WHERE id = 1 FOR SHARE");
         const cfg = config.rows[0] || {};
         const amount = money(first.rows[0].monto);
         const reward = money(Math.min(amount * Number(row.reward_pct) / 100, PILOT.maxRewardBRL, Number(cfg.max_reward_brl || PILOT.maxRewardBRL)));
-        let reviewReason = null;
-        if ([cfg.max_reward_brl, cfg.campaign_limit_brl, cfg.period_limit_brl].some(value => value == null)) reviewReason = "Faltan límites económicos configurados; requiere revisión humana";
-        else if (!(amount > 0) || !(reward > 0)) reviewReason = "Importe o recompensa no válidos";
-        else if (cfg.max_reward_brl != null && reward > Number(cfg.max_reward_brl)) reviewReason = "Supera el límite configurado por recompensa";
+        let costReviewReason = !completedAt ? "La fecha de finalización de la remesa no está disponible; requiere revisión humana" : null;
+        if (completedAt) {
+            try {
+                const benefits = await client.query(`SELECT COALESCE(c.nivel_vip,0)::int AS nivel_vip,
+                    (o.activa AND COALESCE(o.texto,'') <> '' AND (o.vence_at IS NULL OR o.vence_at > NOW())) AS oferta_general_activa,
+                    (o.activa_vip AND COALESCE(o.texto_vip,'') <> '' AND COALESCE(c.nivel_vip,0) > 0) AS oferta_vip_activa
+                    FROM customers c LEFT JOIN ofertas o ON o.id = 1 WHERE c.phone = $1`, [operation.phone]);
+                const benefit = benefits.rows[0];
+                if (!benefit) costReviewReason = "No se pudieron verificar los beneficios existentes del referido";
+                else if (Number(benefit.nivel_vip) > 0 || benefit.oferta_general_activa || benefit.oferta_vip_activa) {
+                    costReviewReason = "Puede acumular beneficios VIP u oferta vigente cuyo costo no está cuantificado; revisar margen antes de aprobar";
+                }
+            } catch (_) {
+                costReviewReason = "No se pudieron verificar costos promocionales/VIP acumulados; requiere revisión humana";
+            }
+        }
+        let reviewReason = costReviewReason;
+        let reservationAfter = Number(row.reserved_reward_brl || 0);
+        if ([cfg.max_reward_brl, cfg.campaign_limit_brl, cfg.period_limit_brl].some(value => value == null)) reviewReason ||= "Faltan límites económicos configurados; requiere revisión humana";
+        else if (!(amount > 0) || !(reward > 0)) reviewReason ||= "Importe o recompensa no válidos";
+        else if (reward > Number(cfg.max_reward_brl)) reviewReason ||= "Supera el límite configurado por recompensa";
         else {
             const usage = await client.query(`SELECT COALESCE(SUM(reserved_reward_brl),0) AS total FROM customer_referrals
                 WHERE status NOT IN ('RECHAZADA','CANCELADA') AND id <> $1`, [row.id]);
             const campaignTotal = Number(usage.rows[0]?.total || 0) + reward;
-            if (cfg.campaign_limit_brl != null && campaignTotal > Number(cfg.campaign_limit_brl)) reviewReason = "Supera el límite acumulado configurado para el programa";
+            const cap = Math.min(PILOT.budgetBRL, Number(cfg.campaign_limit_brl), Number(cfg.period_limit_brl));
+            if (campaignTotal > cap) reviewReason ||= "Supera el límite acumulado configurado para el programa";
+            else reservationAfter = reward;
         }
         const nextStatus = reviewReason ? "REVISION" : "ELEGIBLE";
         await client.query(`UPDATE customer_referrals SET first_operation_id = $2, first_amount_brl = $3,
-            reward_brl = $4, reserved_reward_brl = CASE WHEN $5 = 'ELEGIBLE' THEN $4 ELSE reserved_reward_brl END,
-            status = $5, eligible_at = CASE WHEN $5 = 'ELEGIBLE' THEN NOW() ELSE eligible_at END,
-            status_reason = $6, updated_at = NOW() WHERE id = $1`,
-        [row.id, first.rows[0].id, amount, reward, nextStatus, reviewReason || "Primera remesa completada; requiere revisión humana"]);
+            reward_brl = $4, reserved_reward_brl = $5,
+            status = $6, eligible_at = CASE WHEN $6 = 'ELEGIBLE' THEN NOW() ELSE eligible_at END,
+            status_reason = $7, updated_at = NOW() WHERE id = $1`,
+        [row.id, first.rows[0].id, amount, reward, reservationAfter, nextStatus, reviewReason || "Primera remesa completada; requiere revisión humana"]);
         await client.query(`INSERT INTO customer_referral_events (referral_id, actor, action, from_status, to_status, details)
             VALUES ($1,'system','PRIMERA_REMESA_VALIDADA',$2,$3,$4::jsonb)`,
         [row.id, row.status, nextStatus, JSON.stringify({ operationId: first.rows[0].id, amountBRL: amount, rewardBRL: reward, reason: reviewReason })]);
+        if (Number(row.reserved_reward_brl || 0) !== reservationAfter) {
+            await client.query(`INSERT INTO customer_referral_events (referral_id, actor, action, from_status, to_status, details)
+                VALUES ($1,'system','RESERVA_AJUSTADA',$2,$3,$4::jsonb)`,
+            [row.id, row.status, nextStatus, JSON.stringify({ beforeBRL: Number(row.reserved_reward_brl || 0), afterBRL: reservationAfter, reason: "Reserva máxima ajustada a recompensa calculada" })]);
+        }
         await client.query("COMMIT");
         return { processed: true, referralId: Number(row.id), status: nextStatus, amountBRL: amount, rewardBRL: reward, reason: reviewReason };
     } catch (error) {
@@ -304,12 +365,14 @@ async function onOperationCompleted(operation, db = pool) {
 }
 
 async function reconcilePendingReferralAccruals(db = pool, limit = 100) {
+    const expired = await expirePendingReferralReservations(db, limit);
     const pending = await db.query(`SELECT r.referred_phone AS phone, o.id, o.monto, o.tipo
         FROM customer_referrals r JOIN LATERAL (
             SELECT op.id, op.monto, op.tipo, op.completed_at FROM operations op
             WHERE op.phone = r.referred_phone AND op.status = 'completada'
               AND op.tipo = ANY($1::text[]) AND op.monto > 0
               AND COALESCE(op.es_prueba,FALSE) = FALSE AND op.completed_at >= r.linked_at
+              AND (r.participation_expires_at IS NULL OR op.completed_at <= r.participation_expires_at)
             ORDER BY op.completed_at ASC NULLS LAST, op.id ASC LIMIT 1
         ) o ON TRUE
         WHERE r.status = 'PENDIENTE' ORDER BY o.id LIMIT $2`,
@@ -319,7 +382,43 @@ async function reconcilePendingReferralAccruals(db = pool, limit = 100) {
         const result = await onOperationCompleted(operation, db);
         if (result.processed) processed++;
     }
-    return { inspected: pending.rows.length, processed };
+    return { inspected: pending.rows.length, processed, expired };
+}
+
+async function expirePendingReferralReservations(db = pool, limit = 100) {
+    const client = await db.connect();
+    try {
+        await client.query("BEGIN");
+        await client.query("SELECT pg_advisory_xact_lock(hashtext('referral-program-budget'))");
+        const due = await client.query(`SELECT id, reserved_reward_brl FROM customer_referrals
+            WHERE status = 'PENDIENTE' AND participation_expires_at IS NOT NULL
+              AND participation_expires_at <= NOW()
+              AND NOT EXISTS (SELECT 1 FROM operations o WHERE o.phone = customer_referrals.referred_phone
+                  AND o.status = 'completada' AND o.tipo = ANY($2::text[]) AND o.monto > 0
+                  AND COALESCE(o.es_prueba,FALSE) = FALSE AND o.completed_at >= customer_referrals.linked_at
+                  AND o.completed_at <= customer_referrals.participation_expires_at)
+            ORDER BY participation_expires_at, id
+            LIMIT $1 FOR UPDATE SKIP LOCKED`, [Math.min(500, Math.max(1, Number(limit) || 100)), VALID_REMITTANCE_TYPES]);
+        for (const row of due.rows) {
+            const releasedBRL = Number(row.reserved_reward_brl || 0);
+            await client.query(`UPDATE customer_referrals SET status = 'CANCELADA', reserved_reward_brl = 0,
+                expired_at = NOW(), status_reason = 'Participación vencida sin primera remesa completada dentro de 30 días', updated_at = NOW()
+                WHERE id = $1 AND status = 'PENDIENTE'`, [row.id]);
+            await client.query(`INSERT INTO customer_referral_events
+                (referral_id, actor, action, from_status, to_status, details)
+                VALUES ($1,'system','PARTICIPACION_VENCIDA','PENDIENTE','CANCELADA',$2::jsonb)`,
+            [row.id, JSON.stringify({ releasedReservationBRL: releasedBRL })]);
+            await client.query(`INSERT INTO customer_referral_events
+                (referral_id, actor, action, from_status, to_status, details)
+                VALUES ($1,'system','RESERVA_LIBERADA_VENCIMIENTO','PENDIENTE','CANCELADA',$2::jsonb)`,
+            [row.id, JSON.stringify({ amountBRL: releasedBRL, reason: "Venció el plazo comunicado sin transferencia válida" })]);
+        }
+        await client.query("COMMIT");
+        return due.rows.length;
+    } catch (error) {
+        try { await client.query("ROLLBACK"); } catch {}
+        throw error;
+    } finally { client.release(); }
 }
 
 async function reviewReversedOperation(operationId, db = pool) {
@@ -341,6 +440,11 @@ async function reviewReversedOperation(operationId, db = pool) {
         await client.query(`INSERT INTO customer_referral_events (referral_id, actor, action, from_status, to_status, details)
             VALUES ($1,'system','OPERACION_REVERTIDA',$2,$3,$4::jsonb)`,
         [row.id, row.status, next, JSON.stringify({ operationId })]);
+        if (next === "CANCELADA" && Number(row.reserved_reward_brl || 0) > 0) {
+            await client.query(`INSERT INTO customer_referral_events (referral_id, actor, action, from_status, to_status, details)
+                VALUES ($1,'system','RESERVA_LIBERADA',$2,$3,$4::jsonb)`,
+            [row.id, row.status, next, JSON.stringify({ amountBRL: Number(row.reserved_reward_brl), reason: "Operación vinculada revertida antes de liquidación" })]);
+        }
         await client.query("COMMIT");
         return updated.rows[0];
     } catch (error) {
@@ -379,7 +483,8 @@ async function transitionReferral(id, action, { actor = "admin", method = null, 
             const campaign = await client.query(`SELECT COALESCE(SUM(reserved_reward_brl),0) AS total FROM customer_referrals
                 WHERE status NOT IN ('RECHAZADA','CANCELADA') AND id <> $1`, [id]);
             const reservation = Number(row.reserved_reward_brl || row.reward_brl || 0);
-            if (cfg.campaign_limit_brl != null && Number(campaign.rows[0]?.total || 0) + reservation > Number(cfg.campaign_limit_brl)) throw Object.assign(new Error("El presupuesto comprometido del piloto sigue excedido"), { status: 409 });
+            const cap = Math.min(PILOT.budgetBRL, Number(cfg.campaign_limit_brl), Number(cfg.period_limit_brl));
+            if (Number(campaign.rows[0]?.total || 0) + reservation > cap) throw Object.assign(new Error("El presupuesto comprometido del piloto sigue excedido"), { status: 409 });
         }
         const updated = await client.query(`UPDATE customer_referrals SET status = $2, status_reason = $3,
             reserved_reward_brl = CASE WHEN $2 IN ('RECHAZADA','CANCELADA') THEN 0 WHEN $2 = 'ELEGIBLE' THEN reward_brl ELSE reserved_reward_brl END,
@@ -397,6 +502,12 @@ async function transitionReferral(id, action, { actor = "admin", method = null, 
             (referral_id, actor, action, from_status, to_status, details)
             VALUES ($1,$2,$3,$4,$5,$6::jsonb)`,
         [id, actor, transition.action, from, transition.to, JSON.stringify({ method, reference })]);
+        if (["RECHAZADA", "CANCELADA"].includes(transition.to) && Number(row.reserved_reward_brl || 0) > 0) {
+            await client.query(`INSERT INTO customer_referral_events
+                (referral_id, actor, action, from_status, to_status, details)
+                VALUES ($1,$2,'RESERVA_LIBERADA',$3,$4,$5::jsonb)`,
+            [id, actor, from, transition.to, JSON.stringify({ amountBRL: Number(row.reserved_reward_brl), reason: transition.to === "RECHAZADA" ? "Recompensa rechazada por operador" : "Participación cancelada por operador" })]);
+        }
         await client.query("COMMIT");
         return updated.rows[0];
     } catch (error) {
@@ -475,18 +586,95 @@ async function getReferralSummary(db = pool) {
         COUNT(*) FILTER (WHERE status = 'APROBADA')::int AS aprobadas,
         COUNT(*) FILTER (WHERE status = 'LIQUIDADA')::int AS liquidadas,
         COUNT(*) FILTER (WHERE status IN ('REVISION','REVISION_REVERSO'))::int AS en_revision,
+        COUNT(*) FILTER (WHERE expired_at IS NOT NULL)::int AS participaciones_vencidas,
         COALESCE(SUM(reserved_reward_brl) FILTER (WHERE status NOT IN ('RECHAZADA','CANCELADA')),0)::numeric AS costo_comprometido_brl,
         COALESCE(SUM(first_amount_brl) FILTER (WHERE first_operation_id IS NOT NULL),0)::numeric AS volumen_primeras_remesas_brl,
-        COALESCE(SUM(reward_brl) FILTER (WHERE status = 'LIQUIDADA'),0)::numeric AS recompensas_liquidadas_brl
+        COALESCE(SUM(reward_brl) FILTER (WHERE first_operation_id IS NOT NULL),0)::numeric AS recompensas_acumuladas_brl,
+        COALESCE(SUM(reward_brl) FILTER (WHERE status = 'LIQUIDADA'),0)::numeric AS recompensas_liquidadas_brl,
+        COALESCE(SUM(reserved_reward_brl) FILTER (WHERE status = 'APROBADA'),0)::numeric AS recompensas_aprobadas_brl,
+        COUNT(*) FILTER (WHERE first_operation_id IS NOT NULL)::int AS conversiones_con_primera_remesa
         FROM customer_referrals`);
     return result.rows[0] || {};
 }
 
+function calculateReferralScenarios({ rewardPct = PILOT.rewardPct, maxRewardBRL = PILOT.maxRewardBRL } = {}) {
+    return [500, 1000, 3000, 5000].map(amountBRL => {
+        const rewardBRL = money(Math.min(amountBRL * rewardPct / 100, maxRewardBRL));
+        const grossMarginReferenceBRL = money(amountBRL * 0.05);
+        return { amountBRL, rewardBRL, grossMarginReferenceBRL,
+            grossReferenceAfterRewardBRL: money(grossMarginReferenceBRL - rewardBRL),
+            netProfitBRL: null, netProfitKnown: false,
+            note: "Referencia bruta al 5 % menos recompensa; no es beneficio neto e ignora costos no cuantificados." };
+    });
+}
+
+async function getReferralInviteCandidates(db = pool, limit = 20) {
+    const result = await db.query(`
+        SELECT c.phone, c.nombre, COALESCE(c.nivel_vip,0)::int AS nivel_vip,
+               COUNT(o.id)::int AS remittances_365d,
+               COALESCE(SUM(o.monto),0)::numeric AS volume_365d_brl,
+               MAX(o.completed_at) AS last_completed_at
+        FROM customers c
+        JOIN operations o ON o.phone = c.phone
+        WHERE o.status = 'completada' AND o.tipo = ANY($1::text[])
+          AND o.monto > 0 AND COALESCE(o.es_prueba,FALSE) = FALSE
+          AND o.completed_at >= NOW() - INTERVAL '365 days'
+          AND NOT COALESCE(c.marketing_opt_out,FALSE)
+          AND (c.pausa_hasta IS NULL OR c.pausa_hasta <= NOW())
+          AND NOT EXISTS (SELECT 1 FROM blocked_numbers b WHERE b.phone = c.phone)
+          AND NOT EXISTS (SELECT 1 FROM operations active WHERE active.phone = c.phone AND active.status IN ('pendiente','confirmada'))
+          AND NOT EXISTS (SELECT 1 FROM commercial_contact_events ce WHERE ce.phone = c.phone
+              AND ce.occurred_at >= NOW() - INTERVAL '30 days'
+              AND ce.provider_status IN ('SENDING','SENT','UNKNOWN'))
+          AND NOT EXISTS (SELECT 1 FROM commercial_contact_events ce WHERE ce.phone = c.phone
+              AND ce.response_status = 'DECLINED')
+        GROUP BY c.phone, c.nombre, c.nivel_vip
+        ORDER BY COUNT(o.id) DESC, MAX(o.completed_at) DESC, c.phone
+        LIMIT $2`, [VALID_REMITTANCE_TYPES, Math.min(20, Math.max(1, Number(limit) || 20))]);
+    return result.rows.map(row => ({ ...row,
+        selectionEvidence: `${Number(row.remittances_365d)} remesa(s) válida(s) completada(s) en los últimos 365 días; última: ${row.last_completed_at || "sin fecha verificable"}.`,
+        requiresComplaintCheck: true,
+        limitation: "YORDA no tiene un registro estructurado de reclamaciones; verificar incidencias manualmente antes de cualquier invitación." }));
+}
+
+function buildReferralLaunchCopy(config = {}) {
+    const pct = Number(config.reward_pct || PILOT.rewardPct);
+    const maxReward = Number(config.max_reward_brl || PILOT.maxRewardBRL);
+    return [
+        "🎁 Recomienda YORDA y gana",
+        "",
+        "Invita a un amigo que todavía no haya enviado dinero con nosotros.",
+        `Cuando registre tu código y complete su primera remesa válida dentro de los 30 días siguientes, recibes el ${pct} % del valor enviado, hasta R$${maxReward}.`,
+        "",
+        "📲 Comparte tu enlace personal y comienza a recomendar.",
+        "",
+        "*Promoción sujeta a condiciones, vigencia y disponibilidad del presupuesto. El piloto admite nuevos registros durante 30 días desde su activación; cada participación conserva 30 días para completar la primera remesa. Recompensas sujetas a validación y aprobación manual.*"
+    ].join("\n");
+}
+
+async function ensureReferralLaunchDraft(db = pool) {
+    const library = require("./content-library");
+    const asset = await library.createDirectorDraft({
+        titulo: "Piloto de referidos · invitación comercial",
+        cuerpo: buildReferralLaunchCopy(await getProgramConfig(db)),
+        grupo: "permanente",
+        categoria: "referidos",
+        aporte: "Propuesta breve para captar nuevos clientes mediante recomendaciones verificadas, con términos explícitos, recompensa limitada y aprobación manual. Borrador no publicado ni enviado.",
+        impacto: { estado: "NO_ENVIADO", conversionesEsperadas: null, beneficioNetoBRL: null },
+        fuentes: [{ nombre: "Configuración administrativa del programa de referidos", titulo: "Condiciones del piloto configuradas en YORDA", url: "internal://referral-program-config" }],
+        origenSistema: "referral-pilot-launch-v1"
+    }, db);
+    if (asset.estado !== "BORRADOR") {
+        throw Object.assign(new Error("El contenido del programa ya no está en estado de borrador; requiere revisión del operador antes de reutilizarse."), { code: "REFERRAL_DRAFT_NOT_PENDING" });
+    }
+    return asset;
+}
+
 async function getAcquisitionOverview(db = pool) {
-    const [config, referrals, secondTransferCandidates] = await Promise.all([
-        getProgramConfig(db), getReferralSummary(db), getSecondTransferSummary(db)
+    const [config, referrals, secondTransferCandidates, inviteCandidates] = await Promise.all([
+        getProgramConfig(db), getReferralSummary(db), getSecondTransferSummary(db), getReferralInviteCandidates(db, 20)
     ]);
-    const budget = Math.min(PILOT.budgetBRL, Number(config.campaign_limit_brl || PILOT.budgetBRL));
+    const budget = Math.min(PILOT.budgetBRL, Number(config.campaign_limit_brl || PILOT.budgetBRL), Number(config.period_limit_brl || PILOT.budgetBRL));
     const committed = Number(referrals.costo_comprometido_brl || 0);
     const events = await db.query(`SELECT COUNT(*) FILTER (WHERE action = 'ENLACE_GENERADO' AND details->>'linkAvailable' = 'true')::int AS links_requested
         FROM referral_program_events`);
@@ -499,13 +687,17 @@ async function getAcquisitionOverview(db = pool) {
         AND NOT EXISTS (SELECT 1 FROM commercial_contact_events ce WHERE ce.phone=c.phone
             AND ce.provider_status IN ('SENDING','SENT','UNKNOWN') AND ce.occurred_at >= NOW() - INTERVAL '14 days')`, [VALID_REMITTANCE_TYPES]);
     const volume = Number(referrals.volumen_primeras_remesas_brl || 0);
+    const invited = await db.query(`SELECT COUNT(DISTINCT phone)::int AS count FROM commercial_contact_events
+        WHERE source = 'REFERRAL_PILOT' AND provider_status IN ('SENDING','SENT','UNKNOWN')`);
+    const acquisitionCost = Number(referrals.conversiones_con_primera_remesa || 0) > 0
+        ? money(Number(referrals.recompensas_acumuladas_brl || 0) / Number(referrals.conversiones_con_primera_remesa)) : null;
     const activeNow = programAcceptingReferrals(config);
     const programStatus = activeNow ? "ACTIVO" : config.enabled && config.expires_at && new Date(config.expires_at).getTime() <= Date.now() ? "EXPIRADO" : "DESACTIVADO";
     return { config: { ...config, program_status: programStatus }, referrals, secondTransferCandidates,
         secondTransferWindow: "Una remesa válida hace 7–45 días, exactamente una remesa completada, e interés posterior comprobable; sin operación activa, opt-out, pausa, bloqueo ni contacto comercial enviado en 14 días.",
-        referralEconomics: { rewardPct: PILOT.rewardPct, maxRewardBRL: Math.min(PILOT.maxRewardBRL, Number(config.max_reward_brl || PILOT.maxRewardBRL)), campaignLimitBRL: budget, committedBRL: committed, availableBRL: Math.max(0, money(budget - committed)), periodLimitBRL: budget, durationDays: PILOT.durationDays, netProfitKnown: false, unknownNetProfitAcknowledged: Boolean(config.unknown_net_profit_acknowledged) },
-        referralMetrics: { linksRequested: Number(events.rows[0]?.links_requested || 0), eligibleReferrers: Number(eligibleReferrers.rows[0]?.count || 0), convertedReferrals: Number(referrals.primeras_remesas_completadas || 0), firstRemittanceVolumeBRL: volume, grossMarginReferenceBRL: money(volume * 0.05), otherCostsKnown: false, netProfitBRL: null, aiCostBRL: null },
-        launchProposal: { status: "BORRADOR_NO_ENVIADO", audience: "Clientes con al menos una remesa BRL completada y sin bloqueo comercial; selección individual aún requiere aprobación del operador.", audienceCount: Number(eligibleReferrers.rows[0]?.count || 0), channels: ["WhatsApp individual mediante enlace personal"], terms: `${Number(config.duration_days || PILOT.durationDays)} días desde activación explícita; recompensa ${Number(config.reward_pct || PILOT.rewardPct)} % de la primera remesa válida, con máximo R$ ${Number(config.max_reward_brl || PILOT.maxRewardBRL).toFixed(2)} por referido; presupuesto total R$ ${budget.toFixed(2)}.`, draft: `¿Conoces a alguien que necesite enviar dinero a Cuba? Comparte tu enlace personal de YORDA. Si una persona nueva realiza su primera remesa válida durante el piloto, puedes recibir una recompensa de ${Number(config.reward_pct || PILOT.rewardPct)} % (máximo R$${Number(config.max_reward_brl || PILOT.maxRewardBRL).toFixed(2)}), sujeta a validación y aprobación manual.`, successCriteria: ["Referidos nuevos con primera remesa válida", "Volumen BRL confirmado", "Compromisos dentro del presupuesto"], followUp: "Revisión semanal por el operador; no se envían recordatorios automáticos." }
+        referralEconomics: { rewardPct: PILOT.rewardPct, maxRewardBRL: Math.min(PILOT.maxRewardBRL, Number(config.max_reward_brl || PILOT.maxRewardBRL)), campaignLimitBRL: budget, committedBRL: committed, availableBRL: Math.max(0, money(budget - committed)), periodLimitBRL: budget, durationDays: PILOT.durationDays, participationDays: PILOT.participationDays, scenarios: calculateReferralScenarios(), netProfitKnown: false, unknownNetProfitAcknowledged: Boolean(config.unknown_net_profit_acknowledged) },
+        referralMetrics: { invited: Number(invited.rows[0]?.count || 0), inviteCandidates: inviteCandidates.length, linksRequested: Number(events.rows[0]?.links_requested || 0), registeredReferrals: Number(referrals.vinculados || 0), convertedReferrals: Number(referrals.primeras_remesas_completadas || 0), firstRemittanceVolumeBRL: volume, committedRewardBRL: committed, approvedRewardBRL: Number(referrals.recompensas_aprobadas_brl || 0), paidRewardBRL: Number(referrals.recompensas_liquidadas_brl || 0), expiredParticipations: Number(referrals.participaciones_vencidas || 0), acquisitionCostPerConvertedClientBRL: acquisitionCost, grossMarginReferenceBRL: money(volume * 0.05), otherCostsKnown: false, netProfitBRL: null, aiCostBRL: null },
+        launchProposal: { status: "BORRADOR_NO_ENVIADO", audience: "Hasta 20 clientes con remesas legítimas, sin operación activa, bloqueo, opt-out, pausa humana, contacto comercial reciente o rechazo registrado. Revisión manual de reclamaciones pendiente porque no hay registro estructurado.", audienceCount: inviteCandidates.length, channels: ["WhatsApp individual mediante enlace personal"], terms: `${Number(config.duration_days || PILOT.durationDays)} días desde activación explícita para nuevos registros; cada referido dispone de ${PILOT.participationDays} días desde su vinculación para completar la primera remesa; recompensa ${Number(config.reward_pct || PILOT.rewardPct)} % con máximo R$ ${Number(config.max_reward_brl || PILOT.maxRewardBRL).toFixed(2)} por referido; presupuesto total R$ ${budget.toFixed(2)}.`, draft: buildReferralLaunchCopy(config), successCriteria: ["Referidos nuevos con primera remesa válida", "Volumen BRL confirmado", "Compromisos dentro del presupuesto", "Costo de adquisición por conversión liquidada"], followUp: "Revisión semanal por el operador; no se envían recordatorios automáticos.", candidates: inviteCandidates, candidateLimitations: ["No existe un registro estructurado de reclamaciones; confirmar manualmente que cada candidato no tenga una incidencia abierta antes de invitarlo.", "La atribución solo cuenta códigos validados y primeras remesas completadas; ningún mensaje está autorizado por esta propuesta."] }
     };
 }
 
@@ -513,7 +705,8 @@ module.exports = {
     REFERRAL_CODE_RE, VALID_REMITTANCE_TYPES, PILOT, normalizeCode, randomCode, referralShareLink, getOfficialWhatsAppNumber, recordLinkGenerated,
     ensureReferralCode, getProgramConfig, saveProgramConfig, recordReferralLink,
     processReferralCodeMessage, onOperationCompleted, reviewReversedOperation,
-    reconcilePendingReferralAccruals,
+    reconcilePendingReferralAccruals, expirePendingReferralReservations,
     transitionReferral, listReferrals, getReferralSummary,
-    getSecondTransferCandidates, getSecondTransferSummary, getAcquisitionOverview, followupMessage
+    getSecondTransferCandidates, getSecondTransferSummary, getAcquisitionOverview, getReferralInviteCandidates,
+    calculateReferralScenarios, buildReferralLaunchCopy, ensureReferralLaunchDraft, followupMessage
 };

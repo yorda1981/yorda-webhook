@@ -211,21 +211,25 @@
             <div class="package-stat"><strong id="refPending">0</strong>pendientes de primera remesa</div>
             <div class="package-stat"><strong id="refEligible">0</strong>recompensas elegibles</div>
             <div class="package-stat"><strong id="refApproved">0</strong>aprobadas para liquidación</div>
+            <div class="package-stat"><strong id="refApprovedAmount">R$0,00</strong>recompensas aprobadas</div>
             <div class="package-stat"><strong id="refPaid">0</strong>liquidadas manualmente</div>
             <div class="package-stat"><strong id="secondCandidatesCount">0</strong>candidatos a segunda remesa</div>
             <div class="package-stat"><strong id="refBudgetCommitted">R$0,00</strong>presupuesto comprometido</div>
-            <div class="package-stat"><strong id="refBudgetAvailable">R$200,00</strong>presupuesto disponible</div>
+            <div class="package-stat"><strong id="refBudgetAvailable">R$500,00</strong>presupuesto disponible</div>
             <div class="package-stat"><strong id="refFirstVolume">R$0,00</strong>volumen de primeras remesas</div>
             <div class="package-stat"><strong id="refGrossMargin">R$0,00</strong>margen bruto de referencia (5 %)</div>
             <div class="package-stat"><strong id="refLinkRequests">0</strong>enlaces generados (no confirma que se compartieron)</div>
+            <div class="package-stat"><strong id="refInvited">0</strong>clientes invitados (sin envíos de esta fase)</div>
+            <div class="package-stat"><strong id="refExpired">0</strong>participaciones vencidas</div>
+            <div class="package-stat"><strong id="refAcquisitionCost">—</strong>recompensa comprometida media por conversión; neto desconocido</div>
         </div>
         <div class="package-section">
             <h3>Configuración del programa</h3>
-            <p class="helper">Piloto fijo: 1 % de la primera remesa válida (máximo R$20), presupuesto total estricto R$200, duración de 30 días desde una activación explícita. Las obligaciones se reservan al registrar la referencia. La liquidación siempre es manual.</p>
+            <p class="helper">Piloto preparado y desactivado: 1 % de la primera remesa válida (máximo R$50), presupuesto total estricto R$500, 30 días para registrar nuevas referencias desde la activación. Cada participación dispone de otros 30 días desde su registro para completar la primera remesa. La reserva se toma antes de confirmar condiciones y se libera al vencer solo si no hubo transferencia. La liquidación siempre es manual.</p>
             <div class="config-grid">
                 <div><label for="refRewardPct">Recompensa (%)</label><input id="refRewardPct" type="number" min="1" max="1" step="0.01" value="1" disabled></div>
-                <div><label for="refMaxReward">Máximo por referido (R$)</label><input id="refMaxReward" type="number" value="20" disabled></div>
-                <div><label for="refCampaignLimit">Presupuesto total (R$)</label><input id="refCampaignLimit" type="number" value="200" disabled></div>
+                <div><label for="refMaxReward">Máximo por referido (R$)</label><input id="refMaxReward" type="number" value="50" disabled></div>
+                <div><label for="refCampaignLimit">Presupuesto total (R$)</label><input id="refCampaignLimit" type="number" value="500" disabled></div>
                 <div><label>Duración</label><input value="30 días · sin renovación automática" disabled></div>
             </div>
             <div class="helper" id="referralPilotDates">Sin fecha de activación ni vencimiento.</div>
@@ -238,7 +242,18 @@
             <p class="helper" id="referralLaunchAudience"></p>
             <p class="helper" id="referralLaunchTerms"></p>
             <textarea id="referralLaunchDraft" readonly style="min-height:100px" aria-label="Borrador comercial no enviado"></textarea>
+            <div class="draft-actions"><button class="secondary" id="referralLaunchDraftButton" type="button">Guardar borrador en Biblioteca</button><span class="helper" id="referralLaunchDraftStatus" aria-live="polite"></span></div>
             <p class="helper">Canal: WhatsApp individual mediante enlace personal. Métricas: referidos vinculados, primeras remesas confirmadas, volumen y compromisos dentro del presupuesto. Revisión semanal por el operador; sin contactos automáticos ni publicaciones en grupo.</p>
+        </div>
+        <div class="package-section">
+            <h3>Grupo piloto propuesto · hasta 20 clientes, sin contactar</h3>
+            <p class="helper" id="referralCandidateLimitations"></p>
+            <div class="package-clients" id="referralInviteCandidates"><div class="empty">Sin candidatos disponibles según los filtros actuales.</div></div>
+        </div>
+        <div class="package-section">
+            <h3>Economía ilustrativa por primera remesa</h3>
+            <p class="helper">Recompensas calculadas al 1 %. El margen de referencia del 5 % es bruto y no representa beneficio neto. Costos operativos, VIP, ofertas y beneficios acumulados no están cuantificados.</p>
+            <div class="package-clients" id="referralEconomicsScenarios"></div>
         </div>
         <div class="package-section">
             <h3>Referencias y recompensas</h3>
@@ -257,11 +272,12 @@
         </div>
         <div class="package-section">
             <h3>Vinculación manual verificada</h3>
-            <p class="helper">Solo antes de la primera remesa, con evidencia registrada. No permite cambiar un referente existente.</p>
+            <p class="helper">Solo antes de la primera remesa, con evidencia registrada. No permite cambiar un referente existente. Informa antes al cliente del plazo de 30 días para completar la primera remesa.</p>
             <div class="config-grid">
                 <div><label for="manualReferralPhone">Teléfono del referido</label><input id="manualReferralPhone" inputmode="numeric"></div>
                 <div><label for="manualReferralCode">Código del referente</label><input id="manualReferralCode" maxlength="10"></div>
-                <div style="grid-column:span 2"><label for="manualReferralEvidence">Evidencia revisada por el operador</label><input id="manualReferralEvidence" maxlength="500" placeholder="Qué verificaste para confirmar la recomendación"></div>
+                <div style="grid-column:span 2"><label for="manualReferralEvidence">Evidencia revisada por el operador</label><input id="manualReferralEvidence" maxlength="500" placeholder="Qué verificaste para confirmar la recomendación y el plazo comunicado"></div>
+                <div style="grid-column:span 2"><label style="display:flex;align-items:center;gap:9px;text-transform:none;letter-spacing:0"><input id="manualReferralTermsCommunicated" type="checkbox" style="width:auto"> Confirmo que informé el plazo de 30 días antes de registrar</label></div>
             </div>
             <div class="draft-actions"><button class="secondary" id="manualReferralButton" type="button">Registrar vinculación verificada</button></div>
         </div>
@@ -523,6 +539,7 @@
         byId("refPending").textContent = summary.esperando_primera_remesa || 0;
         byId("refEligible").textContent = summary.elegibles || 0;
         byId("refApproved").textContent = summary.aprobadas || 0;
+        byId("refApprovedAmount").textContent = moneyBRL(summary.recompensas_aprobadas_brl || 0);
         byId("refPaid").textContent = summary.liquidadas || 0;
         byId("secondCandidatesCount").textContent = overview.secondTransferCandidates || 0;
         const economics = overview.referralEconomics || {};
@@ -532,9 +549,12 @@
         byId("refFirstVolume").textContent = moneyBRL(metrics.firstRemittanceVolumeBRL);
         byId("refGrossMargin").textContent = moneyBRL(metrics.grossMarginReferenceBRL);
         byId("refLinkRequests").textContent = metrics.linksRequested || 0;
+        byId("refInvited").textContent = metrics.invited || 0;
+        byId("refExpired").textContent = metrics.expiredParticipations || 0;
+        byId("refAcquisitionCost").textContent = metrics.acquisitionCostPerConvertedClientBRL == null ? "—" : moneyBRL(metrics.acquisitionCostPerConvertedClientBRL);
         byId("refRewardPct").value = Number(cfg.reward_pct || 1);
-        byId("refMaxReward").value = Number(cfg.max_reward_brl || 20);
-        byId("refCampaignLimit").value = Number(cfg.campaign_limit_brl || 200);
+        byId("refMaxReward").value = Number(cfg.max_reward_brl || 50);
+        byId("refCampaignLimit").value = Number(cfg.campaign_limit_brl || 500);
         byId("referralProgramEnabled").checked = !!cfg.enabled;
         byId("referralUnknownProfitAck").checked = !!cfg.unknown_net_profit_acknowledged;
         window.referralProgramConfig = cfg;
@@ -545,6 +565,19 @@
         byId("referralLaunchAudience").textContent = `Público elegible estimado: ${proposal.audienceCount || 0}. ${proposal.audience || ""} Propuesta: ${proposal.status || "BORRADOR_NO_ENVIADO"}.`;
         byId("referralLaunchTerms").textContent = proposal.terms || "";
         byId("referralLaunchDraft").value = proposal.draft || "";
+        byId("referralCandidateLimitations").textContent = (proposal.candidateLimitations || []).join(" ");
+        const inviteCandidates = byId("referralInviteCandidates"); inviteCandidates.replaceChildren();
+        if (!(proposal.candidates || []).length) appendText(inviteCandidates, "div", "No hay clientes que cumplan los filtros actuales.", "empty");
+        for (const candidate of proposal.candidates || []) {
+            const row = document.createElement("div"); row.className = "group-row";
+            appendText(row, "div", `${candidate.nombre || "Cliente"} · ${candidate.phone}`, "group-name");
+            appendText(row, "div", `${candidate.selectionEvidence} VIP nivel ${candidate.nivel_vip}. No contactado; verificar manualmente que no exista reclamación abierta.`, "helper");
+            inviteCandidates.appendChild(row);
+        }
+        const scenarios = byId("referralEconomicsScenarios"); scenarios.replaceChildren();
+        for (const scenario of economics.scenarios || []) {
+            appendText(scenarios, "div", `R$${scenario.amountBRL.toLocaleString("es-BR")} · recompensa R$${scenario.rewardBRL.toFixed(2)} · margen bruto ref. R$${scenario.grossMarginReferenceBRL.toFixed(2)} · resta R$${scenario.grossReferenceAfterRewardBRL.toFixed(2)} antes de otros costos (neto desconocido).`, "helper");
+        }
         byId("secondTransferRule").textContent = overview.secondTransferWindow || "";
 
         const referralList = byId("referralList"); referralList.replaceChildren();
@@ -591,13 +624,22 @@
         }
         try {
             await requestJson("/admin/content-library/acquisition/config", { method:"POST", body:JSON.stringify({
-                enabled, rewardPct:1, maxRewardBRL:20,
-                campaignLimitBRL:200, periodLimitBRL:200, renewPilot,
+                enabled, rewardPct:1, maxRewardBRL:50,
+                campaignLimitBRL:500, periodLimitBRL:500, renewPilot,
                 acknowledgeUnknownNetProfit:byId("referralUnknownProfitAck").checked
             }) });
             setStatus(enabled ? "Programa activado. Sin pagos automáticos ni campaña de difusión." : "Configuración guardada; programa desactivado.", "ok");
             await loadAcquisition();
         } catch (error) { setStatus(error.message, "error"); }
+    });
+    byId("referralLaunchDraftButton").addEventListener("click", async () => {
+        const button = byId("referralLaunchDraftButton"); button.disabled = true;
+        try {
+            const data = await requestJson("/admin/content-library/acquisition/launch-draft", { method:"POST", body:"{}" });
+            byId("referralLaunchDraftStatus").textContent = `Borrador #${data.asset.id} guardado en la Biblioteca; no publicado.`;
+            setStatus("Propuesta guardada como borrador; no se envió.", "ok");
+        } catch (error) { byId("referralLaunchDraftStatus").textContent = error.message; }
+        finally { button.disabled = false; }
     });
     byId("referralCodeButton").addEventListener("click", async () => {
         const phone = byId("referralCodePhone").value.trim();
@@ -612,11 +654,12 @@
         const referredPhone = byId("manualReferralPhone").value.trim();
         const code = byId("manualReferralCode").value.trim();
         const evidenceNote = byId("manualReferralEvidence").value.trim();
-        if (!referredPhone || !code || !evidenceNote) return setStatus("Completa teléfono, código y evidencia revisada.", "error");
+        if (!referredPhone || !code || !evidenceNote || !byId("manualReferralTermsCommunicated").checked) return setStatus("Completa los datos y confirma que se comunicaron los 30 días de participación.", "error");
         if (!window.confirm("Confirmas que verificaste esta recomendación antes de la primera remesa? No se permite asociar retroactivamente.")) return;
         try {
-            await requestJson("/admin/content-library/acquisition/referrals/manual", { method:"POST", body:JSON.stringify({ referredPhone, code, evidenceNote }) });
+            await requestJson("/admin/content-library/acquisition/referrals/manual", { method:"POST", body:JSON.stringify({ referredPhone, code, evidenceNote, termsCommunicated:true }) });
             byId("manualReferralEvidence").value = "";
+            byId("manualReferralTermsCommunicated").checked = false;
             setStatus("Vinculación manual auditada.", "ok");
             await loadAcquisition();
         } catch (error) { setStatus(error.message, "error"); }
