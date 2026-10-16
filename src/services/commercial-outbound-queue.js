@@ -102,20 +102,20 @@ async function nextAvailableAt(client, settings) {
             FROM commercial_contact_events, bounds
             WHERE provider_status IN ('SENDING','SENT','FAILED','UNKNOWN')
               AND occurred_at>=bounds.day_start AND occurred_at<bounds.day_end
-        ) SELECT bounds.*, sent.count AS sent_today, sent.last_sent FROM bounds CROSS JOIN sent`,
+        ) SELECT bounds.*, sent.count AS attempts_today, sent.last_sent AS last_attempt FROM bounds CROSS JOIN sent`,
     [settings.time_zone, settings.opening_time, settings.closing_time, settings.daily_limit]);
     const row = clock.rows[0];
     const now = new Date(row.now_at);
     const opening = new Date(row.today_open);
     const closing = new Date(row.today_close);
     const tomorrow = new Date(row.tomorrow_open);
-    if (Number(row.sent_today) >= Number(settings.daily_limit)) return tomorrow;
+    if (Number(row.attempts_today) >= Number(settings.daily_limit)) return tomorrow;
     let available = now < opening ? opening : now;
-    if (row.last_sent) {
+    if (row.last_attempt) {
         const openMinutes = Number(String(settings.opening_time).slice(0, 2)) * 60 + Number(String(settings.opening_time).slice(3, 5));
         const closeMinutes = Number(String(settings.closing_time).slice(0, 2)) * 60 + Number(String(settings.closing_time).slice(3, 5));
         const intervalMinutes = Math.max(1, Math.floor((closeMinutes - openMinutes) / Number(settings.daily_limit)));
-        const spaced = new Date(new Date(row.last_sent).getTime() + intervalMinutes * 60000);
+        const spaced = new Date(new Date(row.last_attempt).getTime() + intervalMinutes * 60000);
         if (spaced > available) available = spaced;
     }
     if (now >= closing || available >= closing) return tomorrow;
@@ -271,7 +271,13 @@ async function getSnapshot(db = pool, now = new Date()) {
         db.query(`SELECT COUNT(*) FILTER(WHERE state='PENDING')::int AS pending,
             (SELECT COUNT(*)::int FROM commercial_contact_events e WHERE e.provider_status IN ('SENDING','SENT','FAILED','UNKNOWN')
                 AND e.occurred_at >= ((NOW() AT TIME ZONE $1)::date AT TIME ZONE $1)
+                AND e.occurred_at < (((NOW() AT TIME ZONE $1)::date + 1) AT TIME ZONE $1)) AS attempts_today,
+            (SELECT COUNT(*)::int FROM commercial_contact_events e WHERE e.provider_status = 'SENT'
+                AND e.occurred_at >= ((NOW() AT TIME ZONE $1)::date AT TIME ZONE $1)
                 AND e.occurred_at < (((NOW() AT TIME ZONE $1)::date + 1) AT TIME ZONE $1)) AS sent_today,
+            (SELECT COUNT(*)::int FROM commercial_outbound_queue q WHERE q.state = 'SENT'
+                AND q.sent_at >= ((NOW() AT TIME ZONE $1)::date AT TIME ZONE $1)
+                AND q.sent_at < (((NOW() AT TIME ZONE $1)::date + 1) AT TIME ZONE $1)) AS queue_sent_today,
             COUNT(*) FILTER(WHERE state='CANCELLED')::int AS cancelled,
             COUNT(*) FILTER(WHERE state IN ('FAILED','UNKNOWN'))::int AS failed,
             MIN(scheduled_at) FILTER(WHERE state='PENDING') AS next_pending

@@ -23,7 +23,7 @@ function workerDb({ paused = false, sentToday = 0, lastSent = null, state = "PEN
                     return { rows: pending ? [pending] : [] };
                 }
                 if (/SELECT c\.marketing_opt_out/.test(q)) return { rows: [{ marketing_opt_out: optedOut, marketing_consent_at: consent, pausa_hasta: null, estado_crm: "cotizado", fecha_cotizacion: new Date(rows[0].metadata.quoteAt), active_operation: active, blocked }] };
-                if (/WITH cfg AS/.test(q)) return { rows: [{ now_at: now, local_now: now, today_open: new Date(now.getTime() - 3600000), today_close: new Date(now.getTime() + 3600000), tomorrow_open: new Date(now.getTime() + 86400000), sent_today: sentToday, last_sent: lastSent }] };
+                if (/WITH cfg AS/.test(q)) return { rows: [{ now_at: now, local_now: now, today_open: new Date(now.getTime() - 3600000), today_close: new Date(now.getTime() + 3600000), tomorrow_open: new Date(now.getTime() + 86400000), attempts_today: sentToday, last_attempt: lastSent }] };
                 if (/UPDATE commercial_outbound_queue SET state='SENDING'/.test(q)) { const item = rows.find(x => x.id === params[0]); item.state = "SENDING"; return { rows: [] }; }
                 if (/UPDATE commercial_outbound_queue SET state='CANCELLED'/.test(q)) { const item = rows.find(x => x.id === params[0]); item.state = "CANCELLED"; return { rows: [] }; }
                 if (/UPDATE commercial_outbound_queue SET contact_event_id/.test(q)) return { rows: [] };
@@ -48,6 +48,18 @@ test("el límite diario lleno pospone el envío y nunca llama al proveedor", asy
     const db = workerDb({ sentToday: 10 }); let sent = 0;
     const result = await queue.processNext({ pool: db, sendFn: async () => { sent++; return true; } });
     assert.equal(result.code, "WAITING_FOR_SLOT"); assert.equal(sent, 0); assert.equal(db.rows[0].state, "PENDING");
+});
+
+test("el panel diferencia intentos, aceptación de Z-API y envíos de la cola", () => {
+    const source = fs.readFileSync(path.join(__dirname, "../src/services/commercial-outbound-queue.js"), "utf8");
+    assert.match(source, /AS attempts_today/);
+    assert.match(source, /provider_status = 'SENT'[\s\S]*AS sent_today/);
+    assert.match(source, /commercial_outbound_queue q WHERE q\.state = 'SENT'[\s\S]*AS queue_sent_today/);
+    const ui = fs.readFileSync(path.join(__dirname, "../public/content-operations.html"), "utf8");
+    assert.match(ui, /Intentos hoy \(cuota\)/);
+    assert.match(ui, /Aceptados por Z-API/);
+    assert.match(ui, /Enviados por esta cola/);
+    assert.match(ui, /no confirma entrega/i);
 });
 
 test("respeta el intervalo distribuido entre envíos aunque queden candidatos", async () => {
