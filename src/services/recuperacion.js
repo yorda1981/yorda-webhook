@@ -84,6 +84,7 @@ const PREDICADO_CANDIDATO = `
     AND cu.tipo_favorito IS NOT NULL
     AND COALESCE(cu.fecha_estado, cu.fecha_cotizacion) IS NOT NULL
     AND COALESCE(cu.marketing_opt_out, false) = false
+    AND cu.marketing_consent_at IS NOT NULL
     -- Mínimo 2 horas de antigüedad -- mismo umbral que ya usa el flujo de
     -- PIX (DOS_HORAS en shared.js) para no interrumpir una conversación
     -- todavía en curso.
@@ -118,7 +119,7 @@ const PREDICADO_CANDIDATO = `
     AND NOT EXISTS (
         SELECT 1 FROM recuperacion_envios re
         WHERE re.phone = cu.phone
-          AND re.estado IN ('ENVIANDO','ENVIADO')
+          AND re.estado IN ('ENVIANDO','ENVIADO','INCIERTO')
           AND COALESCE(re.enviado_at, re.creado_at) >= COALESCE(cu.fecha_estado, cu.fecha_cotizacion)
     )
     -- No reescribir un contacto comercial posterior a esta cotización con
@@ -208,6 +209,7 @@ async function obtenerMotivoExclusion(phone, executor = pool) {
         SELECT CASE
             WHEN cu.phone IS NULL THEN 'El registro del cliente ya no existe.'
             WHEN COALESCE(cu.marketing_opt_out, false) THEN 'El cliente pidió no recibir comunicaciones comerciales.'
+            WHEN cu.marketing_consent_at IS NULL THEN 'No hay consentimiento comercial verificable registrado.'
             WHEN cu.tipo_favorito IS NULL THEN 'No hay un servicio previo confirmado para personalizar el contacto.'
             WHEN EXISTS (SELECT 1 FROM blocked_numbers b WHERE b.phone = cu.phone) THEN 'El número está bloqueado.'
             WHEN cu.pausa_hasta > NOW() THEN 'La conversación está bajo pausa humana.'

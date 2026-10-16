@@ -19,11 +19,10 @@
 "use strict";
 
 const pool          = require("../../db");
-const { enviarMensaje } = require("./zapi");
+const commercialQueue = require("./commercial-outbound-queue");
 const { filtrarNoBloqueados } = require("./blocked-numbers");
 const { enPausaHumana } = require("./webhook-guard");
 const { obtenerUltimaOperacion } = require("./operations");
-const contactMemory = require("./commercial-contact-memory");
 
 const ESTADOS_OP_ACTIVA = new Set(["pendiente", "confirmada"]);
 
@@ -354,7 +353,7 @@ async function ejecutarRecordatorios(dependencies = {}) {
 
 async function onda30min(dependencies = {}) {
     const r = await pool.query(`
-        SELECT phone, nombre, ultimo_monto, idioma
+        SELECT phone, nombre, ultimo_monto, idioma, fecha_cotizacion
         FROM customers
         WHERE estado_crm = 'cotizado'
           AND ultimo_monto > 0
@@ -392,7 +391,7 @@ async function onda30min(dependencies = {}) {
 
 async function onda24h(dependencies = {}) {
     const r = await pool.query(`
-        SELECT phone, nombre, idioma
+        SELECT phone, nombre, idioma, fecha_cotizacion, ultimo_monto
         FROM customers
         WHERE estado_crm IN ('cotizado', 'esperando_pix')
           AND fecha_cotizacion < NOW() - INTERVAL '24 hours'
@@ -428,24 +427,18 @@ async function onda7d() {
 }
 
 async function enviarComercial(cliente, reason, estrategia, texto, dependencies = {}) {
-    let claim;
     try {
-        const memory = dependencies.contactMemory || contactMemory;
-        claim = await memory.claim({
-            phone: cliente.phone, source: "crm", reason, strategy: estrategia,
-            content: texto, operationId: cliente.operation_id || null
-        });
+        const queued = await (dependencies.commercialQueue || dependencies.contactMemory?.commercialQueue || commercialQueue).enqueue({
+            phone: cliente.phone, source: "QUOTE_FOLLOWUP", reason, strategy: estrategia,
+            content: texto, idempotencyKey: `crm-${cliente.phone}-${reason}-${cliente.fecha_cotizacion || cliente.ultimo_monto || "open"}`,
+            expiresAt: new Date(new Date(cliente.fecha_cotizacion || Date.now()).getTime() + (reason === "cotizacion_pago" ? 3 : 48) * 60 * 60 * 1000),
+            metadata: { operationId: cliente.operation_id || null, quoteAt: cliente.fecha_cotizacion || null }
+        }, { pool: dependencies.pool });
+        return queued.queued;
     } catch (error) {
-        console.error("❌ CRM: no se pudo coordinar contacto comercial:", error.message);
+        console.error("❌ CRM: no se pudo agregar contacto a la cola comercial:", error.message);
         return false;
     }
-    if (!claim.allowed) return false;
-    let sent = false;
-    let error = null;
-    try { sent = (await (dependencies.sendFn || enviarMensaje)(cliente.phone, texto)) === true; }
-    catch (e) { error = e.message; }
-    await (dependencies.contactMemory || contactMemory).settle(claim.id, { sent, error: error || (sent ? null : "Proveedor no confirmó el envío.") });
-    return sent;
 }
 
 // ── Helpers ─────────────────────────────

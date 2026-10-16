@@ -52,7 +52,8 @@ test("la consulta incluye EXACTAMENTE los dos estados esperados en el filtro de 
     assert.match(sql, /cu\.tipo_favorito IS NOT NULL/);
     assert.match(sql, /COALESCE\(cu\.marketing_opt_out, false\) = false/);
     assert.match(sql, /commercial_contact_events ce[\s\S]*ce\.occurred_at >= COALESCE/);
-    assert.match(sql, /recuperacion_envios re[\s\S]*re\.estado IN \('ENVIANDO','ENVIADO'\)[\s\S]*re\.creado_at/);
+    assert.match(sql, /recuperacion_envios re[\s\S]*re\.estado IN \('ENVIANDO','ENVIADO','INCIERTO'\)[\s\S]*re\.creado_at/);
+    assert.match(sql, /cu\.marketing_consent_at IS NOT NULL/);
 });
 
 // ── 3-4. Operación confirmada/completada posterior -> excluido ──

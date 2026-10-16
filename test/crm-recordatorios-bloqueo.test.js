@@ -29,10 +29,7 @@ const crm = require("../src/services/crm");
 
 test.beforeEach(() => { mensajesEnviados = []; });
 
-const contactMemory = {
-    claim: async () => ({ allowed: true, id: 1 }),
-    settle: async () => "SENT"
-};
+const contactMemory = { commercialQueue: { enqueue: async item => { mensajesEnviados.push(item.phone); return { queued: true, code: "QUEUED" }; } } };
 
 function mockOnda30min(t, { bloqueados = [], pausas = {} } = {}) {
     const bloqueadosSet = new Set(bloqueados);
@@ -66,20 +63,20 @@ test("onda30min: pausa humana ACTIVA -> no envía el recordatorio", async (t) =>
     assert.ok(!mensajesEnviados.includes("5511900000002"), "con pausa_hasta en el futuro, el recordatorio no debe enviarse");
 });
 
-test("onda30min: pausa humana VENCIDA -> comportamiento normal (sí envía)", async (t) => {
+test("onda30min: pausa humana VENCIDA -> comportamiento normal (se agenda)", async (t) => {
     const haceUnaHora = new Date(Date.now() - 60 * 60000).toISOString();
     mockOnda30min(t, { pausas: { "5511900000002": haceUnaHora } });
     await crm.ejecutarRecordatorios({ contactMemory });
-    assert.ok(mensajesEnviados.includes("5511900000002"), "con pausa_hasta ya vencida, el recordatorio debe enviarse igual que siempre");
+    assert.ok(mensajesEnviados.includes("5511900000002"), "con pausa_hasta ya vencida, el recordatorio debe quedar en cola");
 });
 
-test("onda30min: SIN pausa (pausa_hasta null) -> comportamiento normal (sí envía)", async (t) => {
+test("onda30min: SIN pausa (pausa_hasta null) -> comportamiento normal (se agenda)", async (t) => {
     mockOnda30min(t, {});
     await crm.ejecutarRecordatorios({ contactMemory });
     assert.ok(mensajesEnviados.includes("5511900000002"));
 });
 
-test("onda30min: fallo de Z-API queda como fallo y no marca recordatorio exitoso", async (t) => {
+test("onda30min: agenda contacto pero no llama Z-API en la ronda CRM", async (t) => {
     const bloqueadosSet = new Set();
     let marcadorExito = false;
     t.mock.method(pool, "query", async (sql, params = []) => {
@@ -90,14 +87,10 @@ test("onda30min: fallo de Z-API queda como fallo y no marca recordatorio exitoso
         if (/UPDATE customers SET[\s\S]*ultimo_recordatorio/.test(sql)) marcadorExito = true;
         return { rows: [] };
     });
-    let settled;
-    const failingMemory = {
-        claim: async () => ({ allowed: true, id: 9 }),
-        settle: async (_id, result) => { settled = result; }
-    };
-    await crm.ejecutarRecordatorios({ contactMemory: failingMemory, sendFn: async () => false });
-    assert.equal(settled.sent, false);
-    assert.equal(marcadorExito, false);
+    let providerCalls = 0;
+    await crm.ejecutarRecordatorios({ commercialQueue: { enqueue: async item => { mensajesEnviados.push(item.phone); return { queued: true }; } }, sendFn: async () => { providerCalls++; return false; } });
+    assert.equal(providerCalls, 0);
+    assert.equal(marcadorExito, true);
 });
 
 test("onda30min: nunca envía el recordatorio a un número bloqueado", async (t) => {

@@ -32,15 +32,18 @@ function fakeDb({ failFinalUpdate = false } = {}) {
             const row = rows.find(r => r.idempotency_key === params[0]);
             return { rows: row ? [row] : [] };
         }
-        if (/SELECT id, estado[\s\S]*estado IN \('ENVIANDO','ENVIADO'\)/i.test(sql)) {
-            const row = rows.find(r => r.phone === params[0] && ["ENVIANDO", "ENVIADO"].includes(r.estado));
+        if (/SELECT id, estado[\s\S]*estado IN \('EN_COLA','ENVIANDO','ENVIADO','INCIERTO'\)/i.test(sql)) {
+            const row = rows.find(r => r.phone === params[0] && ["EN_COLA", "ENVIANDO", "ENVIADO", "INCIERTO"].includes(r.estado));
             return { rows: row ? [row] : [] };
         }
         if (/INSERT INTO recuperacion_envios/i.test(sql)) {
             if (rows.some(r => r.idempotency_key === params[6])) { const e = new Error("duplicate key"); e.code = "23505"; throw e; }
-            if (rows.some(r => r.phone === params[0] && ["ENVIANDO", "ENVIADO"].includes(r.estado))) { const e = new Error("duplicate active phone"); e.code = "23505"; throw e; }
-            const row = { id: nextId++, phone: params[0], familia: params[1], variante_indice: params[2], tono: params[3], tipo_favorito: params[4], texto: params[5], estado: "ENVIANDO", idempotency_key: params[6], creado_at: new Date(), actualizado_at: new Date(), enviado_at: null, error: null };
+            if (rows.some(r => r.phone === params[0] && ["EN_COLA", "ENVIANDO", "ENVIADO"].includes(r.estado))) { const e = new Error("duplicate active phone"); e.code = "23505"; throw e; }
+            const row = { id: nextId++, phone: params[0], familia: params[1], variante_indice: params[2], tono: params[3], tipo_favorito: params[4], texto: params[5], estado: "EN_COLA", idempotency_key: params[6], creado_at: new Date(), actualizado_at: new Date(), enviado_at: null, error: null };
             rows.push(row); return { rows: [row] };
+        }
+        if (/SELECT id,estado,creado_at,enviado_at,actualizado_at,error[\s\S]*WHERE id=\$1/i.test(sql)) {
+            const row = rows.find(r => r.id === params[0]); return { rows: row ? [row] : [] };
         }
         if (/^\s*UPDATE recuperacion_envios\s+SET estado = \$2/i.test(sql)) {
             if (failFinalUpdate) throw new Error("DB caída después del proveedor");
@@ -61,14 +64,16 @@ function fakeDb({ failFinalUpdate = false } = {}) {
 }
 
 function deps(db, { candidato: c = candidato(), sendFn = async () => true } = {}) {
-    return { pool: db, obtenerCandidato: async () => c, sendFn,
+    const queueItems = [];
+    return { pool: db, obtenerCandidato: async () => c, sendFn, queueItems,
+        commercialQueue: { enqueue: async item => { queueItems.push(item); return { queued: true, code: "QUEUED", id: queueItems.length }; } },
         contactMemory: { claim: async () => ({ allowed: true, id: 99 }), settle: async () => "SENT" } };
 }
 
-test("candidato válido: registra ENVIANDO, hace commit antes del proveedor y termina ENVIADO", async () => {
-    const db = fakeDb(); let enviado = false;
-    const r = await enviarRecuperacionManual({ phone: "5511900000001", familia: "servicio_especifico", indice: 0, idempotencyKey: "k-1" }, deps(db, { sendFn: async () => { enviado = true; return true; } }));
-    assert.equal(r.ok, true); assert.equal(r.code, "ENVIADO"); assert.equal(enviado, true); assert.equal(db.rows[0].estado, "ENVIADO");
+test("candidato válido: registra EN_COLA, sin llamar al proveedor antes del scheduler", async () => {
+    const db = fakeDb(); let enviado = false; const d = deps(db, { sendFn: async () => { enviado = true; return true; } });
+    const r = await enviarRecuperacionManual({ phone: "5511900000001", familia: "servicio_especifico", indice: 0, idempotencyKey: "k-1" }, d);
+    assert.equal(r.ok, true); assert.equal(r.code, "EN_COLA"); assert.equal(enviado, false); assert.equal(db.rows[0].estado, "EN_COLA"); assert.equal(d.queueItems.length, 1);
 });
 
 for (const [nombre, extra] of [
@@ -90,10 +95,10 @@ test("variante inexistente o manipulada: se rechaza y nunca se envía texto arbi
     assert.equal(r.code, "VARIANTE_INVALIDA"); assert.equal(llamadas, 0); assert.equal(db.rows.length, 0);
 });
 
-test("fallo WhatsApp: registra FALLIDO y nunca ENVIADO", async () => {
+test("una solicitud aprobada solo queda en cola; el resultado del proveedor se registra al despacharla", async () => {
     const db = fakeDb();
     const r = await enviarRecuperacionManual({ phone: "5511900000001", familia: "servicio_especifico", indice: 0, idempotencyKey: "k-fail" }, deps(db, { sendFn: async () => false }));
-    assert.equal(r.ok, false); assert.equal(r.code, "ENVIO_FALLIDO"); assert.equal(db.rows[0].estado, "FALLIDO");
+    assert.equal(r.ok, true); assert.equal(r.code, "EN_COLA"); assert.equal(db.rows[0].estado, "EN_COLA");
 });
 
 test("misma idempotency key/retry: un solo envío", async () => {
@@ -101,7 +106,7 @@ test("misma idempotency key/retry: un solo envío", async () => {
     const d = deps(db, { sendFn: async () => { llamadas++; return true; } });
     const a = await enviarRecuperacionManual({ phone: "5511900000001", familia: "servicio_especifico", indice: 0, idempotencyKey: "k-retry" }, d);
     const b = await enviarRecuperacionManual({ phone: "5511900000001", familia: "servicio_especifico", indice: 0, idempotencyKey: "k-retry" }, d);
-    assert.equal(a.code, "ENVIADO"); assert.equal(b.code, "YA_ENVIADO"); assert.equal(llamadas, 1); assert.equal(db.rows.length, 1);
+    assert.equal(a.code, "EN_COLA"); assert.equal(b.code, "INTENTO_EXISTENTE"); assert.equal(llamadas, 0); assert.equal(db.rows.length, 1);
 });
 
 test("idempotency key reutilizada para otro teléfono o variante: conflicto, no envía", async () => {
@@ -112,61 +117,55 @@ test("idempotency key reutilizada para otro teléfono o variante: conflicto, no 
     const otroTelefono = await enviarRecuperacionManual({ phone: "5511900000002", familia: "servicio_especifico", indice: 0, idempotencyKey: "k-conflict" }, d);
     assert.equal(otraVariante.code, "IDEMPOTENCY_CONFLICT");
     assert.equal(otroTelefono.code, "IDEMPOTENCY_CONFLICT");
-    assert.equal(llamadas, 1);
+    assert.equal(llamadas, 0);
 });
 
-test("requests concurrentes: el índice de teléfono deja un solo envío", async () => {
-    const db = fakeDb(); let liberar; let llamadas = 0;
-    const bloqueado = new Promise(resolve => { liberar = resolve; });
-    const d = deps(db, { sendFn: async () => { llamadas++; await bloqueado; return true; } });
-    const primero = enviarRecuperacionManual({ phone: "5511900000001", familia: "servicio_especifico", indice: 0, idempotencyKey: "k-con-1" }, d);
-    while (db.rows.length === 0) await new Promise(r => setImmediate(r));
-    const segundo = await enviarRecuperacionManual({ phone: "5511900000001", familia: "servicio_especifico", indice: 0, idempotencyKey: "k-con-2" }, d);
-    assert.ok(["EN_CURSO", "COOLDOWN"].includes(segundo.code)); assert.equal(llamadas, 1);
-    liberar(); await primero;
+test("dos solicitudes simultáneas no agregan dos contactos pendientes al mismo cliente", async () => {
+    const db = fakeDb(); let llamadas = 0;
+    const d = deps(db, { sendFn: async () => { llamadas++; return true; } });
+    const results = await Promise.all(["k-con-1", "k-con-2"].map(idempotencyKey => enviarRecuperacionManual({ phone: "5511900000001", familia: "servicio_especifico", indice: 0, idempotencyKey }, d)));
+    assert.equal(db.rows.length, 1); assert.equal(llamadas, 0); assert.equal(results.filter(result => result.code === "EN_COLA").length, 1);
 });
 
-test("requests concurrentes después de expirar cooldown: solo una obtiene el claim", async () => {
+test("después del cooldown se conserva el historial y vuelve a admitir una sola fila en cola", async () => {
     const db = fakeDb();
     const inicial = deps(db, { sendFn: async () => true });
     await enviarRecuperacionManual({ phone: "5511900000001", familia: "servicio_especifico", indice: 0, idempotencyKey: "k-exp-0" }, inicial);
+    db.rows[0].estado = "ENVIADO";
     db.rows[0].enviado_at = new Date(Date.now() - 25 * 3600000);
-    let liberar; let llamadas = 0;
-    const espera = new Promise(resolve => { liberar = resolve; });
-    const d = deps(db, { sendFn: async () => { llamadas++; await espera; return true; } });
-    const a = enviarRecuperacionManual({ phone: "5511900000001", familia: "servicio_especifico", indice: 0, idempotencyKey: "k-exp-1" }, d);
-    while (db.rows.filter(r => r.estado === "ENVIANDO").length === 0) await new Promise(r => setImmediate(r));
-    const b = await enviarRecuperacionManual({ phone: "5511900000001", familia: "servicio_especifico", indice: 0, idempotencyKey: "k-exp-2" }, d);
-    assert.ok(["EN_CURSO", "COOLDOWN"].includes(b.code)); assert.equal(llamadas, 1);
-    liberar(); await a;
-    assert.equal(db.rows.filter(r => r.estado === "ENVIADO").length, 1);
+    const d = deps(db);
+    const [a, b] = await Promise.all(["k-exp-1", "k-exp-2"].map(idempotencyKey => enviarRecuperacionManual({ phone: "5511900000001", familia: "servicio_especifico", indice: 0, idempotencyKey }, d)));
+    assert.equal([a, b].filter(result => result.code === "EN_COLA").length, 1);
+    assert.ok([a, b].some(result => ["EN_CURSO", "COOLDOWN"].includes(result.code)));
+    assert.equal(db.rows.filter(r => r.estado === "EN_COLA").length, 1);
     assert.equal(db.rows.some(r => r.estado === "EXPIRADO"), true);
 });
 
-test("éxito Z-API pero fallo de UPDATE local: queda ENVIANDO y no se reintenta", async () => {
+test("una cola pendiente no reintenta un envío: el proveedor solo se invoca desde el scheduler", async () => {
     const db = fakeDb({ failFinalUpdate: true }); let llamadas = 0;
     const d = deps(db, { sendFn: async () => { llamadas++; return true; } });
     const r = await enviarRecuperacionManual({ phone: "5511900000001", familia: "servicio_especifico", indice: 0, idempotencyKey: "k-ambiguous" }, d);
-    assert.equal(r.code, "ESTADO_AMBIGUO"); assert.equal(r.historial.estado, "ENVIANDO"); assert.equal(llamadas, 1);
+    assert.equal(r.code, "EN_COLA"); assert.equal(r.historial.estado, "EN_COLA"); assert.equal(llamadas, 0);
     const retry = await enviarRecuperacionManual({ phone: "5511900000001", familia: "servicio_especifico", indice: 0, idempotencyKey: "k-ambiguous-2" }, d);
-    assert.equal(retry.code, "EN_CURSO"); assert.equal(llamadas, 1);
+    assert.equal(retry.code, "EN_CURSO"); assert.equal(llamadas, 0);
 });
 
 test("preview B: enviar reconstruye y registra exactamente familia+índice aprobados, sin nueva selección aleatoria", async () => {
     const db = fakeDb(); let textoEnviado = null;
     const d = deps(db, { sendFn: async (_phone, texto) => { textoEnviado = texto; return true; } });
     const r = await enviarRecuperacionManual({ phone: "5511900000001", familia: "servicio_especifico", indice: 0, idempotencyKey: "k-preview-b" }, d);
-    assert.equal(r.ok, true); assert.equal(textoEnviado, r.texto); assert.equal(db.rows[0].texto, r.texto); assert.match(r.texto, /consultaste un envío a CUP/i);
+    assert.equal(r.ok, true); assert.equal(textoEnviado, null); assert.equal(db.rows[0].texto, r.texto); assert.match(r.texto, /consultaste un envío a CUP/i); assert.equal(d.queueItems[0].content, r.texto);
 });
 
 test("cooldown menor de 24h bloquea, y después de 24h permite otro intento conservando historial", async () => {
     const db = fakeDb(); const d = deps(db, { sendFn: async () => true });
     await enviarRecuperacionManual({ phone: "5511900000001", familia: "servicio_especifico", indice: 0, idempotencyKey: "k-cd-1" }, d);
     const bloqueado = await enviarRecuperacionManual({ phone: "5511900000001", familia: "servicio_especifico", indice: 0, idempotencyKey: "k-cd-2" }, d);
-    assert.equal(bloqueado.code, "COOLDOWN");
+    assert.ok(["COOLDOWN", "EN_CURSO"].includes(bloqueado.code));
+    db.rows[0].estado = "ENVIADO";
     db.rows[0].enviado_at = new Date(Date.now() - 25 * 3600000);
     const permitido = await enviarRecuperacionManual({ phone: "5511900000001", familia: "servicio_especifico", indice: 0, idempotencyKey: "k-cd-3" }, d);
-    assert.equal(permitido.code, "ENVIADO"); assert.equal(db.rows.length, 2); assert.equal(db.rows[0].estado, "EXPIRADO");
+    assert.equal(permitido.code, "EN_COLA"); assert.equal(db.rows.length, 2); assert.equal(db.rows[0].estado, "EXPIRADO");
 });
 
 test("preview sigue siendo GET/read-only y no hay ruta de envío masivo", () => {

@@ -3,8 +3,7 @@
 const pool = require("../../db");
 const recuperacion = require("./recuperacion");
 const mensajes = require("./recuperacion-mensajes");
-const { enviarMensaje } = require("./zapi");
-const contactMemory = require("./commercial-contact-memory");
+const commercialQueue = require("./commercial-outbound-queue");
 
 const COOLDOWN_HORAS = 24;
 
@@ -33,21 +32,21 @@ async function buscarBloqueoActual(phone, executor) {
     const r = await executor.query(`
         SELECT id, estado, creado_at, enviado_at, actualizado_at, error
         FROM recuperacion_envios
-        WHERE phone = $1 AND estado IN ('ENVIANDO','ENVIADO')
+        WHERE phone = $1 AND estado IN ('EN_COLA','ENVIANDO','ENVIADO','INCIERTO')
         ORDER BY id DESC LIMIT 1
     `, [phone]);
     return r.rows[0] || null;
 }
 
 /**
- * Reclama un único intento y solo después del COMMIT llama al proveedor.
+ * Registra el intento y lo agrega a la cola compartida; solo el scheduler
+ * puede llamar al proveedor tras revalidar sus condiciones.
  * El índice parcial de la migración protege también dos POST concurrentes
  * con idempotency keys distintas para el mismo cliente.
  */
-async function enviarRecuperacionManual({ phone, familia, indice, idempotencyKey, textoAprobado = null }, deps = {}) {
+async function enviarRecuperacionManual({ phone, familia, indice, idempotencyKey, textoAprobado = null, metadata = {} }, deps = {}) {
     const db = deps.pool || pool;
     const candidatoFn = deps.obtenerCandidato || recuperacion.obtenerCandidatoRecuperablePorTelefono;
-    const sendFn = deps.sendFn || enviarMensaje;
     if (!phone || !idempotencyKey || String(idempotencyKey).length > 120) {
         return { ok: false, code: "PETICION_INVALIDA", error: "Faltan teléfono o idempotency key válida." };
     }
@@ -123,7 +122,7 @@ async function enviarRecuperacionManual({ phone, familia, indice, idempotencyKey
         const insertado = await client.query(`
             INSERT INTO recuperacion_envios
                 (phone, familia, variante_indice, tono, tipo_favorito, texto, estado, idempotency_key)
-            VALUES ($1,$2,$3,$4,$5,$6,'ENVIANDO',$7)
+            VALUES ($1,$2,$3,$4,$5,$6,'EN_COLA',$7)
             RETURNING id, estado, creado_at, enviado_at, actualizado_at, error
         `, [phone, aprobado.familia, aprobado.indice, aprobado.tono,
             candidato.tipoFavorito || null, aprobado.mensaje, String(idempotencyKey)]);
@@ -145,69 +144,22 @@ async function enviarRecuperacionManual({ phone, familia, indice, idempotencyKey
         if (client) client.release();
     }
 
-    // El proveedor se llama únicamente después de haber confirmado ENVIANDO.
-    let memoria;
-    try {
-        memoria = await (deps.contactMemory || contactMemory).claim({
-            phone, source: "recuperacion", reason: `campana_${familia}`,
-            strategy: `recuperacion_${familia}_${indice}`, content: aprobado.mensaje,
-            metadata: { recoveryAttemptId: intento.id }
-        });
-    } catch (e) {
-        await db.query(`UPDATE recuperacion_envios SET estado = 'FALLIDO', error = $2, actualizado_at = NOW() WHERE id = $1`,
-            [intento.id, `No se pudo coordinar contacto: ${e.message}`]).catch(() => {});
-        return { ok: false, code: "CONTACT_MEMORY_ERROR", error: "No se pudo validar el historial comercial." };
+    const queued = await (deps.commercialQueue || commercialQueue).enqueue({
+        phone, source: "RECUPERACION", reason: `campana_${familia}`,
+        strategy: `recuperacion_${familia}_${indice}`, content: aprobado.mensaje,
+        idempotencyKey: `recovery-${idempotencyKey}`, recoveryAttemptId: intento.id,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        metadata: { ...metadata, familia: aprobado.familia, indice: aprobado.indice, operatorApproved: true }
+    }, { pool: db });
+    if (!queued.queued) {
+        const state = ["OPTED_OUT", "HUMAN_PAUSE", "NO_VERIFIABLE_MARKETING_CONSENT", "CUSTOMER_ALREADY_QUEUED", "BLOCKED_NUMBER"].includes(queued.code) ? "CANCELADO" : "FALLIDO";
+        await db.query("UPDATE recuperacion_envios SET estado=$2,error=$3,actualizado_at=NOW() WHERE id=$1 AND estado='EN_COLA'",
+            [intento.id, state, queued.code]).catch(() => {});
+        return { ok: false, code: queued.code, error: "No se pudo agregar el contacto a la cola comercial.", historial: { ...resultadoHistorial(intento), estado: state } };
     }
-    if (!memoria.allowed) {
-        await db.query(`UPDATE recuperacion_envios SET estado = 'FALLIDO', error = $2, actualizado_at = NOW() WHERE id = $1`,
-            [intento.id, `Contacto omitido por control comercial: ${memoria.code}`]).catch(() => {});
-        return { ok: false, code: memoria.code, error: "El historial comercial impide contactar ahora." };
-    }
-    let enviado = false;
-    let error = null;
-    try {
-        enviado = await sendFn(phone, aprobado.mensaje);
-        if (!enviado) error = "El proveedor no confirmó el envío.";
-    } catch (e) {
-        error = e.message || "Error del proveedor WhatsApp.";
-    }
-    await (deps.contactMemory || contactMemory).settle(memoria.id, { sent: enviado, error });
-
-    let actualizado;
-    try {
-        actualizado = await db.query(`
-            UPDATE recuperacion_envios
-            SET estado = $2,
-                enviado_at = CASE WHEN $2 = 'ENVIADO' THEN NOW() ELSE enviado_at END,
-                error = $3,
-                actualizado_at = NOW()
-            WHERE id = $1
-            RETURNING id, estado, creado_at, enviado_at, actualizado_at, error
-        `, [intento.id, enviado ? "ENVIADO" : "FALLIDO", error]);
-    } catch (e) {
-        // Z-API pudo aceptar el mensaje, pero no podemos confirmar el estado
-        // local. El claim ENVIANDO permanece bloqueado deliberadamente: no se
-        // reintenta y se investiga manualmente para evitar un duplicado.
-        console.error("❌ Estado ambiguo en recuperación manual:", e.message);
-        return {
-            ok: false,
-            code: "ESTADO_AMBIGUO",
-            error: "El mensaje pudo enviarse, pero no se pudo confirmar el estado local. No se reintentó.",
-            historial: { id: intento.id, estado: "ENVIANDO", fecha: intento.creado_at, error: e.message }
-        };
-    }
-    if (!actualizado.rows[0]) {
-        return {
-            ok: false,
-            code: "ESTADO_AMBIGUO",
-            error: "No se pudo confirmar el estado local. No se reintentó.",
-            historial: { id: intento.id, estado: "ENVIANDO", fecha: intento.creado_at, error: "UPDATE sin fila" }
-        };
-    }
-    const historial = resultadoHistorial(actualizado.rows[0] || intento);
-    return enviado
-        ? { ok: true, code: "ENVIADO", historial, texto: aprobado.mensaje }
-        : { ok: false, code: "ENVIO_FALLIDO", error, historial };
+    const queuedRow = await db.query(`SELECT id,estado,creado_at,enviado_at,actualizado_at,error
+        FROM recuperacion_envios WHERE id=$1`, [intento.id]);
+    return { ok: true, code: "EN_COLA", queueId: queued.id, historial: resultadoHistorial(queuedRow.rows[0] || intento), texto: aprobado.mensaje };
 }
 
 module.exports = {

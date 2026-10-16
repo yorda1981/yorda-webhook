@@ -24,6 +24,19 @@
             <div class="small" id="adminRatesStatus"></div>
             <div class="status" id="ratesStatus"></div>
         </div></section>
+        <section class="panel"><h2>Cola de contactos comerciales</h2><div class="content">
+            <div class="grid" style="margin-top:0"><article class="metric"><span>Pendientes</span><strong id="commercialPendingCount">0</strong></article><article class="metric"><span>Enviados hoy</span><strong id="commercialSentCount">0</strong></article><article class="metric"><span>Cancelados</span><strong id="commercialCancelledCount">0</strong></article><article class="metric"><span>Fallidos / inciertos</span><strong id="commercialFailedCount">0</strong></article></div>
+            <div style="display:flex;gap:10px;align-items:end;flex-wrap:wrap">
+                <label>Límite diario (máx. 10)<input id="commercialDailyLimit" type="number" min="1" max="10" value="10" style="display:block;width:120px"></label>
+                <label>Desde<input id="commercialOpening" type="time" value="09:00" style="display:block"></label>
+                <label>Hasta<input id="commercialClosing" type="time" value="18:00" style="display:block"></label>
+                <button id="saveCommercial" type="button">Guardar límites</button>
+                <button id="toggleCommercial" type="button">Pausar cola</button>
+            </div>
+            <div class="small" id="commercialInfo">Horarios de São Paulo. Un único envío cada intervalo calculado según el límite diario. Cotizaciones y atención del bot permanecen fuera de esta cola. Las campañas requieren opt-in explícito del cliente (ACEPTO PROMOCIONES / ACEITO PROMOÇÕES).</div>
+            <div class="status" id="commercialStatus"></div>
+            <div id="commercialQueue"></div>
+        </div></section>
         <div class="columns">
             <div>
                 <section class="panel"><h2>Pulso del grupo</h2><div class="content" id="pulse"></div></section>
@@ -59,6 +72,7 @@ function renderPulse(p){
     replace("pulseLeaves",p.bajasPorPublicacion.map(x=>row(`${x.bajas} ${x.bajas===1?"baja":"bajas"} · ${x.titulo}`,date(x.publicadaAt))),"Todavía no hay publicaciones en el grupo.");
 }
 function render(data){renderPulse(data.pulse);for(const [key,id] of [["programadas","scheduled"],["ejecutadas","executed"],["fallidas","failed"],["canceladas","canceled"]])byId(id).textContent=data.counts[key]??0;
+    renderCommercial(data.commercialOutbound);
     const rates=data.dailyRates;
     byId("ratesEnabled").checked=Boolean(rates?.enabled);
     byId("ratesTime").value=rates?.time||"09:00";
@@ -76,7 +90,10 @@ function render(data){renderPulse(data.pulse);for(const [key,id] of [["programad
     replace("services",services,"Estado no disponible.");
     replace("destinations",data.destinations.map(d=>row(d.nombre,`${d.tipo} · ${d.external_id} · ${d.activo?"Activo":"Inactivo"} · validado ${date(d.validado_at)}`)),"No hay destinos registrados.");
 }
+function renderCommercial(snapshot){if(!snapshot?.settings)return;const s=snapshot.settings,c=snapshot.counts||{};byId("commercialPendingCount").textContent=c.pending??0;byId("commercialSentCount").textContent=c.sent_today??0;byId("commercialCancelledCount").textContent=c.cancelled??0;byId("commercialFailedCount").textContent=c.failed??0;byId("commercialDailyLimit").value=s.daily_limit;byId("commercialOpening").value=String(s.opening_time).slice(0,5);byId("commercialClosing").value=String(s.closing_time).slice(0,5);byId("toggleCommercial").textContent=s.paused?"Reanudar cola":"Pausar cola";byId("commercialInfo").textContent=`Cola ${s.paused?"PAUSADA":"ACTIVA"} · límite ${s.daily_limit}/día · ${String(s.opening_time).slice(0,5)}–${String(s.closing_time).slice(0,5)} ${s.time_zone} · próximo turno ${date(snapshot.nextSendAt)}. Un estado incierto no se reintenta. Campañas requieren opt-in: ACEPTO PROMOCIONES / ACEITO PROMOÇÕES.`;replace("commercialQueue",(snapshot.pending||[]).map(x=>row(`${x.source} · ${x.phone} · ${x.state}`,`${x.reason} · creado ${date(x.created_at)} · vence ${date(x.expires_at)}`)),"No hay mensajes comerciales pendientes.")}
 byId("connect").addEventListener("click",async()=>{const token=byId("token").value.trim();if(!token){byId("status").textContent="Introduce el token administrativo.";return}byId("status").textContent="Cargando estado...";try{const response=await fetch("/admin/content-operations",{headers:{Authorization:`Bearer ${token}`}});const data=await response.json();if(!response.ok)throw new Error(data.error||"No se pudo cargar el estado.");render(data.operations);byId("panel").hidden=false;byId("status").textContent=`Actualizado ${date(new Date())}.`;}catch(error){byId("panel").hidden=true;byId("status").textContent=error.message}});
+byId("saveCommercial").addEventListener("click",async()=>{const token=byId("token").value.trim();byId("commercialStatus").textContent="Guardando límites...";try{const response=await fetch("/admin/content-operations/commercial-outbound/settings",{method:"PUT",headers:{Authorization:`Bearer ${token}`,"Content-Type":"application/json"},body:JSON.stringify({dailyLimit:Number(byId("commercialDailyLimit").value),openingTime:byId("commercialOpening").value,closingTime:byId("commercialClosing").value})});const data=await response.json();if(!response.ok)throw new Error(data.error||"No se pudo guardar.");byId("commercialStatus").textContent="Límites guardados.";byId("connect").click();}catch(error){byId("commercialStatus").textContent=error.message}});
+byId("toggleCommercial").addEventListener("click",async()=>{const token=byId("token").value.trim();const paused=byId("toggleCommercial").textContent.includes("Pausar");try{const response=await fetch(`/admin/content-operations/commercial-outbound/${paused?"pause":"resume"}`,{method:"POST",headers:{Authorization:`Bearer ${token}`}});const data=await response.json();if(!response.ok)throw new Error(data.error||"No se pudo cambiar el estado.");byId("commercialStatus").textContent=paused?"Cola pausada.":"Cola reanudada.";byId("connect").click();}catch(error){byId("commercialStatus").textContent=error.message}});
 byId("saveRates").addEventListener("click",async()=>{const token=byId("token").value.trim();byId("ratesStatus").textContent="Guardando...";try{const response=await fetch("/admin/content-library/daily-rates",{method:"PUT",headers:{Authorization:`Bearer ${token}`,"Content-Type":"application/json"},body:JSON.stringify({enabled:byId("ratesEnabled").checked,time:byId("ratesTime").value})});const data=await response.json();if(!response.ok)throw new Error(data.error||"No se pudo guardar el horario.");byId("ratesStatus").textContent=`Guardado: ${data.settings.enabled?"activo":"pausado"} · ${data.settings.time} · ${data.settings.timeZone}.`; }catch(error){byId("ratesStatus").textContent=error.message}});
 </script>
 </body>

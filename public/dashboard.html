@@ -1405,8 +1405,8 @@
                     alert("❌ " + (d.error || "No se pudo enviar. La situación del cliente puede haber cambiado."));
                     return;
                 }
-                btn.innerText = "✅ ENVIADO";
-                document.getElementById("recMensajeHistorial").innerText = `Última recuperación: ${new Date(d.historial.fecha).toLocaleString("pt-BR")} · Estado: ENVIADO`;
+                btn.innerText = d.code === "EN_COLA" ? "✅ EN COLA" : "✅ ENVIADO";
+                document.getElementById("recMensajeHistorial").innerText = `Última recuperación: ${new Date(d.historial.fecha).toLocaleString("pt-BR")} · Estado: ${d.code === "EN_COLA" ? "EN COLA · envío gradual" : "ENVIADO"}`;
                 await cargarRecuperacion();
             } catch (e) {
                 btn.disabled = false;

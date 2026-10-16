@@ -4,6 +4,7 @@ const pool = require("../../db");
 const env = require("../config/env");
 const { SCHEMA_STATES } = require("./schema-status");
 const dailyRates = require("./content-daily-rates");
+const commercialOutboundQueue = require("./commercial-outbound-queue");
 
 const SCHEDULER_LABEL_BY_SCHEMA = Object.freeze({
     [SCHEMA_STATES.VERIFICANDO]: "VERIFICANDO ESQUEMA",
@@ -35,9 +36,9 @@ function schemaBlockedSnapshot(schema) {
     };
 }
 
-async function getOperationsSnapshot(db = pool, { schedulerStarted = false, schema = null } = {}) {
+async function getOperationsSnapshot(db = pool, { schedulerStarted = false, schema = null, outbound = commercialOutboundQueue } = {}) {
     if (schema && schema.estado !== SCHEMA_STATES.COMPLETO) return schemaBlockedSnapshot(schema);
-    const [counts, latest, next, events, destinations, ratesSettings, latestRatesSchedule, latestAdminRatesSchedule] = await Promise.all([
+    const [counts, latest, next, events, destinations, ratesSettings, latestRatesSchedule, latestAdminRatesSchedule, commercialOutbound] = await Promise.all([
         db.query(`
             SELECT
                 COUNT(*) FILTER (WHERE estado = 'PENDIENTE')::int AS programadas,
@@ -82,7 +83,8 @@ async function getOperationsSnapshot(db = pool, { schedulerStarted = false, sche
             SELECT id, programada_para, ejecutada_at, estado, result_code, error, idempotency_key
             FROM content_schedules WHERE idempotency_key LIKE 'daily-rates-admin-%'
             ORDER BY id DESC LIMIT 1
-        `)
+        `),
+        outbound.getSnapshot(db)
     ]);
 
     return {
@@ -94,6 +96,7 @@ async function getOperationsSnapshot(db = pool, { schedulerStarted = false, sche
         dailyRates: ratesSettings,
         latestDailyRatesSchedule: latestRatesSchedule.rows[0] || null,
         latestDailyRatesAdminSchedule: latestAdminRatesSchedule.rows[0] || null,
+        commercialOutbound,
         schema,
         services: {
             scheduler: schedulerStarted ? "INICIADO" : "NO INICIADO",

@@ -4,6 +4,7 @@ const pool = require("../../db");
 const contentPublisher = require("./content-publisher");
 const contentSelector = require("./content-selector");
 const dailyRates = require("./content-daily-rates");
+const commercialOutboundQueue = require("./commercial-outbound-queue");
 
 const SCHEDULE_STATES = Object.freeze({
     PENDING: "PENDIENTE",
@@ -162,7 +163,8 @@ async function claimDueSchedules({ limit = 10 } = {}, db = pool) {
                 SELECT id
                 FROM content_schedules
                 WHERE estado = $1 AND programada_para <= NOW()
-                ORDER BY programada_para ASC, id ASC
+                ORDER BY CASE WHEN idempotency_key LIKE 'daily-rates-%' THEN 0 ELSE 1 END,
+                         programada_para ASC, id ASC
                 FOR UPDATE SKIP LOCKED
                 LIMIT $2
             ), claimed AS (
@@ -273,10 +275,19 @@ async function runDueSchedulesOnce(dependencies = {}) {
     } catch (error) {
         console.error("❌ Tasas diarias al destino administrativo:", error.message);
     }
-    const claimed = await claimDueSchedules({ limit: dependencies.limit || 10 }, db);
+    // Una publicación de Biblioteca por ciclo evita vaciar de golpe una cola
+    // de campañas acumulada tras una interrupción. Las tasas usan la ruta
+    // operativa diaria existente y permanecen independientes.
+    const claimed = await claimDueSchedules({ limit: dependencies.limit || 1 }, db);
     const results = [];
     for (const schedule of claimed) {
         results.push(await executeClaimedSchedule(schedule, dependencies));
+    }
+    try {
+        const commercial = await (dependencies.processCommercialOutbound || commercialOutboundQueue.processNext)({ pool: db });
+        if (!['EMPTY', 'WAITING_FOR_SLOT', 'WAITING_FOR_APPROVAL_COMMIT', 'PAUSED', 'WORKER_BUSY'].includes(commercial?.code)) results.push({ commercialOutbound: commercial });
+    } catch (error) {
+        console.error("❌ Cola comercial:", error.message);
     }
     return results;
 }

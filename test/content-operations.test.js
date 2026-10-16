@@ -15,7 +15,7 @@ test("consolida métricas, programación, publicación, eventos, destinos y serv
         if (sql.includes("FROM content_destinations")) return { rows: [{ nombre: "Clientes", activo: true }] };
         assert.fail("Consulta operacional inesperada");
     } };
-    const snapshot = await getOperationsSnapshot(db, { schedulerStarted: true });
+    const snapshot = await getOperationsSnapshot(db, { schedulerStarted: true, outbound: { getSnapshot: async () => ({ settings: { paused: true }, counts: {}, pending: [], nextSendAt: null }) } });
     assert.deepEqual(snapshot.counts, { programadas: 2, ejecutadas: 5, fallidas: 1, canceladas: 3 });
     assert.equal(snapshot.latestPublication.titulo, "Confianza");
     assert.equal(snapshot.nextSchedule.idioma, "es");

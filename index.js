@@ -14,6 +14,8 @@ const crm = require("./src/services/crm");
 const recuperacionService = require("./src/services/recuperacion");
 const recuperacionMensajes = require("./src/services/recuperacion-mensajes");
 const recuperacionEnvios = require("./src/services/recuperacion-envios");
+const commercialOutboundQueue = require("./src/services/commercial-outbound-queue");
+const marketingConsent = require("./src/services/marketing-consent");
 const entregasService = require("./src/services/entregas");
 const { esPedidoWeb, procesarPedidoWeb, crearEntregaManual, cotizarTransferenciaManual, crearTransferenciaManual } = require("./src/flows/pedido-web-flow");
 const { enviarSeguro, getAdminPhone, getPIXKey, getPIXHolder, getPIXBank, getPIXImage, limpiarSesion } = require("./src/flows/shared");
@@ -295,6 +297,11 @@ app.post("/webhook", verificarSecretoWebhook, webhookLimiter, validarPayloadWebh
         const messageId = body.messageId || body.id || body.zeId;
         if (await yaFueProcesado(messageId)) return;
 
+        // Una respuesta del cliente invalida seguimientos comerciales en cola;
+        // el bot y las respuestas transaccionales continúan por su ruta normal.
+        await commercialOutboundQueue.cancelPendingForPhone(phoneRaw, "CLIENT_REPLIED").catch(error =>
+            console.error("⚠️ No se pudieron cancelar contactos comerciales pendientes:", error.message));
+
         // Número bloqueado: cero automatización, ni siquiera llega al portón
         // de gatillos ni a la pausa humana. No borra ni toca nada de
         // customers/operations/entregas — ver src/services/blocked-numbers.js.
@@ -350,6 +357,15 @@ app.post("/webhook", verificarSecretoWebhook, webhookLimiter, validarPayloadWebh
         }
 
         if (!textMessage) return;
+
+        // El opt-in comercial solo se registra cuando el cliente usa una
+        // frase afirmativa exacta; no se deduce del uso normal del bot.
+        if (marketingConsent.isExplicitOptIn(textMessage)) {
+            await guardarCliente({ phone: phoneRaw, nombre: pushName });
+            const recorded = await marketingConsent.recordExplicitOptIn({ phone: phoneRaw, messageId, text: textMessage });
+            if (recorded) await enviarSeguro(phoneRaw, "Quedó registrado que aceptas recibir comunicaciones comerciales de YORDA. Puedes cancelar cuando quieras escribiendo STOP.");
+            return;
+        }
 
         // Referidos: solo comandos explícitos solicitados por el cliente o
         // códigos declarados expresamente. Nunca se infiere una recomendación
@@ -531,8 +547,8 @@ app.post("/admin/recuperacion/enviar", adminWriteLimiter, verificarToken, async 
             idempotencyKey: String(body.idempotencyKey || "").trim()
         });
         const codigo = resultado.code;
-        const status = codigo === "ENVIADO" || codigo === "YA_ENVIADO" ? 200
-            : codigo === "NO_ELEGIBLE" ? 409
+        const status = codigo === "ENVIADO" || codigo === "YA_ENVIADO" || codigo === "EN_COLA" ? 200
+            : ["NO_ELEGIBLE", "NO_VERIFICABLE_MARKETING_CONSENT", "OPTED_OUT", "HUMAN_PAUSE", "BLOCKED_NUMBER", "CUSTOMER_ALREADY_QUEUED", "APPROVAL_REQUIRED"].includes(codigo) ? 409
             : codigo === "COOLDOWN" || codigo === "EN_CURSO" || codigo === "INTENTO_EXISTENTE" ? 409
             : codigo === "VARIANTE_INVALIDA" || codigo === "PETICION_INVALIDA" || codigo === "IDEMPOTENCY_CONFLICT" ? 400
             : 502;
@@ -707,7 +723,9 @@ app.post("/admin/completar-operacion/:id", adminWriteLimiter, verificarToken, as
             if (nivelNuevo > nivelAnterior && !(await blockedNumbers.estaBloqueado(operacion.phone))) {
                 const estrellas = "⭐".repeat(nivelNuevo);
                 const mVip = `🌟 *¡Felicidades! Alcanzaste el nivel VIP ${estrellas} de YORDA.*\n\nGracias por confiar en nosotros y elegirnos para tus remesas. Si tienes una transferencia en mente, escríbenos y te ayudamos con las condiciones vigentes. 💜🇨🇺`;
-                await enviarMensaje(operacion.phone, mVip);
+                await commercialOutboundQueue.enqueue({ phone: operacion.phone, source: "VIP", reason: "nivel_vip_nuevo",
+                    strategy: `vip_level_${nivelNuevo}`, content: mVip,
+                    idempotencyKey: `vip-operation-${operacion.id}-${nivelNuevo}`, metadata: { level: nivelNuevo, operationId: operacion.id } });
             } else if (nivelNuevo < nivelAnterior) {
                 console.log(`ℹ️ Cliente ${operacion.phone} bajó de nivel VIP: ${nivelAnterior} → ${nivelNuevo}`);
             }
@@ -1021,7 +1039,9 @@ async function recalcularNivelesVipYAvisar() {
             if (c.nivel_nuevo > c.nivel_anterior) {
                 const estrellas = "⭐".repeat(c.nivel_nuevo);
                 const mVip = `🌟 *¡Felicidades! Ahora eres cliente VIP ${estrellas} de Yorda Envíos!*\n\nDesde ahora tienes:\n💰 Tasa preferencial en tus próximas transferencias\n🚚 Descuento en tus pedidos de entrega en efectivo\n🎁 Promociones exclusivas para ti\n\n¡Gracias por confiar en nosotros! 💜🇨🇺`;
-                await enviarMensaje(c.phone, mVip);
+                await commercialOutboundQueue.enqueue({ phone: c.phone, source: "VIP", reason: "nivel_vip_nuevo",
+                    strategy: `vip_level_${c.nivel_nuevo}`, content: mVip,
+                    idempotencyKey: `vip-daily-${c.phone}-${c.nivel_nuevo}`, metadata: { level: c.nivel_nuevo } });
             } else {
                 console.log(`ℹ️ Cliente ${c.phone} bajó de nivel VIP: ${c.nivel_anterior} → ${c.nivel_nuevo}`);
             }

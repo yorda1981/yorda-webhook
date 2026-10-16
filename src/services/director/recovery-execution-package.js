@@ -501,7 +501,8 @@ async function resolvePackage(rawId, action, db = pool, dependencies = {}) {
                     content = refreshContentForRates(content, latestRates, row, dependencies.now || new Date(), results);
                     content.ejecucion = { ...(content.ejecucion || {}), adaptador: "RECUPERACION_CRM", resultadosParciales: results,
                         completados: results.filter(result => result.estado === "ENVIADO" || result.estado === "YA_ENVIADO").length,
-                        fallidos: results.filter(result => !["ENVIADO", "YA_ENVIADO"].includes(result.estado)).length };
+                        enCola: results.filter(result => result.estado === "EN_COLA").length,
+                        fallidos: results.filter(result => !["ENVIADO", "YA_ENVIADO", "EN_COLA"].includes(result.estado)).length };
                     await db.query("UPDATE director_execution_packages SET contenido = $2::jsonb, actualizado_at = NOW() WHERE id = $1 AND estado = 'BORRADOR'",
                         [id, JSON.stringify(content)]);
                     throw validationError("La tasa cambió durante el envío. Se detuvieron los mensajes pendientes y se recalculó el paquete; revisa y vuelve a aprobar.");
@@ -510,13 +511,15 @@ async function resolvePackage(rawId, action, db = pool, dependencies = {}) {
             const sendRecovery = dependencies.sendRecovery || recuperacionEnvios.enviarRecuperacionManual;
             const sent = await sendRecovery({
                 phone: client.phone, familia: client.familia, indice: client.varianteIndice,
-                textoAprobado: client.mensaje, idempotencyKey: `director-package-${id}-${client.phone}`
+                textoAprobado: client.mensaje, idempotencyKey: `director-package-${id}-${client.phone}`,
+                metadata: { campaignId: id, approvalStatus: "APROBADO" }
             }, { pool: db });
             results.push({ phone: client.phone, estado: sent.code, error: sent.error || null });
         }
         content.ejecucion = { ...(content.ejecucion || {}), adaptador: "RECUPERACION_CRM", resultados: results,
             completados: results.filter(result => result.estado === "ENVIADO" || result.estado === "YA_ENVIADO").length,
-            fallidos: results.filter(result => !["ENVIADO", "YA_ENVIADO"].includes(result.estado)).length };
+            enCola: results.filter(result => result.estado === "EN_COLA").length,
+            fallidos: results.filter(result => !["ENVIADO", "YA_ENVIADO", "EN_COLA"].includes(result.estado)).length };
     } else if (action === "approve" && row.tipo === "INICIATIVA_COMERCIAL") {
         const materials = (content.materiales || []).filter(item => item.tipo === "biblioteca" && item.titulo && item.contenido);
         if (!materials.length) throw validationError("Esta iniciativa aún no tiene un adaptador listo para ejecutarse.");
