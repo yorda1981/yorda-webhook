@@ -367,8 +367,15 @@ app.post("/webhook", verificarSecretoWebhook, webhookLimiter, validarPayloadWebh
             return;
         }
 
-        // Referidos: solo comandos explícitos solicitados por el cliente o
-        // códigos declarados expresamente. Nunca se infiere una recomendación
+        // Registrar con evidencia el retiro del consentimiento publicitario
+        // sin silenciar atención, cotizaciones u operaciones solicitadas.
+        if (marketingConsent.isExplicitOptOut(textMessage)) {
+            await guardarCliente({ phone: phoneRaw, nombre: pushName }).catch(() => {});
+            await marketingConsent.recordExplicitOptOut({ phone: phoneRaw, messageId, text: textMessage }).catch(error =>
+                console.error("⚠️ No se pudo registrar el retiro de consentimiento comercial:", error.message));
+        }
+
+        // Códigos declarados expresamente. Nunca se infiere una recomendación
         // mediante IA ni se interrumpe el flujo de pagos/operaciones.
         try {
             const referralMessage = await customerAcquisition.processReferralCodeMessage(phoneRaw, textMessage);
@@ -382,6 +389,25 @@ app.post("/webhook", verificarSecretoWebhook, webhookLimiter, validarPayloadWebh
             }
         } catch (error) {
             console.error("⚠️ No se pudo procesar el código de referido:", error.message);
+        }
+
+        // El cliente inicia la conversación: responder consultas naturales
+        // sobre referidos sin pasar por IA ni tocar el flujo financiero.
+        // La entrega del enlace es una respuesta solicitada, no consentimiento
+        // para futuras campañas ni un envío por la cola comercial.
+        try {
+            const referralConversation = await customerAcquisition.processReferralConversation(phoneRaw, textMessage, messageId);
+            if (referralConversation.handled) {
+                const accepted = await enviarSeguro(phoneRaw, referralConversation.message);
+                if (referralConversation.pendingLinkOffer) {
+                    await customerAcquisition.recordReferralConversationEvent(phoneRaw,
+                        accepted === true ? "ENLACE_OFRECIDO" : "ENLACE_OFRECIMIENTO_FALLIDO",
+                        messageId, { providerAccepted: accepted === true, offerExpiresMinutes: 30 });
+                }
+                return;
+            }
+        } catch (error) {
+            console.error("⚠️ No se pudo responder la consulta de referidos:", error.message);
         }
 
         // Pedido generado por la calculadora web (entrega o transferencia) — se procesa aparte, sin pasar por GPT.

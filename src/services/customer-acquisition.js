@@ -260,6 +260,95 @@ async function processReferralCodeMessage(phone, text, db = pool) {
         : (messages[result.reason] || "No pude registrar la referencia. Escríbenos para que el equipo la revise.") };
 }
 
+function normalizeReferralIntent(text) {
+    return String(text || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase().replace(/[¿?¡!.,;:]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function referralConversationIntent(text) {
+    const value = normalizeReferralIntent(text);
+    const financial = /(?:\br\$\s*\d|\busd\s*\d|\b\d+[,.]?\d*\s*(?:reais|brl|cup|mlc)\b|\b(cotiz|cotacao|enviar|envio|transfer|pix|comprovante|pagar|pago|operacion|entrega|tasa|cambio)\w*\b)/i.test(value);
+    const yes = /^(si|si quiero|claro|por favor|dale|ok|okay|sim|quero|pode ser|manda|pasamelo|pasame el enlace|enviamelo)$/i.test(value);
+    const no = /^(no|no gracias|ahora no|despues|nao|nao obrigado|agora nao)$/i.test(value);
+    const asks = /\b(referid[oa]s?|recomend\w*|indic\w*|invit\w*)\b/.test(value)
+        && /\b(como|quiero|quisiera|tienen|hay|puedo|compart|ganar|funciona|enlace|link|codigo|programa)\b/.test(value);
+    const wantsLink = /\b(quiero|quisiera|puedo|como|compart|pasame|dame|obtener|generar|me das|manda|enviame)\b/.test(value)
+        && /\b(enlace|link|codigo|compart|invitar|amigo|amiga|recomendar)\b/.test(value);
+    return { yes, no, asks, wantsLink, financial };
+}
+
+async function recordReferralConversationEvent(phone, action, messageId, details = {}, db = pool) {
+    await db.query(`INSERT INTO referral_program_events (customer_phone, action, details)
+        VALUES ($1,$2,$3::jsonb)`, [phone, action, JSON.stringify({
+        channel: "WHATSAPP_INBOUND", evidenceMessageId: String(messageId || "").slice(0, 200) || null,
+        interactionScope: "REFERRAL_PROGRAM_CONVERSATION", ...details
+    })]);
+}
+
+/** Handles only a clear, customer-initiated referral conversation. A one-off
+ * request for a link is not marketing consent and does not enter the campaign queue. */
+async function processReferralConversation(phone, text, messageId, db = pool, deps = {}) {
+    const intent = referralConversationIntent(text);
+    if (intent.financial) return { handled: false };
+    let latestOfferAction = null;
+    if (intent.yes || intent.no || intent.asks) {
+        const latest = await db.query(`SELECT action FROM referral_program_events
+            WHERE customer_phone = $1 AND action IN ('ENLACE_OFRECIDO','ENLACE_ACEPTADO','ENLACE_RECHAZADO')
+              AND occurred_at > NOW() - INTERVAL '30 minutes'
+            ORDER BY occurred_at DESC, id DESC LIMIT 1`, [phone]);
+        latestOfferAction = latest.rows[0]?.action || null;
+    }
+    const pendingOffer = latestOfferAction === "ENLACE_OFRECIDO";
+    if (!intent.asks && !intent.wantsLink && !(pendingOffer && (intent.yes || intent.no))) return { handled: false };
+
+    if (intent.asks && !intent.wantsLink && pendingOffer) {
+        return { handled: true, message: "Ya te expliqué las condiciones 😊 Si quieres tu enlace personal, responde «sí» y te lo paso." };
+    }
+
+    const config = await getProgramConfig(db);
+    const active = programAcceptingReferrals(config);
+    if (intent.yes && pendingOffer && active) {
+        await recordReferralConversationEvent(phone, "ENLACE_ACEPTADO", messageId,
+            { consentRecorded: true, consentDecision: "YES", consentScope: "REFERRAL_LINK_ONLY" }, db);
+        const eligible = await db.query(`SELECT 1 FROM operations WHERE phone = $1 AND status = 'completada'
+            AND tipo = ANY($2::text[]) AND monto > 0 AND COALESCE(es_prueba,FALSE) = FALSE LIMIT 1`, [phone, VALID_REMITTANCE_TYPES]);
+        if (!eligible.rows.length) return { handled: true, message: "El enlace personal está disponible para clientes que ya completaron una remesa con YORDA. Cuando completes tu primer envío, puedes pedírmelo." };
+        const code = await ensureReferralCode(phone, db);
+        const link = code ? referralShareLink(code, await (deps.getOfficialWhatsAppNumber || getOfficialWhatsAppNumber)()) : null;
+        if (code) await recordLinkGenerated(phone, Boolean(link), db);
+        await recordReferralConversationEvent(phone, "ENLACE_SOLICITADO", messageId, { linkAvailable: Boolean(link) }, db);
+        return { handled: true, message: link
+            ? `Este es tu enlace personal: ${link}\n\nLa recompensa es del 1 % de la primera remesa válida de cada amigo, hasta R$50; sujeta a vigencia, presupuesto, validación y aprobación manual.`
+            : "Puedo generar tu código, pero el enlace oficial no está disponible ahora. Escríbenos y te ayudamos." };
+    }
+    if (intent.no && pendingOffer) {
+        await recordReferralConversationEvent(phone, "ENLACE_RECHAZADO", messageId,
+            { consentRecorded: true, consentDecision: "NO", consentScope: "REFERRAL_LINK_ONLY" }, db);
+        return { handled: true, message: "Entendido 😊 No te enviaré el enlace. Si lo necesitas más adelante, puedes preguntarme." };
+    }
+    if (!active) {
+        await recordReferralConversationEvent(phone, "CONSULTA_REFERIDOS", messageId, { programActive: false }, db);
+        return { handled: true, message: "Gracias por preguntar 😊 El programa de referidos no está activo ahora, así que no puedo prometer recompensas ni generar invitaciones. Si se habilita, podrás consultarme por aquí." };
+    }
+    const eligible = await db.query(`SELECT 1 FROM operations WHERE phone = $1 AND status = 'completada'
+        AND tipo = ANY($2::text[]) AND monto > 0 AND COALESCE(es_prueba,FALSE) = FALSE LIMIT 1`, [phone, VALID_REMITTANCE_TYPES]);
+    if (!eligible.rows.length) {
+        await recordReferralConversationEvent(phone, "CONSULTA_REFERIDOS", messageId, { eligibleReferrer: false }, db);
+        return { handled: true, message: "El enlace personal está disponible para clientes que ya completaron una remesa con YORDA. Si necesitas hacer tu primer envío, dime y te ayudo." };
+    }
+    if (intent.wantsLink) {
+        const code = await ensureReferralCode(phone, db);
+        const link = code ? referralShareLink(code, await (deps.getOfficialWhatsAppNumber || getOfficialWhatsAppNumber)()) : null;
+        if (code) await recordLinkGenerated(phone, Boolean(link), db);
+        await recordReferralConversationEvent(phone, "ENLACE_SOLICITADO", messageId, { linkAvailable: Boolean(link) }, db);
+        return { handled: true, message: link
+            ? `Este es tu enlace personal: ${link}\n\nTu amigo debe iniciar el registro con este enlace antes de su primera remesa. La recompensa es del 1 % de su primera remesa válida, hasta R$50, sujeta a vigencia, presupuesto, validación y aprobación manual.`
+            : "No pude generar el enlace ahora. Escríbenos y lo revisamos." };
+    }
+    await recordReferralConversationEvent(phone, "CONSULTA_REFERIDOS", messageId, { eligibleReferrer: true }, db);
+    return { handled: true, pendingLinkOffer: true, message: "🎁 El piloto ofrece el 1 % de la primera remesa válida de cada amigo que invites, hasta R$50; sujeto a vigencia, presupuesto disponible, validación y aprobación manual. ¿Quieres que te pase tu enlace personal?" };
+}
+
 async function onOperationCompleted(operation, db = pool) {
     if (!operation || !VALID_REMITTANCE_TYPES.includes(operation.tipo) || !(Number(operation.monto) > 0)) return { processed: false, reason: "NOT_ELIGIBLE_REMITTANCE" };
     const client = await db.connect();
@@ -700,7 +789,12 @@ async function getAcquisitionOverview(db = pool) {
     ]);
     const budget = Math.min(PILOT.budgetBRL, Number(config.campaign_limit_brl || PILOT.budgetBRL), Number(config.period_limit_brl || PILOT.budgetBRL));
     const committed = Number(referrals.costo_comprometido_brl || 0);
-    const events = await db.query(`SELECT COUNT(*) FILTER (WHERE action = 'ENLACE_GENERADO' AND details->>'linkAvailable' = 'true')::int AS links_requested
+    const events = await db.query(`SELECT
+            COUNT(*) FILTER (WHERE action = 'ENLACE_GENERADO' AND details->>'linkAvailable' = 'true')::int AS links_generated,
+            COUNT(*) FILTER (WHERE action = 'ENLACE_SOLICITADO')::int AS links_requested,
+            COUNT(*) FILTER (WHERE action = 'CONSULTA_REFERIDOS')::int AS referral_queries,
+            COUNT(*) FILTER (WHERE action = 'ENLACE_OFRECIDO')::int AS link_offers_provider_accepted,
+            COUNT(*) FILTER (WHERE action = 'ENLACE_OFRECIMIENTO_FALLIDO')::int AS link_offers_failed
         FROM referral_program_events`);
     const volume = Number(referrals.volumen_primeras_remesas_brl || 0);
     const invited = await db.query(`SELECT COUNT(DISTINCT phone)::int AS count FROM commercial_contact_events
@@ -712,7 +806,7 @@ async function getAcquisitionOverview(db = pool) {
     return { config: { ...config, program_status: programStatus }, referrals, secondTransferCandidates,
         secondTransferWindow: "Una remesa válida hace 7–45 días, exactamente una remesa completada, e interés posterior comprobable; sin operación activa, opt-out, pausa, bloqueo ni contacto comercial enviado en 14 días.",
         referralEconomics: { rewardPct: PILOT.rewardPct, maxRewardBRL: Math.min(PILOT.maxRewardBRL, Number(config.max_reward_brl || PILOT.maxRewardBRL)), campaignLimitBRL: budget, committedBRL: committed, availableBRL: Math.max(0, money(budget - committed)), periodLimitBRL: budget, durationDays: PILOT.durationDays, participationDays: PILOT.participationDays, scenarios: calculateReferralScenarios(), netProfitKnown: false, unknownNetProfitAcknowledged: Boolean(config.unknown_net_profit_acknowledged) },
-        referralMetrics: { invited: Number(invited.rows[0]?.count || 0), inviteCandidates: inviteCandidates.length, eligibleWithConsentAndWindow: Number(inviteConsent.with_consent_and_window || 0), excludedWithoutConsent: Number(inviteConsent.without_consent || 0), consentedWithoutOpenWindow: Number(inviteConsent.with_consent_without_window || 0), linksRequested: Number(events.rows[0]?.links_requested || 0), registeredReferrals: Number(referrals.vinculados || 0), convertedReferrals: Number(referrals.primeras_remesas_completadas || 0), firstRemittanceVolumeBRL: volume, committedRewardBRL: committed, approvedRewardBRL: Number(referrals.recompensas_aprobadas_brl || 0), paidRewardBRL: Number(referrals.recompensas_liquidadas_brl || 0), expiredParticipations: Number(referrals.participaciones_vencidas || 0), acquisitionCostPerConvertedClientBRL: acquisitionCost, grossMarginReferenceBRL: money(volume * 0.05), otherCostsKnown: false, netProfitBRL: null, aiCostBRL: null },
+        referralMetrics: { invited: Number(invited.rows[0]?.count || 0), inviteCandidates: inviteCandidates.length, eligibleWithConsentAndWindow: Number(inviteConsent.with_consent_and_window || 0), excludedWithoutConsent: Number(inviteConsent.without_consent || 0), consentedWithoutOpenWindow: Number(inviteConsent.with_consent_without_window || 0), linksGenerated: Number(events.rows[0]?.links_generated || 0), linksRequested: Number(events.rows[0]?.links_requested || 0), referralQueries: Number(events.rows[0]?.referral_queries || 0), linkOffersAcceptedByProvider: Number(events.rows[0]?.link_offers_provider_accepted || 0), linkOffersFailed: Number(events.rows[0]?.link_offers_failed || 0), registeredReferrals: Number(referrals.vinculados || 0), convertedReferrals: Number(referrals.primeras_remesas_completadas || 0), firstRemittanceVolumeBRL: volume, committedRewardBRL: committed, approvedRewardBRL: Number(referrals.recompensas_aprobadas_brl || 0), paidRewardBRL: Number(referrals.recompensas_liquidadas_brl || 0), expiredParticipations: Number(referrals.participaciones_vencidas || 0), acquisitionCostPerConvertedClientBRL: acquisitionCost, grossMarginReferenceBRL: money(volume * 0.05), otherCostsKnown: false, netProfitBRL: null, aiCostBRL: null },
         launchProposal: { status: "BORRADOR_NO_ENVIADO", audience: "Hasta 20 clientes con remesas legítimas, consentimiento comercial explícito verificable y ventana de conversación abierta; sin operación activa, bloqueo, opt-out, pausa humana, contacto comercial reciente o rechazo registrado. Revisión manual de reclamaciones pendiente porque no hay registro estructurado.", audienceCount: inviteCandidates.length, eligibleWithConsentCount: Number(inviteConsent.with_consent_and_window || 0), excludedWithoutConsentCount: Number(inviteConsent.without_consent || 0), consentedWithoutOpenWindowCount: Number(inviteConsent.with_consent_without_window || 0), channels: ["WhatsApp individual mediante enlace personal"], terms: `${Number(config.duration_days || PILOT.durationDays)} días desde activación explícita para nuevos registros; cada referido dispone de ${PILOT.participationDays} días desde su vinculación para completar la primera remesa; recompensa ${Number(config.reward_pct || PILOT.rewardPct)} % con máximo R$ ${Number(config.max_reward_brl || PILOT.maxRewardBRL).toFixed(2)} por referido; presupuesto total R$ ${budget.toFixed(2)}.`, draft: buildReferralLaunchCopy(config), successCriteria: ["Referidos nuevos con primera remesa válida", "Volumen BRL confirmado", "Compromisos dentro del presupuesto", "Costo de adquisición por conversión liquidada"], followUp: "Revisión semanal por el operador; no se envían recordatorios automáticos.", candidates: inviteCandidates, candidateLimitations: ["Los clientes sin consentimiento comercial verificable se excluyen de la lista de invitación proactiva.", "Aunque tengan consentimiento, los clientes sin ventana abierta se excluyen hasta integrar plantillas aprobadas.", "No existe un registro estructurado de reclamaciones; confirmar manualmente que cada candidato no tenga una incidencia abierta antes de cualquier invitación.", "La atribución solo cuenta códigos validados y primeras remesas completadas; ningún mensaje está autorizado por esta propuesta."] }
     };
 }
@@ -720,7 +814,8 @@ async function getAcquisitionOverview(db = pool) {
 module.exports = {
     REFERRAL_CODE_RE, VALID_REMITTANCE_TYPES, PILOT, normalizeCode, randomCode, referralShareLink, getOfficialWhatsAppNumber, recordLinkGenerated,
     ensureReferralCode, getProgramConfig, saveProgramConfig, recordReferralLink,
-    processReferralCodeMessage, onOperationCompleted, reviewReversedOperation,
+    processReferralCodeMessage, processReferralConversation, referralConversationIntent, recordReferralConversationEvent,
+    onOperationCompleted, reviewReversedOperation,
     reconcilePendingReferralAccruals, expirePendingReferralReservations,
     transitionReferral, listReferrals, getReferralSummary,
     getSecondTransferCandidates, getSecondTransferSummary, getAcquisitionOverview, getReferralInviteCandidates, getReferralInviteConsentSummary,

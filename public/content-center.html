@@ -218,7 +218,10 @@
             <div class="package-stat"><strong id="refBudgetAvailable">R$500,00</strong>presupuesto disponible</div>
             <div class="package-stat"><strong id="refFirstVolume">R$0,00</strong>volumen de primeras remesas</div>
             <div class="package-stat"><strong id="refGrossMargin">R$0,00</strong>margen bruto de referencia (5 %)</div>
-            <div class="package-stat"><strong id="refLinkRequests">0</strong>enlaces generados (no confirma que se compartieron)</div>
+            <div class="package-stat"><strong id="refReferralQueries">0</strong>consultas espontáneas sobre referidos</div>
+            <div class="package-stat"><strong id="refLinkRequests">0</strong>solicitudes de enlace (no confirma que se compartió)</div>
+            <div class="package-stat"><strong id="refLinksGenerated">0</strong>enlaces generados</div>
+            <div class="package-stat"><strong id="refLinkOffersAccepted">0</strong>ofertas aceptadas por Z-API (no confirma entrega)</div>
             <div class="package-stat"><strong id="refInvited">0</strong>clientes invitados (sin envíos de esta fase)</div>
             <div class="package-stat"><strong id="refExpired">0</strong>participaciones vencidas</div>
             <div class="package-stat"><strong id="refAcquisitionCost">—</strong>recompensa comprometida media por conversión; neto desconocido</div>
@@ -548,7 +551,10 @@
         byId("refBudgetAvailable").textContent = moneyBRL(economics.availableBRL);
         byId("refFirstVolume").textContent = moneyBRL(metrics.firstRemittanceVolumeBRL);
         byId("refGrossMargin").textContent = moneyBRL(metrics.grossMarginReferenceBRL);
+        byId("refReferralQueries").textContent = metrics.referralQueries || 0;
         byId("refLinkRequests").textContent = metrics.linksRequested || 0;
+        byId("refLinksGenerated").textContent = metrics.linksGenerated || 0;
+        byId("refLinkOffersAccepted").textContent = metrics.linkOffersAcceptedByProvider || 0;
         byId("refInvited").textContent = metrics.invited || 0;
         byId("refExpired").textContent = metrics.expiredParticipations || 0;
         byId("refAcquisitionCost").textContent = metrics.acquisitionCostPerConvertedClientBRL == null ? "—" : moneyBRL(metrics.acquisitionCostPerConvertedClientBRL);

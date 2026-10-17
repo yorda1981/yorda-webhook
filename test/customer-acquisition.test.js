@@ -106,6 +106,79 @@ test("solo un mensaje explícito con código dispara registro; no usa IA para at
     assert.deepEqual(await acquisition.processReferralCodeMessage("5511999999999", "Hola, me recomendaron YORDA", db), { handled: false });
 });
 
+test("reconoce preguntas naturales de referidos sin capturar confirmaciones financieras ambiguas", () => {
+    for (const phrase of ["¿Cómo puedo ganar recomendando?", "¿Tienen programa de referidos?", "Quiero invitar a un amigo", "¿Cómo comparto mi enlace?"]) {
+        const intent = acquisition.referralConversationIntent(phrase);
+        assert.equal(intent.asks || intent.wantsLink, true, phrase);
+    }
+    assert.equal(acquisition.referralConversationIntent("Sí, quiero cotizar R$500").yes, false);
+    assert.equal(acquisition.referralConversationIntent("Quiero invitar a un amigo y cotizar R$500").financial, true);
+    assert.equal(acquisition.referralConversationIntent("Sí").yes, true);
+});
+
+test("pregunta natural informa que el programa apagado no ofrece recompensa y deja evidencia", async () => {
+    const calls = [];
+    const db = { async query(sql, params = []) {
+        calls.push({ sql: String(sql), params });
+        if (String(sql).includes("SELECT * FROM referral_program_config")) return { rows: [{ enabled: false }] };
+        return { rows: [] };
+    } };
+    const result = await acquisition.processReferralConversation("5511999999999", "¿Tienen programa de referidos?", "wa-q-1", db);
+    assert.equal(result.handled, true);
+    assert.match(result.message, /no está activo ahora/i);
+    assert.doesNotMatch(result.message, /puedes ganar el 1 %/i);
+    const evidence = calls.find(call => call.sql.includes("INSERT INTO referral_program_events"));
+    assert.ok(evidence);
+    assert.match(evidence.params[1], /CONSULTA_REFERIDOS/);
+    assert.match(evidence.params[2], /WHATSAPP_INBOUND/);
+    assert.match(evidence.params[2], /wa-q-1/);
+});
+
+test("cliente elegible que pide enlace recibe enlace construido con número oficial y términos configurados", async () => {
+    const calls = [];
+    const db = { async query(sql, params = []) {
+        const q = String(sql).replace(/\\s+/g, " ").trim();
+        calls.push({ q, params });
+        if (q.includes("SELECT action FROM referral_program_events")) return { rows: [] };
+        if (q.includes("SELECT * FROM referral_program_config")) return { rows: [{ enabled: true, reward_pct: "1", max_reward_brl: "50", campaign_limit_brl: "500", period_limit_brl: "500", expires_at: new Date(Date.now() + 86400000) }] };
+        if (q.includes("SELECT 1 FROM operations")) return { rows: [{ ok: 1 }] };
+        if (q.includes("SELECT COALESCE(SUM(reserved_reward_brl),0)::numeric AS total")) return { rows: [{ total: "0" }] };
+        if (q.includes("UPDATE customers SET referral_code")) return { rows: [{ referral_code: "AB23456789" }] };
+        if (q.includes("INSERT INTO referral_program_events")) return { rows: [] };
+        throw new Error(`Unexpected SQL: ${q}`);
+    } };
+    const result = await acquisition.processReferralConversation("5511999999999", "Quiero invitar a un amigo", "wa-link-1", db,
+        { getOfficialWhatsAppNumber: async () => "+55 (11) 98888-7777" });
+    assert.equal(result.handled, true);
+    assert.match(result.message, /https:\/\/wa\.me\/5511988887777\?text=/);
+    assert.match(result.message, /hasta R\$50/);
+    assert.match(result.message, /aprobación manual/);
+    assert.ok(calls.some(call => call.q.includes("UPDATE customers SET referral_code")));
+    assert.ok(calls.some(call => call.q.includes("INSERT INTO referral_program_events") && call.params[1] === "ENLACE_SOLICITADO"));
+});
+
+test("aceptar una oferta reciente entrega el enlace y registra consentimiento limitado al enlace", async () => {
+    const calls = [];
+    const db = { async query(sql, params = []) {
+        const q = String(sql).replace(/\\s+/g, " ").trim();
+        calls.push({ q, params });
+        if (q.includes("SELECT action FROM referral_program_events")) return { rows: [{ action: "ENLACE_OFRECIDO" }] };
+        if (q.includes("SELECT * FROM referral_program_config")) return { rows: [{ enabled: true, reward_pct: "1", max_reward_brl: "50", campaign_limit_brl: "500", period_limit_brl: "500", expires_at: new Date(Date.now() + 86400000) }] };
+        if (q.includes("SELECT 1 FROM operations")) return { rows: [{ ok: 1 }] };
+        if (q.includes("SELECT COALESCE(SUM(reserved_reward_brl),0)::numeric AS total")) return { rows: [{ total: "0" }] };
+        if (q.includes("UPDATE customers SET referral_code")) return { rows: [{ referral_code: "CD34567890" }] };
+        if (q.includes("INSERT INTO referral_program_events")) return { rows: [] };
+        throw new Error(`Unexpected SQL: ${q}`);
+    } };
+    const result = await acquisition.processReferralConversation("5511999999999", "Sí", "wa-yes-2", db,
+        { getOfficialWhatsAppNumber: async () => "5511988887777" });
+    assert.match(result.message, /https:\/\/wa\.me\/5511988887777/);
+    const accepted = calls.find(call => call.params[1] === "ENLACE_ACEPTADO");
+    assert.ok(accepted);
+    assert.match(accepted.params[2], /REFERRAL_LINK_ONLY/);
+    assert.match(accepted.params[2], /\"consentDecision\":\"YES\"/);
+});
+
 test("un cliente que ya existía no se registra como referido nuevo y conserva el resto de su solicitud", async () => {
     const linkDb = makeLinkDb();
     const db = { query: async sql => String(sql).includes("SELECT phone FROM customers") ? { rows: [{ phone: "5511999999999" }] } : { rows: [] }, connect: linkDb.connect };
