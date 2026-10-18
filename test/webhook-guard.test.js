@@ -20,7 +20,13 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const pool = require("../db");
-const { yaFueProcesado, activarPausaHumana, enPausaHumana, _internos } = require("../src/services/webhook-guard");
+const { yaFueProcesado, activarPausaHumana, enPausaHumana, isNonConversationNotification, _internos } = require("../src/services/webhook-guard");
+
+test("eventos Z-API de borrado/estado no son mensajes conversacionales", () => {
+    assert.equal(isNonConversationNotification({ type: "ReceivedCallback", notification: "REVOKE" }), true);
+    assert.equal(isNonConversationNotification({ type: "ReceivedCallback", isStatusReply: true }), true);
+    assert.equal(isNonConversationNotification({ type: "ReceivedCallback", text: { message: "Quiero mi enlace" } }), false);
+});
 
 function mockInsertNuevo(t) {
     return t.mock.method(pool, "query", async (sql) => {

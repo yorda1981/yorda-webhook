@@ -107,10 +107,13 @@ test("solo un mensaje explícito con código dispara registro; no usa IA para at
 });
 
 test("reconoce preguntas naturales de referidos sin capturar confirmaciones financieras ambiguas", () => {
-    for (const phrase of ["¿Cómo puedo ganar recomendando?", "¿Tienen programa de referidos?", "Quiero invitar a un amigo", "¿Cómo comparto mi enlace?"]) {
+    for (const phrase of ["¿Cómo puedo ganar recomendando?", "¿Tienen programa de referidos?", "Quiero invitar a un amigo", "¿Cómo comparto mi enlace?", "Quiero mi enlace de referido"]) {
         const intent = acquisition.referralConversationIntent(phrase);
         assert.equal(intent.asks || intent.wantsLink, true, phrase);
     }
+    assert.equal(acquisition.isReferralLinkRequest("Quiero mi enlace de referido"), true);
+    assert.equal(acquisition.isReferralLinkRequest("mi código de referido"), true);
+    assert.equal(acquisition.isReferralLinkRequest("Quiero cotizar R$500"), false);
     assert.equal(acquisition.referralConversationIntent("Sí, quiero cotizar R$500").yes, false);
     assert.equal(acquisition.referralConversationIntent("Quiero invitar a un amigo y cotizar R$500").financial, true);
     assert.equal(acquisition.referralConversationIntent("Sí").yes, true);
@@ -134,15 +137,26 @@ test("pregunta natural informa que el programa apagado no ofrece recompensa y de
     assert.match(evidence.params[2], /wa-q-1/);
 });
 
-test("cliente elegible que pide enlace recibe enlace construido con número oficial y términos configurados", async () => {
+test("solicitud explícita de enlace con piloto desactivado no genera código ni promete recompensa", async () => {
+    const db = { async query(sql) {
+        if (String(sql).includes("SELECT * FROM referral_program_config")) return { rows: [{ enabled: false }] };
+        if (String(sql).includes("SELECT action FROM referral_program_events")) return { rows: [] };
+        if (String(sql).includes("INSERT INTO referral_program_events")) return { rows: [] };
+        throw new Error(`Unexpected SQL: ${sql}`);
+    } };
+    const result = await acquisition.processReferralConversation("5511999999999", "Quiero mi enlace de referido", "wa-off-1", db);
+    assert.equal(result.handled, true);
+    assert.match(result.message, /no está activo/i);
+    assert.doesNotMatch(result.message, /wa\.me|puedes recibir|gana el/i);
+});
+
+test("cualquier cliente registrado, aunque no haya remitido, recibe su enlace al pedirlo", async () => {
     const calls = [];
     const db = { async query(sql, params = []) {
         const q = String(sql).replace(/\\s+/g, " ").trim();
         calls.push({ q, params });
         if (q.includes("SELECT action FROM referral_program_events")) return { rows: [] };
         if (q.includes("SELECT * FROM referral_program_config")) return { rows: [{ enabled: true, reward_pct: "1", max_reward_brl: "50", campaign_limit_brl: "500", period_limit_brl: "500", expires_at: new Date(Date.now() + 86400000) }] };
-        if (q.includes("SELECT 1 FROM operations")) return { rows: [{ ok: 1 }] };
-        if (q.includes("SELECT COALESCE(SUM(reserved_reward_brl),0)::numeric AS total")) return { rows: [{ total: "0" }] };
         if (q.includes("UPDATE customers SET referral_code")) return { rows: [{ referral_code: "AB23456789" }] };
         if (q.includes("INSERT INTO referral_program_events")) return { rows: [] };
         throw new Error(`Unexpected SQL: ${q}`);
@@ -155,6 +169,38 @@ test("cliente elegible que pide enlace recibe enlace construido con número ofic
     assert.match(result.message, /aprobación manual/);
     assert.ok(calls.some(call => call.q.includes("UPDATE customers SET referral_code")));
     assert.ok(calls.some(call => call.q.includes("INSERT INTO referral_program_events") && call.params[1] === "ENLACE_SOLICITADO"));
+    assert.equal(calls.some(call => call.q.includes("FROM operations")), false);
+});
+
+test("generar el código no reserva presupuesto y las solicitudes repetidas conservan el mismo código", async () => {
+    const saved = new Map();
+    let generated = 0;
+    const db = { async query(sql, params = []) {
+        const q = String(sql).replace(/\s+/g, " ").trim();
+        if (q.includes("SELECT * FROM referral_program_config")) return { rows: [{ enabled: true, expires_at: new Date(Date.now() + 86400000) }] };
+        if (q.includes("UPDATE customers SET referral_code")) {
+            const code = saved.get(params[0]) || params[1];
+            saved.set(params[0], code);
+            return { rows: [{ referral_code: code }] };
+        }
+        throw new Error(`Unexpected SQL: ${q}`);
+    } };
+    const generate = () => (++generated === 1 ? "AB23456789" : "CD34567890");
+    assert.equal(await acquisition.ensureReferralCode("5511999999999", db, generate), "AB23456789");
+    assert.equal(await acquisition.ensureReferralCode("5511999999999", db, generate), "AB23456789");
+    assert.equal(generated, 2);
+});
+
+test("el mismo enlace permite vincular dos clientes nuevos distintos concurrentemente con reservas separadas", async () => {
+    const db = makeLinkDb();
+    const [first, second] = await Promise.all([
+        acquisition.recordReferralLink({ referredPhone: "5511999999001", code: "AB23456789", customerWasNew: true }, db),
+        acquisition.recordReferralLink({ referredPhone: "5511999999002", code: "AB23456789", customerWasNew: true }, db)
+    ]);
+    assert.equal(first.linked, true);
+    assert.equal(second.linked, true);
+    assert.equal(db.state.linked.size, 2);
+    assert.equal(db.state.committed, 100);
 });
 
 test("aceptar una oferta reciente entrega el enlace y registra consentimiento limitado al enlace", async () => {

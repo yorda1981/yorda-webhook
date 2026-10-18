@@ -142,10 +142,17 @@ async function enPausaHumana(phone) {
     }
 }
 
+// Eventos de sistema de Z-API (como REVOKE al borrar un mensaje) no son
+// entradas conversacionales y nunca deben activar una respuesta del bot.
+function isNonConversationNotification(body) {
+    return Boolean(body && (body.notification || body.isStatusReply));
+}
+
 module.exports = {
     yaFueProcesado,
     activarPausaHumana,
     enPausaHumana,
+    isNonConversationNotification,
     limpiarWebhookEventsViejos,
     // Expuesto solo para tests (limpiar estado entre casos).
     _internos: { mensajesProcesados, ULTIMA_PAUSA_CACHE }

@@ -19,7 +19,7 @@ const marketingConsent = require("./src/services/marketing-consent");
 const entregasService = require("./src/services/entregas");
 const { esPedidoWeb, procesarPedidoWeb, crearEntregaManual, cotizarTransferenciaManual, crearTransferenciaManual } = require("./src/flows/pedido-web-flow");
 const { enviarSeguro, getAdminPhone, getPIXKey, getPIXHolder, getPIXBank, getPIXImage, limpiarSesion } = require("./src/flows/shared");
-const { yaFueProcesado, activarPausaHumana, enPausaHumana, limpiarWebhookEventsViejos } = require("./src/services/webhook-guard");
+const { yaFueProcesado, activarPausaHumana, enPausaHumana, isNonConversationNotification, limpiarWebhookEventsViejos } = require("./src/services/webhook-guard");
 const { verificarSecretoWebhook, validarPayloadWebhook } = require("./src/middleware/webhook-security");
 const { conLockExclusivo } = require("./src/services/job-lock");
 const { log } = require("./src/utils/structured-logger");
@@ -262,6 +262,9 @@ app.post("/webhook", verificarSecretoWebhook, webhookLimiter, validarPayloadWebh
         }
         if (body.isGroup || String(phoneRaw).includes("-group")) return;
         if (body.isNewsletter) return;
+        // Z-API comunica apagados como eventos de notificación (p. ej. REVOKE),
+        // no como una nueva consulta del cliente. No pasarlos al bot.
+        if (isNonConversationNotification(body)) return;
 
         if (body.fromMe) {
             if (body.fromApi !== true) {
@@ -317,9 +320,14 @@ app.post("/webhook", verificarSecretoWebhook, webhookLimiter, validarPayloadWebh
 
         const pushName = body.senderName || "Cliente";
 
-        if (await enPausaHumana(phoneRaw)) {
+        const pauseText = body.text?.message || body.body || body.caption || "";
+        const referralLinkRequestDuringPause = customerAcquisition.isReferralLinkRequest(pauseText);
+        if (await enPausaHumana(phoneRaw) && !referralLinkRequestDuringPause) {
             console.log(`🤫 BOT SILENCIADO PARA ${phoneRaw}`);
             return;
+        }
+        if (referralLinkRequestDuringPause) {
+            console.log("ℹ️ Se atiende una solicitud explícita de enlace de referido pese a la pausa humana; las demás rutas siguen pausadas.");
         }
 
         // Audio — responder que solo atendemos por texto
@@ -357,6 +365,13 @@ app.post("/webhook", verificarSecretoWebhook, webhookLimiter, validarPayloadWebh
         }
 
         if (!textMessage) return;
+
+        // La primera solicitud de enlace también registra el teléfono como
+        // cliente identificado; no exige remesas previas ni consentimiento
+        // para campañas futuras.
+        if (customerAcquisition.isReferralLinkRequest(textMessage)) {
+            await guardarCliente({ phone: phoneRaw, nombre: pushName });
+        }
 
         // El opt-in comercial solo se registra cuando el cliente usa una
         // frase afirmativa exacta; no se deduce del uso normal del bot.

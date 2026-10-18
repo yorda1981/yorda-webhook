@@ -47,14 +47,8 @@ async function ensureReferralCode(phone, db = pool, generate = randomCode) {
     if (!phone) throw new Error("Teléfono requerido");
     const program = await db.query("SELECT * FROM referral_program_config WHERE id = 1");
     if (!programAcceptingReferrals(program.rows[0])) return null;
-    const limits = program.rows[0];
-    const committed = await db.query(`SELECT COALESCE(SUM(reserved_reward_brl),0)::numeric AS total
-        FROM customer_referrals WHERE status NOT IN ('RECHAZADA','CANCELADA')`);
-    const available = Math.min(PILOT.budgetBRL, Number(limits.campaign_limit_brl || PILOT.budgetBRL), Number(limits.period_limit_brl || PILOT.budgetBRL)) - Number(committed.rows[0]?.total || 0);
-    if (available < Math.min(PILOT.maxRewardBRL, Number(limits.max_reward_brl || PILOT.maxRewardBRL))) return null;
-    const eligible = await db.query(`SELECT 1 FROM operations WHERE phone = $1 AND status = 'completada'
-        AND tipo = ANY($2::text[]) AND monto > 0 AND COALESCE(es_prueba,FALSE) = FALSE LIMIT 1`, [phone, VALID_REMITTANCE_TYPES]);
-    if (!eligible.rows.length) return null;
+    // Solicitar/compartir el enlace no crea una obligación económica. La
+    // reserva completa del máximo se realiza al registrar cada referido.
     for (let attempt = 0; attempt < 4; attempt++) {
         const code = generate();
         if (!REFERRAL_CODE_RE.test(code)) throw new Error("Generador de código inválido");
@@ -229,9 +223,6 @@ async function processReferralCodeMessage(phone, text, db = pool) {
     if (askCode) {
         const config = await getProgramConfig(db);
         if (!programAcceptingReferrals(config)) return { handled: true, message: "El programa de referidos no está activo ahora. No compartas códigos por el momento." };
-        const eligible = await db.query(`SELECT 1 FROM operations WHERE phone = $1 AND status = 'completada'
-            AND tipo = ANY($2::text[]) AND monto > 0 AND COALESCE(es_prueba,FALSE) = FALSE LIMIT 1`, [phone, VALID_REMITTANCE_TYPES]);
-        if (!eligible.rows.length) return { handled: true, message: "El enlace personal está disponible para clientes que ya completaron una remesa con YORDA. Si necesitas hacer tu primer envío, dime y te ayudo." };
         const code = await ensureReferralCode(phone, db);
         const shareLink = code ? referralShareLink(code, await getOfficialWhatsAppNumber()) : null;
         if (code) await recordLinkGenerated(phone, Boolean(shareLink), db);
@@ -273,8 +264,15 @@ function referralConversationIntent(text) {
     const asks = /\b(referid[oa]s?|recomend\w*|indic\w*|invit\w*)\b/.test(value)
         && /\b(como|quiero|quisiera|tienen|hay|puedo|compart|ganar|funciona|enlace|link|codigo|programa)\b/.test(value);
     const wantsLink = /\b(quiero|quisiera|puedo|como|compart|pasame|dame|obtener|generar|me das|manda|enviame)\b/.test(value)
-        && /\b(enlace|link|codigo|compart|invitar|amigo|amiga|recomendar)\b/.test(value);
+        && /\b(enlace|link|codigo|referid[oa]s?|compart|invitar|amigo|amiga|recomendar)\b/.test(value);
     return { yes, no, asks, wantsLink, financial };
+}
+
+function isReferralLinkRequest(text) {
+    const raw = String(text || "").trim();
+    const asksForOwnCode = /^(?:mi|meu)\s+(?:c[oó]digo|codigo)\s+(?:de\s+)?(?:referidos?|indica[cç][aã]o)\s*\??$/i.test(raw);
+    const intent = referralConversationIntent(raw);
+    return asksForOwnCode || (!intent.financial && intent.wantsLink);
 }
 
 async function recordReferralConversationEvent(phone, action, messageId, details = {}, db = pool) {
@@ -310,9 +308,6 @@ async function processReferralConversation(phone, text, messageId, db = pool, de
     if (intent.yes && pendingOffer && active) {
         await recordReferralConversationEvent(phone, "ENLACE_ACEPTADO", messageId,
             { consentRecorded: true, consentDecision: "YES", consentScope: "REFERRAL_LINK_ONLY" }, db);
-        const eligible = await db.query(`SELECT 1 FROM operations WHERE phone = $1 AND status = 'completada'
-            AND tipo = ANY($2::text[]) AND monto > 0 AND COALESCE(es_prueba,FALSE) = FALSE LIMIT 1`, [phone, VALID_REMITTANCE_TYPES]);
-        if (!eligible.rows.length) return { handled: true, message: "El enlace personal está disponible para clientes que ya completaron una remesa con YORDA. Cuando completes tu primer envío, puedes pedírmelo." };
         const code = await ensureReferralCode(phone, db);
         const link = code ? referralShareLink(code, await (deps.getOfficialWhatsAppNumber || getOfficialWhatsAppNumber)()) : null;
         if (code) await recordLinkGenerated(phone, Boolean(link), db);
@@ -329,12 +324,6 @@ async function processReferralConversation(phone, text, messageId, db = pool, de
     if (!active) {
         await recordReferralConversationEvent(phone, "CONSULTA_REFERIDOS", messageId, { programActive: false }, db);
         return { handled: true, message: "Gracias por preguntar 😊 El programa de referidos no está activo ahora, así que no puedo prometer recompensas ni generar invitaciones. Si se habilita, podrás consultarme por aquí." };
-    }
-    const eligible = await db.query(`SELECT 1 FROM operations WHERE phone = $1 AND status = 'completada'
-        AND tipo = ANY($2::text[]) AND monto > 0 AND COALESCE(es_prueba,FALSE) = FALSE LIMIT 1`, [phone, VALID_REMITTANCE_TYPES]);
-    if (!eligible.rows.length) {
-        await recordReferralConversationEvent(phone, "CONSULTA_REFERIDOS", messageId, { eligibleReferrer: false }, db);
-        return { handled: true, message: "El enlace personal está disponible para clientes que ya completaron una remesa con YORDA. Si necesitas hacer tu primer envío, dime y te ayudo." };
     }
     if (intent.wantsLink) {
         const code = await ensureReferralCode(phone, db);
@@ -814,7 +803,7 @@ async function getAcquisitionOverview(db = pool) {
 module.exports = {
     REFERRAL_CODE_RE, VALID_REMITTANCE_TYPES, PILOT, normalizeCode, randomCode, referralShareLink, getOfficialWhatsAppNumber, recordLinkGenerated,
     ensureReferralCode, getProgramConfig, saveProgramConfig, recordReferralLink,
-    processReferralCodeMessage, processReferralConversation, referralConversationIntent, recordReferralConversationEvent,
+    processReferralCodeMessage, processReferralConversation, referralConversationIntent, isReferralLinkRequest, recordReferralConversationEvent,
     onOperationCompleted, reviewReversedOperation,
     reconcilePendingReferralAccruals, expirePendingReferralReservations,
     transitionReferral, listReferrals, getReferralSummary,
