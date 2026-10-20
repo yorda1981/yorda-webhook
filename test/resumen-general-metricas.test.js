@@ -18,7 +18,7 @@ const FILA = {
 async function sqlDeResumen(t) {
     let sql = "";
     t.mock.method(pool, "query", async consulta => {
-        sql = consulta;
+        if (!sql) sql = consulta;
         return { rows: [FILA] };
     });
     await crm.obtenerEstadisticasCRM(30);

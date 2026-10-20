@@ -19,6 +19,7 @@ const {
 } = require("./reglas-bot");
 const { horaSaoPaulo } = require("../utils/timezone");
 const { log } = require("../utils/structured-logger");
+const commercialFunnel = require("./commercial-funnel");
 
 // Flows
 const { detectarImagenUnificada, detectarComprobantePDF, llamarAsistente } = require("../flows/imagen-flow");
@@ -531,6 +532,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null, opci
         // Lógica en src/services/reglas-bot.js (probada en test/reglas-bot.test.js)
         if (debeConfirmarCotizacion(cliente, esConfirma, montoValido)) {
             if (!tieneTarjetaGuardada(cliente)) {
+                await commercialFunnel.marcarAceptacion(phone);
                 await enviarSeguro(phone, pickL(
                     ["¡Casi listo! Solo necesito la tarjeta 💳\n\nMándame foto o los 16 dígitos."],
                     ["Quase lá! Só preciso do cartão 💳\n\nManda uma foto ou os 16 dígitos."], lang));

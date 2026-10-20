@@ -4,6 +4,7 @@ const pool              = require("../../db");
 const { calcularOperacion, calcularCUPInversoConTasas } = require("../services/calculator");
 const { guardarCliente }     = require("../services/customer-memory");
 const crm                    = require("../services/crm");
+const commercialFunnel       = require("../services/commercial-funnel");
 const {
     enviarSeguro, fmt, pick, pickL,
     CIERRES_COT, CIERRES_COT_PT
@@ -54,6 +55,7 @@ async function cotizarBRL(phone, pushName, valorFinal, lang, { budgetDeclared = 
         fechaEstado: new Date().toISOString(),
         fechaCotizacion: new Date().toISOString()
     });
+    await commercialFunnel.crearCotizacion({ phone, tipo: "brl_cup", monto: valorFinal, salida: r.cup });
     await crm.onCotizacion(phone, lang);
 
     let tip = "";
@@ -85,6 +87,7 @@ async function cotizarUSD(phone, pushName, valorFinal, tipo, lang, esEs) {
         fechaEstado: new Date().toISOString(),
         fechaCotizacion: new Date().toISOString()
     });
+    await commercialFunnel.crearCotizacion({ phone, tipo, monto: valorFinal, salida: r.cup });
     await crm.onCotizacion(phone, lang);
 
     const nivelVip  = await nivelVipPhone(phone);
@@ -136,6 +139,7 @@ async function cotizarMLC(phone, pushName, valorFinal, lang) {
         fechaEstado: new Date().toISOString(),
         fechaCotizacion: new Date().toISOString()
     });
+    await commercialFunnel.crearCotizacion({ phone, tipo: "mlc", monto: valorFinal, salida: r.cup });
     await crm.onCotizacion(phone, lang);
     await enviarSeguro(phone, res);
     return res;
@@ -244,6 +248,7 @@ async function cotizarCUPInverso(phone, pushName, montoCUP, lang) {
         ultimaPregunta: "cotizacion_inversa_pendiente",
         ultimasOpciones: { cupObjetivo: montoCUP, brlCalculado: realesNecesarios, tasaUsada }
     });
+    await commercialFunnel.crearCotizacion({ phone, tipo: "brl_cup_inverso", monto: realesNecesarios, salida: montoCUP });
     await crm.onCotizacion(phone, lang);
     await enviarSeguro(phone, msg);
     return msg;

@@ -102,9 +102,11 @@ async function enviarImagen(phone, imageUrl, caption = "") {
       },
       timeout: 15000
     });
+    return true;
   } catch (e) {
     logger("error", "ZAPI_IMAGE_ERROR", { err: e.message });
     log("EXTERNAL_API_ERROR", { origen: "zapi.enviarImagen", error: e.message });
+    return false;
   }
 }
 

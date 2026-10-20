@@ -759,9 +759,11 @@
 
             <!-- EMBUDO CRM -->
             <div class="config-section" style="border-left: 5px solid #a78bfa; margin-bottom:0;">
-                <h3 style="color:#a78bfa;">📊 Embudo de Conversión <small style="color:#8b949e;font-size:12px;font-weight:400;">· últimos 30 días</small></h3>
-                <p style="color:#8b949e;font-size:11px;margin-top:-6px;">Clientes registrados en los últimos 30 días y su avance comercial; etapas acumulativas por cliente único.</p>
+                <h3 style="color:#a78bfa;">📊 Embudo de cotizaciones <small style="color:#8b949e;font-size:12px;font-weight:400;">· últimos 30 días</small></h3>
+                <p style="color:#8b949e;font-size:11px;margin-top:-6px;">Cotizaciones identificadas individualmente y sus hitos registrados. No se reconstruye el embudo histórico incompleto.</p>
                 <div id="embudo" class="embudo-flow"></div>
+                <div id="embudo-nota" style="margin-top:12px;color:#94a3b8;font-size:11px;line-height:1.5;"></div>
+                <div id="embudo-extras" style="margin-top:12px;display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;"></div>
                 <div style="margin-top:20px; display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px;" id="crm-mini-stats">
                     <div style="background:#0b0e1a;border-radius:12px;padding:16px;border:1px solid #2d355a;">
                         <div style="font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:1px;">Frecuentes</div>
@@ -2634,13 +2636,33 @@
             const embudo = document.getElementById("embudo");
             if (!embudo) return;
 
-            const etapas = [
-                { label: "🆕 Contactos nuevos",      val: Number(d.contactos_nuevos || 0),  pct: 100, color: "#8b949e" },
-                { label: "💬 Cotizados",             val: Number(d.cotizados || 0),          pct: d.cotizados_pct, color: "#38bdf8" },
-                { label: "🧾 Operaciones creadas",   val: Number(d.operaciones_creadas || 0), pct: d.operaciones_creadas_pct, color: "#a78bfa" },
-                { label: "💸 Pagos confirmados",     val: Number(d.pagos_confirmados || 0), pct: d.pagos_confirmados_pct, color: "#f59e0b" },
-                { label: "✅ Completadas",           val: Number(d.completadas || 0),       pct: d.completadas_pct, color: "#4ade80" },
+            const nuevo = d.embudo_cotizaciones;
+            const etapas = nuevo ? [
+                { label: "💬 Cotizaciones", val: Number(nuevo.cotizaciones || 0), color: "#38bdf8" },
+                { label: "👍 Aceptaron seguir", val: Number(nuevo.aceptaron || 0), color: "#60a5fa" },
+                { label: "📲 PIX aceptado por proveedor", val: Number(nuevo.pix_aceptado_proveedor || 0), color: "#a78bfa" },
+                { label: "🧾 Comprobantes recibidos", val: Number(nuevo.comprobantes || 0), color: "#f59e0b" },
+                { label: "🗂️ Operaciones creadas", val: Number(nuevo.operaciones_creadas || 0), color: "#fb923c" },
+                { label: "🔎 Operaciones confirmadas", val: Number(nuevo.operaciones_confirmadas || 0), color: "#facc15" },
+                { label: "✅ Remesas completadas", val: Number(nuevo.completadas || 0), color: "#4ade80" },
+            ] : [
+                { label: "🆕 Contactos nuevos", val: Number(d.contactos_nuevos || 0), pct: 100, color: "#8b949e" },
+                { label: "💬 Cotizados", val: Number(d.cotizados || 0), pct: d.cotizados_pct, color: "#38bdf8" },
+                { label: "🧾 Operaciones creadas", val: Number(d.operaciones_creadas || 0), pct: d.operaciones_creadas_pct, color: "#a78bfa" },
+                { label: "💸 Pagos confirmados", val: Number(d.pagos_confirmados || 0), pct: d.pagos_confirmados_pct, color: "#f59e0b" },
+                { label: "✅ Completadas", val: Number(d.completadas || 0), pct: d.completadas_pct, color: "#4ade80" },
             ];
+
+            const nota = document.getElementById("embudo-nota");
+            const extras = document.getElementById("embudo-extras");
+            if (nota) nota.innerText = nuevo
+                ? `Hitos instrumentados desde ${nuevo.seguimiento_desde ? new Date(nuevo.seguimiento_desde).toLocaleDateString() : "el despliegue"}. “PIX aceptado” significa solicitud aceptada por Z-API, no entrega confirmada en WhatsApp. “Sin avance” no confirma abandono.`
+                : "Embudo histórico provisional basado en estados de cliente; no representa conversiones exactas por cotización.";
+            if (extras) extras.innerHTML = nuevo ? [
+                ["Sin avance registrado ≥24 h", nuevo.sin_avance_observable_24h],
+                ["Operaciones canceladas", nuevo.canceladas],
+                ["PIX parcial/fallido/incierto", nuevo.pix_resultado_no_confirmado]
+            ].map(([label, value]) => `<div style="background:#0b0e1a;border-radius:10px;padding:11px;border:1px solid #2d355a;"><div style="font-size:11px;color:#8b949e;">${label}</div><div style="font-size:20px;font-weight:700;color:#cbd5e1;margin-top:4px;">${Number(value || 0)}</div></div>`).join("") : "";
 
             const maxVal = Math.max(...etapas.map(e => e.val), 1);
 
@@ -2651,7 +2673,7 @@
                     <div class="embudo-stage-name">${e.label}</div>
                     <div class="embudo-stage-meta">
                         <span class="embudo-stage-count" style="color:${e.color};">${e.val}</span>
-                        ${e.pct != null ? `<span class="embudo-stage-pct">${e.pct}%</span>` : ""}
+                        ${!nuevo && e.pct != null ? `<span class="embudo-stage-pct">${e.pct}%</span>` : ""}
                     </div>
                     <div class="embudo-stage-bar"><div class="embudo-stage-fill" style="width:${pct}%;background:${e.color};"></div></div>
                 </div>`;

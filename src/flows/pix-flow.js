@@ -6,6 +6,7 @@ const { agregarOperacion, existeOperacionPendiente, obtenerPendienteCliente }   
 const { calcularOperacion }                                                        = require("../services/calculator");
 const { enviarMensaje, enviarImagen }                                              = require("../services/zapi");
 const crm                                                                          = require("../services/crm");
+const commercialFunnel                                                             = require("../services/commercial-funnel");
 const { esRecarga: esRecargaCliente }                                              = require("../services/reglas-bot");
 const {
     extraerIdentidadComprobante, calcularDestinatarioMatch, buscarOperacionPorIdentidad
@@ -95,6 +96,7 @@ async function enviarPIX(phone, cliente, esEs) {
         await enviarSeguro(phone, msg);
         return msg;
     }
+    await commercialFunnel.marcarAceptacion(phone);
     // BUG VIEJO: comparaba contra "recarga_etecsa", pero el valor real que se guarda
     // (ver src/flows/recarga-flow.js) es "recarga_nacional" o "recarga_internacional" —
     // por eso esRecarga nunca daba true y las recargas se trataban como remesa normal.
@@ -159,16 +161,29 @@ async function enviarPIX(phone, cliente, esEs) {
 }
 
 async function _enviarPIXFinal(phone, cliente, esEs) {
+    await commercialFunnel.marcarAceptacion(phone);
     const key = getPIXKey(); const holder = getPIXHolder();
     const bank = getPIXBank(); const img = getPIXImage();
 
-    if (img)    await enviarImagen(phone, img, "📲 Escanea el QR para pagar.");
-    if (key)    await enviarSeguro(phone, key);
-    if (holder) await enviarSeguro(phone, `Titular: ${holder}${bank ? `\n🏦 ${bank}` : ""}`);
-    await enviarSeguro(phone, esEs
+    await commercialFunnel.iniciarEnvioPix(phone);
+    const providerResults = [];
+    let credentialAccepted = false;
+    if (img) {
+        const accepted = await enviarImagen(phone, img, "📲 Escanea el QR para pagar.").catch(() => false);
+        providerResults.push(accepted);
+        credentialAccepted = accepted === true;
+    }
+    if (key) {
+        const accepted = await enviarSeguro(phone, key);
+        providerResults.push(accepted);
+        credentialAccepted = credentialAccepted || accepted === true;
+    }
+    if (holder) providerResults.push(await enviarSeguro(phone, `Titular: ${holder}${bank ? `\n🏦 ${bank}` : ""}`));
+    providerResults.push(await enviarSeguro(phone, esEs
         ? "Después del pago envíame el comprobante 📎 y proceso tu envío enseguida 🚀"
         : "Após o pagamento envie o comprovante 📎 e processo imediatamente 🚀"
-    );
+    ));
+    await commercialFunnel.registrarPixProveedor(phone, credentialAccepted ? providerResults : [...providerResults, false]);
     await crm.onPIXEnviado(phone, esEs ? "es" : "pt");
     return key;
 }
@@ -315,7 +330,8 @@ async function intentarCompletarOperacion(phone, pushName, cliente, esEs) {
         tipo:    cliente.tipo_favorito,
         comprobanteE2E:           cliente.comprobante_e2e || null,
         comprobanteTransaccionId: cliente.comprobante_transaccion_id || null,
-        comprobanteDatos:         cliente.comprobante_datos || null
+        comprobanteDatos:         cliente.comprobante_datos || null,
+        quoteId:                  cliente.current_quote_id || null
     });
 
     // C1 (auditoría 7728e66): agregarOperacion() puede devolver null por dos
@@ -528,6 +544,10 @@ async function procesarComprobante(phone, pushName, cliente, datos, esEs) {
         await enviarSeguro(phone, m);
         return "";
     }
+
+    // El comprobante ya fue reconocido y superó la deduplicación. Solo se
+    // guarda el hito del embudo; no confirma el pago ni cambia el flujo.
+    await commercialFunnel.registrarComprobante(phone);
 
     // 4) Staging en `customers` -- sobrevive aunque falte monto/tarjeta
     // todavía (mismo patrón que comprobante_pendiente/valor_comprobante ya

@@ -225,7 +225,7 @@ test("idempotencia: mismo intento enviado dos veces -> una sola operación y un 
 test("dashboard: formulario vertical 'Nueva transferencia' al lado de las tasas, sin romper el layout", () => {
     const html = fs.readFileSync(path.join(__dirname, "..", "public", "dashboard.html"), "utf8");
     // Orden: CRM (ancho completo) -> fila Tasas | Nueva transferencia -> fila Resumen General | Embudo.
-    assert.match(html, /<div class="config-section" id="seccionCrmTransferencias">[\s\S]*?<div class="layout-superior">\s*<div class="config-section" id="seccionTasas"[\s\S]*?id="seccionNuevaTransferencia"[\s\S]*?<div class="fila-resumen-embudo">[\s\S]*?📊 Resumen General[\s\S]*?📊 Embudo de Conversión/);
+    assert.match(html, /<div class="config-section" id="seccionCrmTransferencias">[\s\S]*?<div class="layout-superior">\s*<div class="config-section" id="seccionTasas"[\s\S]*?id="seccionNuevaTransferencia"[\s\S]*?<div class="fila-resumen-embudo">[\s\S]*?📊 Resumen General[\s\S]*?📊 Embudo de cotizaciones/);
     assert.match(html, /id="seccionNuevaTransferencia"/);
     for (const id of ["tmCliente", "tmTelefono", "tmMoneda", "tmCantidad", "tmTarjeta", "tmPreview", "btnCrearTransferencia"])
         assert.match(html, new RegExp(`id="${id}"`), `falta ${id}`);

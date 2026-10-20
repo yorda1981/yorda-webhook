@@ -133,6 +133,7 @@ async function limpiarSesionDB(phone) {
         await pool.query(`
             UPDATE customers SET
                 estado                = NULL,
+                current_quote_id      = NULL,
                 fecha_estado          = NULL,
                 fecha_pix             = NULL,
                 comprobante_pendiente = NULL,

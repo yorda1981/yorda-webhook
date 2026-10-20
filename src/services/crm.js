@@ -587,7 +587,15 @@ async function obtenerEstadisticasCRM(dias) {
             CROSS JOIN embudo
             CROSS JOIN cierres
         `);
-        return r.rows[0] || {};
+        let funnel = null;
+        try {
+            funnel = await require("./commercial-funnel").obtenerResumen(diasNum || 30);
+        } catch (funnelError) {
+            // El panel histórico sigue disponible durante el despliegue de la
+            // migración; no convertir una falla de métricas en falla del CRM.
+            console.warn("⚠️ Embudo por cotización no disponible:", funnelError.message);
+        }
+        return { ...(r.rows[0] || {}), ...(funnel ? { embudo_cotizaciones: funnel } : {}) };
     } catch (e) {
         console.error("❌ CRM estadísticas:", e.message);
         return {};
