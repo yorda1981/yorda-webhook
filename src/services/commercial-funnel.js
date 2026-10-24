@@ -62,10 +62,10 @@ async function registrarPixProveedor(phone, results, db = pool) {
             : states.some(v => v === true) ? "PARTIAL" : "UNKNOWN";
     try {
         const r = await db.query(`UPDATE commercial_funnel_quotes q SET
-                pix_provider_last_status=$2,
-                pix_provider_accepted_at=CASE WHEN $2='ACCEPTED' THEN COALESCE(q.pix_provider_accepted_at,NOW()) ELSE q.pix_provider_accepted_at END
+                pix_provider_last_status=$2::varchar,
+                pix_provider_accepted_at=CASE WHEN $3::boolean THEN COALESCE(q.pix_provider_accepted_at,NOW()) ELSE q.pix_provider_accepted_at END
             FROM customers c WHERE c.phone=$1 AND q.quote_id=c.current_quote_id AND q.phone=c.phone
-            RETURNING q.quote_id`, [phone, status]);
+            RETURNING q.quote_id`, [phone, status, status === "ACCEPTED"]);
         return { quoteId: r.rows[0]?.quote_id || null, providerStatus: status };
     } catch (error) { warn("resultado PIX", error); return { quoteId: null, providerStatus: status }; }
 }

@@ -357,3 +357,11 @@ test("la configuración se valida y cada cambio crea una versión con su motivo"
     assert.deepEqual(saved.mezcla, { actualidad: 35, educacion: 50, confianza: 15 });
     assert.equal(insert[7], "Las guías de pago generaron más cotizaciones en octubre");
 });
+
+test("un presupuesto diario agotado detiene nuevos intentos automáticos ese día", async () => {
+    let sql;
+    const allowed = await director.shouldRunToday({ query: async value => { sql = String(value); return { rows: [{ completadas: 0, en_curso: 0, intentos: 1, presupuesto_agotado: true }] }; } }, NOW);
+    assert.equal(allowed, false);
+    assert.match(sql, /aiBudgetBlocked/);
+    assert.match(sql, /presupuesto_agotado/);
+});

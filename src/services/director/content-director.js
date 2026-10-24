@@ -25,6 +25,7 @@ const contentLibrary = require("../content-library");
 const llmGateway = require("./llm");
 const directorConfig = require("./director-config");
 const sources = require("./sources");
+const automaticMarketer = require("./automatic-marketer");
 const { conLockExclusivo } = require("../job-lock");
 const { fechaSaoPaulo, horaSaoPaulo } = require("../../utils/timezone");
 
@@ -501,6 +502,17 @@ async function runDirector({ disparo = "AUTOMATICO" } = {}, dependencies = {}) {
     const detalle = { fuentes: {}, rechazos: [], umbral: config.umbralImpacto, configVersion: config.version };
     const context = { db, llm, library, manual: loadManual(dependencies), dependencies };
 
+    // Reserva primero la única llamada de IA necesaria para el marketero. El
+    // Director editorial puede consumir el presupuesto diario en varios
+    // candidatos; el contenido comercial no debe quedar bloqueado por ese orden.
+    try {
+        detalle.marketing = await (dependencies.marketer || automaticMarketer).runDaily({
+            db, now, marketerConfig: config.marketer, manual: context.manual
+        }, dependencies.marketerDependencies || {});
+    } catch (error) {
+        detalle.marketing = { status: "RECHAZADO", reason: String(error.message || error).slice(0, 250) };
+    }
+
     try {
         let news = [];
         try {
@@ -564,6 +576,9 @@ async function runDirector({ disparo = "AUTOMATICO" } = {}, dependencies = {}) {
         await finishRun(db, runId, { estado: "COMPLETADO", ...counts, detalle });
         return { runId, estado: "COMPLETADO", ...counts, detalle };
     } catch (error) {
+        const aiBudgetBlocked = /^DIRECTOR_DAILY_(?:TOKEN|CALL|COST)_/.test(String(error.code || ""));
+        detalle.aiErrorCode = error.code || null;
+        detalle.aiBudgetBlocked = aiBudgetBlocked;
         await finishRun(db, runId, { estado: "FALLIDO", ...counts, detalle, error: String(error.message).slice(0, 1000) });
         return { runId, estado: "FALLIDO", ...counts, detalle, error: error.message };
     }
@@ -575,12 +590,13 @@ async function shouldRunToday(db, now) {
     const result = await db.query(`
         SELECT COUNT(*) FILTER (WHERE estado = 'COMPLETADO')::int AS completadas,
                COUNT(*) FILTER (WHERE estado = 'EN_CURSO' AND iniciado_at > $2::timestamptz - INTERVAL '${STALE_RUN_MINUTES} minutes')::int AS en_curso,
-               COUNT(*)::int AS intentos
+               COUNT(*)::int AS intentos,
+               COALESCE(BOOL_OR(COALESCE((detalle->>'aiBudgetBlocked')::boolean, FALSE)), FALSE) AS presupuesto_agotado
         FROM director_runs
         WHERE fecha = $1 AND disparo = 'AUTOMATICO'
     `, [fechaSaoPaulo(now), now]);
     const row = result.rows[0];
-    return row.completadas === 0 && row.en_curso === 0 && row.intentos < MAX_AUTOMATIC_ATTEMPTS;
+    return row.completadas === 0 && row.en_curso === 0 && !row.presupuesto_agotado && row.intentos < MAX_AUTOMATIC_ATTEMPTS;
 }
 
 async function runningRun(db) {

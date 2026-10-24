@@ -60,6 +60,7 @@ function mapAsset(row) {
         revision: Number(row.revision_numero),
         estado: row.estado || "ACTIVO",
         origen: row.origen || "operador",
+        origenSistema: row.origen_sistema || null,
         grupo: row.grupo || null,
         categoria: row.categoria || null,
         aporte: row.aporte || null,
@@ -72,7 +73,7 @@ function mapAsset(row) {
 
 const SELECT_ASSET = `
     SELECT ci.id, ci.titulo, ci.creado_at, ci.actualizado_at,
-           ci.estado, ci.origen, ci.grupo, ci.categoria, ci.aporte, ci.impacto, ci.fuentes,
+           ci.estado, ci.origen, ci.origen_sistema, ci.grupo, ci.categoria, ci.aporte, ci.impacto, ci.fuentes,
            cr.id AS revision_id, cr.numero AS revision_numero, cr.cuerpo
     FROM content_items ci
     JOIN LATERAL (
@@ -218,7 +219,10 @@ function normalizeSources(fuentes) {
         nombre: String(fuente?.nombre || "").slice(0, 80),
         titulo: String(fuente?.titulo || "").slice(0, 300),
         url: String(fuente?.url || "").slice(0, 1000),
-        publicadoAt: fuente?.publicadoAt || null
+        publicadoAt: fuente?.publicadoAt || null,
+        ...(fuente?.datosVerificados && typeof fuente.datosVerificados === "object"
+            ? { datosVerificados: fuente.datosVerificados }
+            : {})
     }));
 }
 
@@ -228,8 +232,8 @@ async function createDirectorDraft(input, db = pool) {
     const title = normalizeTitle(input?.titulo);
     const body = normalizeBody(input?.cuerpo);
     const categoria = String(input?.categoria || "").slice(0, 40) || null;
-    const grupo = ["actualidad", "permanente"].includes(input?.grupo) ? input.grupo : null;
-    if (!grupo) throw validationError("Un borrador del Director debe ser de actualidad o permanente.");
+    const grupo = ["actualidad", "permanente", "comercial"].includes(input?.grupo) ? input.grupo : null;
+    if (!grupo) throw validationError("Un borrador del Director debe ser de actualidad, permanente o comercial.");
     const aporte = String(input?.aporte || "").trim().slice(0, 600);
     if (aporte.length < 20) throw validationError("Un borrador del Director debe explicar cómo genera confianza, clientes o remesas.");
     const fuentes = normalizeSources(input?.fuentes);
@@ -275,7 +279,7 @@ async function createDirectorDraft(input, db = pool) {
 }
 
 // Aprobar (BORRADOR → ACTIVO) o descartar (BORRADOR → INACTIVO) un borrador.
-async function resolveDraft(rawId, action, db = pool) {
+async function resolveDraft(rawId, action, db = pool, actor = "admin") {
     const id = normalizeId(rawId);
     const target = DRAFT_ACTIONS[action];
     if (!target) throw validationError("Acción de borrador inválida.");
@@ -286,12 +290,46 @@ async function resolveDraft(rawId, action, db = pool) {
             RETURNING id
         ), event AS (
             INSERT INTO content_events (entity_type, entity_id, event_type, actor, datos)
-            SELECT 'CONTENT_ITEM', id, $3, 'admin', '{}'::jsonb FROM updated
+            SELECT 'CONTENT_ITEM', id, $3, $4, '{}'::jsonb FROM updated
         )
         SELECT id FROM updated
-    `, [id, target.estado, target.evento]);
+    `, [id, target.estado, actor === "marketer_policy" && action === "approve" ? "CONTENT_ASSET_AUTO_APPROVED" : target.evento, actor]);
     const asset = await getContentAsset(id, db);
     return { asset, changed: Boolean(result.rows[0]) };
+}
+
+async function requireManualReview(rawId, db = pool) {
+    const id = normalizeId(rawId);
+    const client = await db.connect();
+    try {
+        await client.query("BEGIN");
+        const item = await client.query("SELECT id,estado,grupo FROM content_items WHERE id=$1 FOR UPDATE", [id]);
+        const row = item.rows[0];
+        if (!row) { await client.query("ROLLBACK"); return { asset: null, changed: false }; }
+        if (row.grupo !== "comercial") throw validationError("La revisión manual adicional solo aplica a contenido comercial automático.");
+        if (row.estado !== "ACTIVO") throw Object.assign(validationError("Solo se puede solicitar revisión manual antes de la publicación y desde un contenido activo."), { status: 409 });
+        const inFlight = await client.query(`SELECT 1 FROM content_schedules cs
+            WHERE cs.content_item_id=$1 AND cs.estado IN ('EJECUTANDO','EJECUTADA')
+            UNION ALL SELECT 1 FROM content_publications cp WHERE cp.content_item_id=$1 AND cp.estado IN ('PUBLICANDO','AMBIGUA','PUBLICADA')
+            LIMIT 1`, [id]);
+        if (inFlight.rows.length) throw Object.assign(validationError("La publicación ya se está enviando, es incierta o se publicó; no se puede retener."), { status: 409 });
+        const canceled = await client.query(`UPDATE content_schedules SET estado='CANCELADA',cancelada_at=NOW(),
+            actualizado_at=NOW(),error='El operador solicitó revisión manual.',result_code='MANUAL_REVIEW_REQUIRED'
+            WHERE content_item_id=$1 AND estado='PENDIENTE' RETURNING id`, [id]);
+        await client.query(`UPDATE content_items SET estado='BORRADOR',actualizado_at=NOW() WHERE id=$1`, [id]);
+        await client.query(`INSERT INTO content_events (entity_type,entity_id,event_type,actor,datos)
+            VALUES ('CONTENT_ITEM',$1,'CONTENT_MARKETER_MANUAL_REVIEW_REQUIRED','admin',$2::jsonb)`,
+        [id, JSON.stringify({ canceledScheduleIds: canceled.rows.map(value => Number(value.id)) })]);
+        for (const schedule of canceled.rows) {
+            await client.query(`INSERT INTO content_events (entity_type,entity_id,event_type,actor,datos)
+                VALUES ('SCHEDULE',$1,'CONTENT_MARKETER_SCHEDULE_CANCELED','admin','{"reason":"MANUAL_REVIEW_REQUIRED"}'::jsonb)`, [schedule.id]);
+        }
+        await client.query("COMMIT");
+        return { asset: await getContentAsset(id, db), changed: true };
+    } catch (error) {
+        try { await client.query("ROLLBACK"); } catch (_) {}
+        throw error;
+    } finally { client.release(); }
 }
 
 module.exports = {
@@ -307,5 +345,6 @@ module.exports = {
     createContentAsset,
     updateContentAsset,
     createDirectorDraft,
-    resolveDraft
+    resolveDraft,
+    requireManualReview
 };

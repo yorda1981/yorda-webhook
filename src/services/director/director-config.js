@@ -14,6 +14,16 @@ const FAMILIES = Object.freeze({
     confianza: "Confianza (seguridad y protección del cliente)"
 });
 
+const MARKETER_CATEGORIES = Object.freeze([
+    "como-utilizar-yorda", "captacion", "referidos",
+    "preguntas-frecuentes", "confianza", "opciones-recepcion"
+]);
+const DEFAULT_MARKETER = Object.freeze({
+    enabled: false,
+    categories: [...MARKETER_CATEGORIES],
+    time: "18:00"
+});
+
 // Respaldo si la tabla todavía no tiene filas; es la misma propuesta inicial de la migración.
 const DEFAULT_CONFIG = Object.freeze({
     version: 0,
@@ -24,6 +34,7 @@ const DEFAULT_CONFIG = Object.freeze({
     ajusteMaximo: 15,
     penalizacionRepeticion: 5,
     diasAlertaSinBorradores: 3,
+    marketer: { ...DEFAULT_MARKETER, categories: [...DEFAULT_MARKETER.categories] },
     motivo: "Configuración inicial propuesta sin datos reales.",
     creadoPor: "sistema",
     creadoAt: null
@@ -55,6 +66,13 @@ function mapConfig(row) {
         ajusteMaximo: Number(row.ajuste_maximo),
         penalizacionRepeticion: Number(row.penalizacion_repeticion),
         diasAlertaSinBorradores: Number(row.dias_alerta_sin_borradores),
+        marketer: {
+            enabled: row.marketer_enabled === true,
+            categories: Array.isArray(row.marketer_categories)
+                ? row.marketer_categories.filter(category => MARKETER_CATEGORIES.includes(category))
+                : [...DEFAULT_MARKETER.categories],
+            time: String(row.marketer_time || DEFAULT_MARKETER.time).slice(0, 5)
+        },
         motivo: row.motivo,
         creadoPor: row.creado_por,
         creadoAt: row.creado_at
@@ -91,6 +109,15 @@ function normalizeConfig(input, current) {
     const motivo = String(input?.motivo || "").trim();
     if (motivo.length < 10) throw configError("Explica el motivo del cambio (por ejemplo, qué resultado lo justifica).");
     config.motivo = motivo.slice(0, 1000);
+    const marketer = { ...(current.marketer || DEFAULT_MARKETER), ...(input?.marketer || {}) };
+    const categories = Array.isArray(marketer.categories) ? [...new Set(marketer.categories)] : null;
+    if (!categories || categories.some(category => !MARKETER_CATEGORIES.includes(category))) {
+        throw configError("Las categorías del marketero contienen valores no permitidos.");
+    }
+    if (marketer.enabled && !categories.length) throw configError("Activa al menos una categoría antes de habilitar el marketero.");
+    const time = String(marketer.time || "").trim();
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) throw configError("El horario del marketero debe tener formato HH:MM.");
+    config.marketer = { enabled: marketer.enabled === true, categories, time };
     return config;
 }
 
@@ -100,12 +127,14 @@ async function saveConfig(input, db = pool) {
     const config = normalizeConfig(input, current);
     const result = await db.query(`
         INSERT INTO director_config (mezcla, umbral_impacto, max_borradores, ventana_dias, ajuste_maximo,
-                                     penalizacion_repeticion, dias_alerta_sin_borradores, motivo, creado_por)
-        VALUES ($1::jsonb, $2, $3, $4, $5, $6, $7, $8, 'admin')
+                                     penalizacion_repeticion, dias_alerta_sin_borradores, motivo, creado_por,
+                                     marketer_enabled, marketer_categories, marketer_time)
+        VALUES ($1::jsonb, $2, $3, $4, $5, $6, $7, $8, 'admin', $9, $10::jsonb, $11::time)
         RETURNING *
     `, [JSON.stringify(config.mezcla), config.umbralImpacto, config.maxBorradores, config.ventanaDias,
-        config.ajusteMaximo, config.penalizacionRepeticion, config.diasAlertaSinBorradores, config.motivo]);
+        config.ajusteMaximo, config.penalizacionRepeticion, config.diasAlertaSinBorradores, config.motivo,
+        config.marketer.enabled, JSON.stringify(config.marketer.categories), `${config.marketer.time}:00`]);
     return mapConfig(result.rows[0]);
 }
 
-module.exports = { FAMILIES, DEFAULT_CONFIG, getActiveConfig, getConfigHistory, normalizeConfig, saveConfig };
+module.exports = { FAMILIES, MARKETER_CATEGORIES, DEFAULT_MARKETER, DEFAULT_CONFIG, getActiveConfig, getConfigHistory, normalizeConfig, saveConfig };

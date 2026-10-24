@@ -48,6 +48,16 @@ test("un PIX solo cuenta como aceptado cuando todos los envíos al proveedor dev
     assert.equal(unknown.providerStatus, "UNKNOWN");
 });
 
+test("el estado PIX usa tipos explícitos para los parámetros PostgreSQL", async () => {
+    let captured;
+    await funnel.registrarPixProveedor("5511999999999", [true], { query: async (sql, params) => {
+        captured = { sql, params }; return { rows: [] };
+    } });
+    assert.match(captured.sql, /pix_provider_last_status=\$2::varchar/);
+    assert.match(captured.sql, /CASE WHEN \$3::boolean/);
+    assert.deepEqual(captured.params, ["5511999999999", "ACCEPTED", true]);
+});
+
 test("los hitos idempotentes no reemplazan timestamps previos y solo admiten estados conocidos", async () => {
     const queries = [];
     const client = { query: async (sql, params) => {

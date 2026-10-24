@@ -144,6 +144,30 @@ test("al ejecutar reenvía el activo programado al mismo Motor de Publicación",
     assert.deepEqual(input, { idioma: "es", idempotencyKey: "library-10-a", contentId: 10 });
 });
 
+test("programación manual comercial no queda bloqueada por el control del marketero", async () => {
+    let input;
+    await executeClaimedSchedule({ scheduleId: 90, idioma: "es", idempotencyKey: "operator-approved-90", contentId: 12 }, {
+        pool: {},
+        validateMarketer: async () => { assert.fail("La revisión automática solo aplica a claves marketer-"); },
+        publisher: { async publishSelectedContent(value) { input = value; return { code: "PUBLISHED" }; } },
+        finishFn: async () => ({})
+    });
+    assert.equal(input.contentId, 12);
+});
+
+test("una programación del marketero vuelve a validar política antes de publicar", async () => {
+    let published = false;
+    let finished;
+    await executeClaimedSchedule({ scheduleId: 91, idioma: "es", idempotencyKey: "marketer-2026-10-23", contentId: 13, programadaPara: "2026-10-23T21:00:00Z" }, {
+        pool: {}, now: new Date("2026-10-23T21:00:00Z"),
+        validateMarketer: async () => ({ ok: false, code: "POLICY", error: "Configuración pausada" }),
+        publisher: { async publishSelectedContent() { published = true; } },
+        finishFn: async (_schedule, result) => { finished = result; return {}; }
+    });
+    assert.equal(published, false);
+    assert.equal(finished.code, "POLICY");
+});
+
 test("el envío administrativo usa una ejecución independiente dentro del scheduler existente", async () => {
     const calls = [];
     const schedule = { scheduleId: 50, idioma: "es", idempotencyKey: "daily-rates-admin-2026-10-15", contentId: 12 };

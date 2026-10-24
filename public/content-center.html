@@ -355,6 +355,11 @@
                     </div>
                     <div class="helper">Se publica la última revisión guardada. La hora es la de este dispositivo.</div>
                 </section>
+                <section class="draft" id="manualReviewPanel" hidden>
+                    <div class="preview-label">Publicación comercial automática</div>
+                    <div class="helper">Puedes detener esta publicación específica y devolverla a borrador para revisión. Si ya empezó el envío o su resultado es incierto, el sistema no intentará cancelarlo.</div>
+                    <button class="secondary" id="manualReviewButton" type="button">Exigir revisión manual</button>
+                </section>
             </form>
         </section>
     </section>
@@ -378,9 +383,10 @@
     let currentExecutionPackage = null;
     const CATEGORY_LABELS = {
         noticias:"Noticias de Cuba", tasas:"Tasas de cambio", economia:"Economía", bancos:"Bancos", remesas:"Remesas", vuelos:"Vuelos", apagones:"Apagones", oficial:"Cambios oficiales",
-        "como-funciona":"Cómo funciona", "usar-bot":"Usar el bot", pago:"Pago y comprobante", entrega:"Entrega", datos:"Datos necesarios", errores:"Errores frecuentes", preguntas:"Preguntas frecuentes", seguridad:"Seguridad", monedas:"CUP, USD y MLC", problemas:"Si algo falla"
+        "como-funciona":"Cómo funciona", "usar-bot":"Usar el bot", pago:"Pago y comprobante", entrega:"Entrega", datos:"Datos necesarios", errores:"Errores frecuentes", preguntas:"Preguntas frecuentes", seguridad:"Seguridad", monedas:"CUP, USD y MLC", problemas:"Si algo falla",
+        "como-utilizar-yorda":"Cómo utilizar YORDA", captacion:"Captación", referidos:"Referidos", "preguntas-frecuentes":"Preguntas frecuentes", confianza:"Confianza y transparencia", "opciones-recepcion":"Opciones de recepción"
     };
-    const GROUP_LABELS = { actualidad:"Actualidad", permanente:"Permanente" };
+    const GROUP_LABELS = { actualidad:"Actualidad", permanente:"Permanente", comercial:"Comercial" };
 
     const byId = (id) => document.getElementById(id);
     const statusEl = byId("status");
@@ -1197,6 +1203,7 @@
     function renderPublishPanel() {
         const asset = selectedAsset();
         byId("publishPanel").hidden = !asset || asset.estado !== "ACTIVO";
+        byId("manualReviewPanel").hidden = !asset || asset.estado !== "ACTIVO" || asset.grupo !== "comercial";
         if (!asset) return;
         const label = byId("publishDestination");
         label.textContent = destinationLabel();
@@ -1204,6 +1211,22 @@
         byId("publishButton").disabled = !activeDestination;
         byId("scheduleButton").disabled = !activeDestination;
     }
+
+    byId("manualReviewButton").addEventListener("click", async () => {
+        const asset = selectedAsset();
+        if (!asset || asset.grupo !== "comercial") return;
+        const button = byId("manualReviewButton");
+        button.disabled = true;
+        try {
+            const data = await requestJson(`/admin/content-library/${asset.id}/require-manual-review`, { method:"POST", body:"{}" });
+            const index = assets.findIndex(item => item.id === data.asset.id);
+            if (index >= 0) assets[index] = data.asset;
+            selectAsset(data.asset.id);
+            setStatus("Publicación detenida y devuelta a borrador para revisión manual.", "ok");
+        } catch (error) {
+            setStatus(error.message, "error");
+        } finally { button.disabled = false; }
+    });
 
     function idempotencyKey(asset, action) {
         return `library-${asset.id}-r${asset.revision}-${action}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;

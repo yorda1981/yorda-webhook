@@ -339,6 +339,18 @@ function createContentLibraryRouter({ service = contentLibrary, selector = conte
         }
     });
 
+    router.post("/:id/require-manual-review", adminWriteLimiter, verificarToken, async (req, res) => {
+        try {
+            const result = await service.requireManualReview(req.params.id);
+            if (!result.asset) return res.status(404).json({ error: "Contenido no encontrado." });
+            if (!result.changed) return res.status(409).json({ error: "No se pudo detener la publicación." });
+            res.json({ asset: result.asset });
+        } catch (error) {
+            const status = error.status || (error.code === "CONTENT_LIBRARY_VALIDATION" ? 400 : 500);
+            res.status(status).json({ error: error.message || "No se pudo exigir revisión manual." });
+        }
+    });
+
     router.get("/:id", adminReadLimiter, verificarToken, async (req, res) => {
         try {
             const asset = await service.getContentAsset(req.params.id);

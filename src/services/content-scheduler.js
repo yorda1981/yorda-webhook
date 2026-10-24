@@ -5,6 +5,7 @@ const contentPublisher = require("./content-publisher");
 const contentSelector = require("./content-selector");
 const dailyRates = require("./content-daily-rates");
 const commercialOutboundQueue = require("./commercial-outbound-queue");
+const { fechaSaoPaulo } = require("../utils/timezone");
 
 const SCHEDULE_STATES = Object.freeze({
     PENDING: "PENDIENTE",
@@ -158,6 +159,21 @@ async function claimDueSchedules({ limit = 10 } = {}, db = pool) {
     const client = await db.connect();
     try {
         await client.query("BEGIN");
+        // Pausar y reclamar publicaciones comerciales se serializa: una pausa
+        // administrativa impide que otro tick reclame el siguiente envío.
+        await client.query("SELECT pg_advisory_xact_lock(hashtext('content-marketer-global'))");
+        const marketer = await client.query("SELECT marketer_enabled FROM director_config ORDER BY id DESC LIMIT 1");
+        if (marketer.rows[0]?.marketer_enabled !== true) {
+            await client.query(`WITH canceled AS (
+                UPDATE content_schedules cs SET estado='CANCELADA',cancelada_at=NOW(),actualizado_at=NOW(),
+                    error='Marketero pausado; no se envió contenido comercial.',result_code='MARKETER_PAUSED'
+                FROM content_items ci WHERE ci.id=cs.content_item_id AND cs.idempotency_key LIKE 'marketer-%' AND cs.estado='PENDIENTE'
+                RETURNING cs.id
+            ), events AS (
+                INSERT INTO content_events (entity_type,entity_id,event_type,actor,datos)
+                SELECT 'SCHEDULE',id,'CONTENT_MARKETER_SCHEDULE_CANCELED','system','{"reason":"MARKETER_PAUSED"}'::jsonb FROM canceled
+            ) SELECT id FROM canceled`);
+        }
         const result = await client.query(`
             WITH due AS (
                 SELECT id
@@ -250,6 +266,24 @@ async function executeClaimedSchedule(schedule, dependencies = {}) {
                 adminPhone: dependencies.adminPhone
             });
         } else {
+            if (String(schedule.idempotencyKey || "").startsWith("marketer-")) {
+                const now = dependencies.now || new Date();
+                const scheduled = new Date(schedule.programadaPara);
+                const scheduledDay = String(schedule.idempotencyKey).slice("marketer-".length);
+                if (scheduledDay !== fechaSaoPaulo(now) || Number.isNaN(scheduled.getTime())
+                    || now.getTime() < scheduled.getTime() || now.getTime() - scheduled.getTime() > 30 * 60 * 1000) {
+                    result = { ok: false, code: "MISSED_MARKETER_WINDOW", error: "Se omitió esta publicación comercial fuera de su ventana; no se recuperan envíos atrasados." };
+                    return finishFn(schedule, result, db);
+                }
+            }
+            if (schedule.contentId && String(schedule.idempotencyKey || "").startsWith("marketer-")) {
+                const validate = dependencies.validateMarketer || require("./director/automatic-marketer").validateBeforePublish;
+                const validation = await validate(schedule.contentId, db, dependencies.now || new Date(), dependencies.marketerDependencies || {});
+                if (!validation.ok) {
+                    result = { ok: false, code: validation.code || "MARKETER_VALIDATION_FAILED", error: validation.error || "La validación comercial falló." };
+                    return finishFn(schedule, result, db);
+                }
+            }
             const input = { idioma: schedule.idioma, idempotencyKey: schedule.idempotencyKey };
             if (schedule.contentId) input.contentId = schedule.contentId;
             result = await publisher.publishSelectedContent(input);
