@@ -102,3 +102,8 @@ test("migración deja el control apagado y el panel ofrece controles integrados"
     assert.match(panel, /automatic-marketer\/settings/);
     assert.match(panel, /value="opciones-recepcion"/);
 });
+
+test("el contador de publicaciones aceptadas conserva la clave camelCase que consume el panel", () => {
+    const source = fs.readFileSync(path.join(__dirname, "..", "src/services/director/automatic-marketer.js"), "utf8");
+    assert.match(source, /AS "providerAccepted"/);
+});
