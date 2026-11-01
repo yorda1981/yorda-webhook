@@ -174,11 +174,22 @@ test("estando en 'confirmando_recarga', 'sí' confirma el resumen y avanza a 'ag
 
 test("estando en 'seleccionando_recarga' con dos opciones, el nombre ('nacional') selecciona esa modalidad", async (t) => {
     const mundo = mockMundo(t);
-    mundo.customers.set("5511900060005", { phone: "5511900060005", estado: "seleccionando_recarga" });
+    mundo.customers.set("5511900060005", { phone: "5511900060005", estado: "seleccionando_recarga",
+        ultima_pregunta: "seleccion_recarga", contexto_actualizado_at: new Date().toISOString() });
     await procesarMensaje("5511900060005", "nacional", "Cliente");
     const row = mundo.customers.get("5511900060005");
     assert.equal(row.tipo_favorito, "recarga_nacional");
     assert.equal(row.estado, "aguardando_numero_recarga");
+});
+
+test("una selección numérica de recarga fuera de la ventana contextual no inicia una operación", async (t) => {
+    const mundo = mockMundo(t);
+    mundo.customers.set("5511900060090", { phone: "5511900060090", estado: "seleccionando_recarga",
+        ultima_pregunta: "seleccion_recarga", contexto_actualizado_at: new Date(Date.now() - 31 * 60000).toISOString() });
+    await procesarMensaje("5511900060090", "1", "Cliente");
+    const row = mundo.customers.get("5511900060090");
+    assert.notEqual(row.tipo_favorito, "recarga_nacional");
+    assert.notEqual(row.estado, "aguardando_numero_recarga");
 });
 
 test("estando en 'confirmando_recarga', un mensaje que no confirma ni es una acción reconocida -- vuelve a pedir confirmación, nunca en silencio", async (t) => {

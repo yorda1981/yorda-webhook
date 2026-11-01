@@ -20,7 +20,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const pool = require("../db");
-const { yaFueProcesado, activarPausaHumana, enPausaHumana, isNonConversationNotification, _internos } = require("../src/services/webhook-guard");
+const { yaFueProcesado, activarPausaHumana, enPausaHumana, isNonConversationNotification, conservarAdjuntoSiPausado, reclamarAdjuntosDiferidos, marcarAdjuntoDiferido, _internos } = require("../src/services/webhook-guard");
 
 test("eventos Z-API de borrado/estado no son mensajes conversacionales", () => {
     assert.equal(isNonConversationNotification({ type: "ReceivedCallback", notification: "REVOKE" }), true);
@@ -93,6 +93,59 @@ test("pasada la ventana de 5 minutos, el mismo messageId vuelve a consultar la D
     t.mock.timers.tick(5 * 60 * 1000 + 1);
     assert.equal(await yaFueProcesado(id), false); // expiró en memoria -> vuelve a preguntarle a Postgres (mock: sigue "nuevo")
     t.mock.timers.reset();
+});
+
+test("adjunto recibido durante pausa se conserva junto a la deduplicación persistente", async (t) => {
+    let llamada;
+    t.mock.method(pool, "query", async (sql, params) => {
+        llamada = { sql, params };
+        return { rows: [{ message_id: "media-paused" }] };
+    });
+    const datos = {
+        phone: "5511988887777",
+        payload: { mediaUrl: "https://media.test/proof.pdf", messageType: "document", text: "Ya envié el PIX", senderName: "Cliente" }
+    };
+    assert.equal(await yaFueProcesado("media-paused", datos), false);
+    assert.match(llamada.sql, /media_payload/);
+    assert.match(llamada.sql, /pausa_hasta > NOW\(\)/);
+    assert.equal(llamada.params[0], "media-paused");
+    assert.equal(llamada.params[1], datos.phone);
+    assert.deepEqual(JSON.parse(llamada.params[2]), datos.payload);
+});
+
+test("la pausa activada entre deduplicación y lectura del webhook conserva el adjunto sin responder", async (t) => {
+    let llamada;
+    t.mock.method(pool, "query", async (sql, params) => {
+        llamada = { sql, params };
+        return { rows: [{ message_id: params[0] }] };
+    });
+    const datos = { phone: "5511988887777", payload: { mediaUrl: "https://media.test/proof.jpg", messageType: "image" } };
+    assert.equal(await conservarAdjuntoSiPausado("media-race", datos), true);
+    assert.match(llamada.sql, /media_status = 'DEFERRED'/);
+    assert.match(llamada.sql, /c\.pausa_hasta > NOW\(\)/);
+});
+
+test("reclamo de adjuntos diferidos es idempotente y excluye pausas aún activas", async (t) => {
+    let llamada;
+    t.mock.method(pool, "query", async (sql, params) => {
+        llamada = { sql, params };
+        return { rows: [{ message_id: "media-due", media_phone: "5511988887777", media_payload: { mediaUrl: "https://media.test/proof.pdf" } }] };
+    });
+    const rows = await reclamarAdjuntosDiferidos(4);
+    assert.equal(rows.length, 1);
+    assert.equal(llamada.params[0], 4);
+    assert.match(llamada.sql, /media_status = 'DEFERRED'/);
+    assert.match(llamada.sql, /c\.pausa_hasta IS NULL OR c\.pausa_hasta <= NOW\(\)/);
+    assert.match(llamada.sql, /FOR UPDATE OF w SKIP LOCKED/);
+    assert.match(llamada.sql, /SET media_status = 'PROCESSING'/);
+});
+
+test("adjunto reclamado con resultado incierto se marca para revisión y no se reintenta", async (t) => {
+    let llamada;
+    t.mock.method(pool, "query", async (sql, params) => { llamada = { sql, params }; return { rows: [] }; });
+    await marcarAdjuntoDiferido("media-uncertain", "REVIEW_REQUIRED");
+    assert.match(llamada.sql, /media_status IN \('PROCESSING', 'DEFERRED'\)/);
+    assert.equal(llamada.params[1], "REVIEW_REQUIRED");
 });
 
 // ── activarPausaHumana / enPausaHumana ──

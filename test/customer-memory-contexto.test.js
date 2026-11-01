@@ -10,7 +10,7 @@ const assert = require("node:assert/strict");
 
 const pool = require("../db");
 const {
-    guardarCliente, obtenerCliente, limpiarSesionDB, limpiarContextoCorto, obtenerSaludosPendientes
+    guardarCliente, obtenerCliente, limpiarSesionDB, limpiarContextoCorto, limpiarContextoPagoExpirado, obtenerSaludosPendientes
 } = require("../src/services/customer-memory");
 
 function mockClientesYBloqueados(t, bloqueados = []) {
@@ -42,6 +42,14 @@ function mockClientesYBloqueados(t, bloqueados = []) {
         if (/UPDATE customers SET[\s\S]*nombre\s*=\s*COALESCE/.test(sql)) {
             const row = aplicarParams(customers.get(params[0]) || { phone: params[0] }, params);
             customers.set(params[0], row);
+            return { rows: [] };
+        }
+        if (/UPDATE customers SET[\s\S]*current_quote_id\s*=\s*NULL/.test(sql)) {
+            const row = customers.get(params[0]);
+            if (row && !row.comprobante_pendiente && !row.comprobante_e2e && !row.comprobante_transaccion_id) {
+                Object.assign(row, { estado: null, ultimo_monto: null, tipo_favorito: null,
+                    ultima_pregunta: null, ultimas_opciones: null, contexto_actualizado_at: null });
+            }
             return { rows: [] };
         }
         if (/UPDATE customers SET[\s\S]*estado\s*=\s*NULL/.test(sql)) {
@@ -103,6 +111,18 @@ test("limpiarContextoCorto: limpia SOLO el contexto corto, nunca el estado ni el
     assert.equal(cliente.ultima_pregunta, null);
     assert.equal(cliente.estado, "aguardando_comprovante", "el estado financiero nunca lo toca limpiarContextoCorto");
     assert.equal(Number(cliente.ultimo_monto), 300);
+});
+
+test("limpiarContextoPagoExpirado preserva tarjeta y evidencia de pago", async (t) => {
+    const customers = mockClientesYBloqueados(t);
+    customers.set("5511900000090", { phone: "5511900000090", estado: "aguardando_comprovante", ultimo_monto: 300,
+        tipo_favorito: "brl_cup", tarjeta_frecuente: "1111222233334444", comprobante_pendiente: true,
+        comprobante_e2e: "E12345678202601011000ABCDEFGHIJK" });
+    await limpiarContextoPagoExpirado("5511900000090");
+    const cliente = await obtenerCliente("5511900000090");
+    assert.equal(cliente.estado, "aguardando_comprovante", "si hay comprobante, la limpieza condicional no toca el contexto/evidencia");
+    assert.equal(cliente.comprobante_e2e, "E12345678202601011000ABCDEFGHIJK");
+    assert.equal(cliente.tarjeta_frecuente, "1111222233334444");
 });
 
 test("obtenerSaludosPendientes: excluye a los números bloqueados", async (t) => {

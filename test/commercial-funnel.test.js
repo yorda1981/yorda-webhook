@@ -108,7 +108,7 @@ test("los flujos conectan cotización, aceptación, comprobante y operación sin
     assert.match(ops, /completed_at = NOW\(\)/);
     assert.match(ops, /cancelada_at = NOW\(\)/);
     const index = read("index.js");
-    assert.match(index, /if \(await yaFueProcesado\(messageId\)\) return/);
+    assert.match(index, /if \(await yaFueProcesado\(messageId, datosAdjuntoPausado\)\) return/);
 });
 
 test("la migración no reescribe ni elimina historial previo", () => {

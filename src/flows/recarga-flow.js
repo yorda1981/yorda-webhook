@@ -1,7 +1,7 @@
 "use strict";
 
 const pool               = require("../../db");
-const { guardarCliente, obtenerCliente } = require("../services/customer-memory");
+const { guardarCliente, obtenerCliente, limpiarContextoCorto } = require("../services/customer-memory");
 const { enviarSeguro }   = require("./shared");
 const { enviarPIX }      = require("./pix-flow");
 const { interpretarSeleccionRecarga, nombraModalidadRecarga, normalizarNumeroCubano } = require("../services/reglas-bot");
@@ -58,7 +58,7 @@ async function mostrarMenuRecargas(phone) {
         msg += `¿Cuál prefieres? Responde ${recargas.map((_, i) => `*${i + 1}*`).join(" o ")}, o dime el nombre 😊`;
     }
 
-    await guardarCliente({ phone, estado: "seleccionando_recarga", fechaEstado: new Date().toISOString() });
+    await guardarCliente({ phone, estado: "seleccionando_recarga", fechaEstado: new Date().toISOString(), ultimaPregunta: "seleccion_recarga" });
     await enviarSeguro(phone, msg);
     return msg;
 }
@@ -119,6 +119,7 @@ async function iniciarSeleccionRecarga(phone, tipo, recargasConocidas, esEs = tr
         estado: "aguardando_numero_recarga",
         fechaEstado: new Date().toISOString()
     });
+    await limpiarContextoCorto(phone);
     await enviarSeguro(phone, esEs
         ? "Perfecto 😊\n\n¿Cuál es el número cubano a recargar?\n\nEjemplo: 51234567 (con o sin +53)"
         : "Perfeito 😊\n\nQual o número cubano para recarregar?\n\nExemplo: 51234567 (com ou sem +53)");

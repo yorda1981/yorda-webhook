@@ -19,7 +19,7 @@ const marketingConsent = require("./src/services/marketing-consent");
 const entregasService = require("./src/services/entregas");
 const { esPedidoWeb, procesarPedidoWeb, crearEntregaManual, cotizarTransferenciaManual, crearTransferenciaManual } = require("./src/flows/pedido-web-flow");
 const { enviarSeguro, getAdminPhone, getPIXKey, getPIXHolder, getPIXBank, getPIXImage, limpiarSesion } = require("./src/flows/shared");
-const { yaFueProcesado, activarPausaHumana, enPausaHumana, isNonConversationNotification, limpiarWebhookEventsViejos } = require("./src/services/webhook-guard");
+const { yaFueProcesado, activarPausaHumana, enPausaHumana, obtenerPausaHumanaHasta, isNonConversationNotification, limpiarWebhookEventsViejos, reclamarAdjuntosDiferidos, conservarAdjuntoSiPausado, marcarAdjuntoDiferido, devolverAdjuntoACola } = require("./src/services/webhook-guard");
 const { verificarSecretoWebhook, validarPayloadWebhook } = require("./src/middleware/webhook-security");
 const { conLockExclusivo } = require("./src/services/job-lock");
 const { log } = require("./src/utils/structured-logger");
@@ -298,7 +298,22 @@ app.post("/webhook", verificarSecretoWebhook, webhookLimiter, validarPayloadWebh
         if (!tiposValidos.includes(body.type)) return;
 
         const messageId = body.messageId || body.id || body.zeId;
-        if (await yaFueProcesado(messageId)) return;
+        const mediaUrlEntrante = body.image?.imageUrl || body.document?.documentUrl || null;
+        const esAdjunto = Boolean(mediaUrlEntrante) && (
+            body.messageType === "image" || body.messageType === "document" ||
+            body.type === "image" || body.type === "document" || body.image || body.document
+        );
+        const textoEntrante = body.text?.message || body.body || body.caption || "";
+        const datosAdjuntoPausado = esAdjunto ? {
+            phone: phoneRaw,
+            payload: {
+                mediaUrl: mediaUrlEntrante,
+                messageType: body.messageType || body.type || (body.document ? "document" : "image"),
+                text: textoEntrante,
+                senderName: body.senderName || "Cliente"
+            }
+        } : null;
+        if (await yaFueProcesado(messageId, datosAdjuntoPausado)) return;
 
         // Una respuesta del cliente invalida seguimientos comerciales en cola;
         // el bot y las respuestas transaccionales continúan por su ruta normal.
@@ -310,6 +325,7 @@ app.post("/webhook", verificarSecretoWebhook, webhookLimiter, validarPayloadWebh
         // customers/operations/entregas — ver src/services/blocked-numbers.js.
         if (await blockedNumbers.estaBloqueado(phoneRaw)) {
             console.log(`🚫 Número bloqueado, sin respuesta: ${phoneRaw}`);
+            if (esAdjunto && messageId) await marcarAdjuntoDiferido(messageId, "IGNORED").catch(() => {});
             return;
         }
 
@@ -324,6 +340,15 @@ app.post("/webhook", verificarSecretoWebhook, webhookLimiter, validarPayloadWebh
         const referralLinkRequestDuringPause = customerAcquisition.isReferralLinkRequest(pauseText);
         if (await enPausaHumana(phoneRaw) && !referralLinkRequestDuringPause) {
             console.log(`🤫 BOT SILENCIADO PARA ${phoneRaw}`);
+            if (esAdjunto && messageId) {
+                const guardado = await conservarAdjuntoSiPausado(messageId, datosAdjuntoPausado).catch(error => {
+                    console.error("❌ No se pudo conservar el adjunto durante la pausa humana:", error.message);
+                    return false;
+                });
+                console.log(guardado
+                    ? `📎 Adjunto conservado para recuperación tras la pausa humana (${messageId})`
+                    : `⚠️ Adjunto durante pausa sin persistencia confirmada (${messageId})`);
+            }
             return;
         }
         if (referralLinkRequestDuringPause) {
@@ -357,9 +382,11 @@ app.post("/webhook", verificarSecretoWebhook, webhookLimiter, validarPayloadWebh
             try {
                 if (mediaUrl) {
                     await openaiService.procesarMensaje(phoneRaw, textMessage || "imagen_recibida", pushName, mediaUrl);
+                    if (esAdjunto && messageId) await marcarAdjuntoDiferido(messageId, "PROCESSED");
                 }
             } catch (e) {
                 console.error("❌ Error en multimedia:", e.message);
+                if (esAdjunto && messageId) await marcarAdjuntoDiferido(messageId, "REVIEW_REQUIRED").catch(() => {});
             }
             return;
         }
@@ -1044,6 +1071,47 @@ app.get("/api/pix-info", (req, res) => {
 app.get("/", (req, res) => res.send("YordaBot Online ✅"));
 
 app.listen(PORT, () => console.log(`🚀 Servidor en puerto ${PORT}`));
+
+// Los adjuntos recibidos mientras el operador tiene la conversación pausada
+// se recuperan solo después del vencimiento de esa pausa. El reclamo ocurre
+// atómicamente en PostgreSQL; si una ejecución queda incierta tras reiniciar,
+// no se reintenta a ciegas para evitar procesar o responder dos veces.
+async function procesarAdjuntosTrasPausaHumana() {
+    let pendientes;
+    try {
+        pendientes = await reclamarAdjuntosDiferidos(10);
+    } catch (error) {
+        console.error("❌ No se pudieron reclamar adjuntos diferidos:", error.message);
+        return;
+    }
+    for (const evento of pendientes) {
+        const media = evento.media_payload || {};
+        try {
+            const pausaHasta = await obtenerPausaHumanaHasta(evento.media_phone);
+            if (pausaHasta && new Date(pausaHasta) > new Date()) {
+                await devolverAdjuntoACola(evento.message_id, pausaHasta);
+                continue;
+            }
+            if (!media.mediaUrl) {
+                await marcarAdjuntoDiferido(evento.message_id, "REVIEW_REQUIRED");
+                continue;
+            }
+            await openaiService.procesarMensaje(
+                evento.media_phone,
+                media.text || "imagen_recibida",
+                media.senderName || "Cliente",
+                media.mediaUrl
+            );
+            await marcarAdjuntoDiferido(evento.message_id, "PROCESSED");
+            console.log(`📎 Adjunto diferido procesado después de la pausa (${evento.message_id})`);
+        } catch (error) {
+            await marcarAdjuntoDiferido(evento.message_id, "REVIEW_REQUIRED").catch(() => {});
+            console.error(`❌ Adjunto diferido requiere revisión (${evento.message_id}):`, error.message);
+        }
+    }
+}
+setTimeout(procesarAdjuntosTrasPausaHumana, 30 * 1000).unref?.();
+setInterval(procesarAdjuntosTrasPausaHumana, 30 * 1000).unref?.();
 
 // Scheduler persistente del Content Center. La tabla decide qué está pendiente;
 // este timer solo despierta el servicio y no contiene reglas de publicación.

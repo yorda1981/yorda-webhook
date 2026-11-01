@@ -86,7 +86,8 @@ for (const frase of ["Cuál es el estado de mi envío", "cómo va mi envío", "m
     test(`"${frase}" con operación PENDIENTE real -> responde su estado real (ya no queda en silencio)`, async (t) => {
         const w = mundo(t, { cliente: CLIENTE, operaciones: [op("pendiente")] });
         const { msgs, resultado } = await decir(PH, frase);
-        assert.deepEqual(msgs, ["Tu última operación: R$300 — ⏳ Pendiente de verificar"]);
+        assert.match(msgs[0], /pendiente de verificación/i);
+        assert.match(msgs[0], /no inicies otro pago|antes de realizar otro pago|no hace falta que vuelvas a pagar/i);
         assert.equal(resultado, "respondido");
         assert.equal(llamadasGPT, 0);
         assert.deepEqual(w.escrituras, [], "solo lectura");
@@ -95,12 +96,14 @@ for (const frase of ["Cuál es el estado de mi envío", "cómo va mi envío", "m
 
 test("estado real: confirmada se informa tal cual", async (t) => {
     mundo(t, { cliente: CLIENTE, operaciones: [op("confirmada")] });
-    assert.deepEqual((await decir(PH, "cómo va mi envío")).msgs, ["Tu última operación: R$300 — ✅ Confirmada, en proceso"]);
+    const { msgs } = await decir(PH, "cómo va mi envío");
+    assert.match(msgs[0], /confirmado/i);
+    assert.match(msgs[0], /transferencia/i);
 });
 
 test("estado real: completada se informa tal cual", async (t) => {
     mundo(t, { cliente: CLIENTE, operaciones: [op("completada")] });
-    assert.deepEqual((await decir(PH, "cómo va mi envío")).msgs, ["Tu última operación: R$300 — 🎉 Completada"]);
+    assert.match((await decir(PH, "cómo va mi envío")).msgs[0], /Tu operación de R\$300 se completó/);
 });
 
 test("no inventa estados: una operación expirada NO se informa como pendiente", async (t) => {

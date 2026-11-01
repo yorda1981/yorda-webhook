@@ -2,7 +2,7 @@
 
 require("dotenv").config();
 
-const { guardarCliente, obtenerCliente, marcarSaludoPendiente, limpiarSaludoPendiente, limpiarContextoCorto, limpiarTarjetaFrecuente } = require("./customer-memory");
+const { guardarCliente, obtenerCliente, marcarSaludoPendiente, limpiarSaludoPendiente, limpiarContextoCorto, limpiarContextoPagoExpirado, limpiarMenuConversacionalObsoleto, limpiarTarjetaFrecuente } = require("./customer-memory");
 const commercialContactMemory = require("./commercial-contact-memory");
 const { obtenerUltimaOperacion, obtenerPendienteCliente }                   = require("./operations");
 const { activarPausaHumana }                       = require("./webhook-guard");
@@ -11,7 +11,7 @@ const {
     esTarjetaDuplicada, esConsultaEntrega, esBareMontoValido, esEnvioNuevoSobreAbandonado, puedeCotizarBRL,
     clienteEstaOcupado, tieneContextoReemplazable, esFraseDeAbandonoExplicito,
     debeCompletarConMontoPendiente, debeConfirmarCotizacion, tieneTarjetaGuardada, esConsultaTasas, esIntencionSinMonto, esMensajeDeNegocio, yaAvisoEntregaReciente,
-    separarSaludo, esPedidoDePix, tieneOperacionEnCurso, preguntaElMonto, esConsultaEstadoOperacion,
+    separarSaludo, esPedidoDePix, tieneOperacionEnCurso, contextoPagoConversacionalVencido, preguntaElMonto, esConsultaEstadoOperacion, esSeguimientoEntrega,
     contextoUtilizable, interpretarSeleccionOpcion, interpretarTarjetaPorPalabra, monedaPendienteDeContexto,
     esRechazoTarjeta, esPausaTemporal, esSenalConfusion, esCierreNatural, esPreguntaExploratoria,
     interpretarAccionRecarga,
@@ -24,7 +24,7 @@ const commercialFunnel = require("./commercial-funnel");
 // Flows
 const { detectarImagenUnificada, detectarComprobantePDF, llamarAsistente } = require("../flows/imagen-flow");
 const { enviarPIX, _enviarPIXFinal, intentarCompletarOperacion, procesarComprobante, guardarTarjeta } = require("../flows/pix-flow");
-const { cotizarBRL, cotizarUSD, preguntarTipoUSD, cotizarMLC, tasaMLC, detectarCUPInverso, cotizarCUPInverso, consultarTasas } = require("../flows/cotizacion-flow");
+const { cotizarBRL, cotizarUSD, preguntarTipoUSD, preguntarModalidadUSD, cotizarMLC, tasaMLC, detectarCUPInverso, cotizarCUPInverso, consultarTasas } = require("../flows/cotizacion-flow");
 const { calcularOperacion } = require("./calculator");
 const {
     mostrarMenuRecargas, intentarSeleccionDirecta, seleccionarRecarga, procesarNumeroRecarga,
@@ -51,7 +51,7 @@ const {
 async function procesarMensaje(phone, text, pushName = "", imageUrl = null, opciones = {}) {
     const reportar = (resultado) => { try { opciones?.onResultado?.(resultado); } catch { /* observabilidad nunca rompe el flujo */ } };
     try {
-        if (!text || !phone) { reportar("sin_texto"); return ""; }
+        if ((!text && !imageUrl) || !phone) { reportar("sin_texto"); return ""; }
 
         // Una solicitud explícita de no recibir comunicaciones comerciales se
         // conserva en el perfil; no altera respuestas ni operaciones iniciadas.
@@ -61,7 +61,35 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null, opci
 
         const txt = norm(text);
 
-        const cliente    = await obtenerCliente(phone);
+        let cliente    = await obtenerCliente(phone);
+        const menuConversacional = cliente?.estado === "seleccionando_tarjeta" || cliente?.estado === "seleccionando_recarga";
+        const preguntaMenuVigente = cliente?.estado === "seleccionando_tarjeta"
+            ? cliente?.ultima_pregunta === "seleccion_tarjeta"
+            : cliente?.ultima_pregunta === "seleccion_recarga";
+        if (!imageUrl && menuConversacional && (!preguntaMenuVigente || !contextoUtilizable(cliente))) {
+            const ultimaOperacion = await obtenerUltimaOperacion(phone);
+            const operacionActiva = ultimaOperacion && ["pendiente", "confirmada"].includes(ultimaOperacion.status);
+            if (!operacionActiva) {
+                await limpiarMenuConversacionalObsoleto(phone);
+                cliente = await obtenerCliente(phone);
+            }
+        }
+        const tieneContextoPago = ["cotizacion_realizada", "aguardando_comprovante"].includes(cliente?.estado);
+        if (!imageUrl && tieneContextoPago) {
+            const ultimaOperacion = await obtenerUltimaOperacion(phone);
+            const operacionActiva = ultimaOperacion && ["pendiente", "confirmada"].includes(ultimaOperacion.status);
+            const estadoFinal = ["completada", "cancelada", "cancelada_por_operador", "expirada", "rechazada"].includes(String(ultimaOperacion?.status || "").toLowerCase());
+            const contextoRef = cliente?.estado === "aguardando_comprovante"
+                ? (cliente?.fecha_pix || cliente?.fecha_estado || cliente?.fecha_cotizacion)
+                : (cliente?.fecha_cotizacion || cliente?.fecha_estado);
+            const contextoTs = contextoRef ? new Date(contextoRef).getTime() : NaN;
+            const operacionTs = new Date(ultimaOperacion?.updated_at || ultimaOperacion?.created_at || NaN).getTime();
+            const reemplazadoPorOperacionFinal = estadoFinal && Number.isFinite(contextoTs) && Number.isFinite(operacionTs) && operacionTs >= contextoTs;
+            if (!operacionActiva && (contextoPagoConversacionalVencido(cliente) || reemplazadoPorOperacionFinal)) {
+                await limpiarContextoPagoExpirado(phone);
+                cliente = await obtenerCliente(phone);
+            }
+        }
         const yaSaludado = !!cliente?.saludo_enviado;
 
         // ── Idioma y CRM ──
@@ -79,6 +107,9 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null, opci
         if (solicitaNoComerciales) {
             await require("../../db").query("UPDATE customers SET marketing_opt_out = true WHERE phone = $1", [phone]).catch(() => {});
         }
+
+        if (imageUrl && cliente?.estado !== "pedido_web_pendiente")
+            return await manejarImagen(phone, pushName, cliente, imageUrl, lang, esEs);
 
         // ── Pedido de la calculadora en proceso: el bot se queda en silencio ──
         // Una vez que un pedido llega desde la calculadora, se maneja 100% por el
@@ -137,6 +168,19 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null, opci
             await enviarSeguro(phone, msg); return msg;
         }
 
+        // Una operación real pendiente/confirmada tiene prioridad sobre el
+        // estado conversacional. No pedir otro PIX ni iniciar una nueva
+        // cotización mientras el operador verifica/procesa esa transferencia.
+        const senalSeguimiento = esConsultaEstadoOperacion(txt) || esSeguimientoEntrega(txt) ||
+            /\b(paguei|pague|comprovante|comprobante|ya envie|ya mande|ya pague|hice el pago|estoy esperando|sigo esperando)\b/.test(txt);
+        const puedeInterferirOperacion = !!cliente?.estado || montoValido || esPedidoDePix(txt) ||
+            esIntencionSinMonto(txt) || senalSeguimiento ||
+            /\b(quiero|necesito|quero|preciso)\b.{0,35}\b(enviar|mandar|transferir|remesa|remessa)\b/.test(txt);
+        if (puedeInterferirOperacion) {
+            const activa = await obtenerOperacionActiva(phone);
+            if (activa) return await responderEstadoOperacion(phone, activa, lang);
+        }
+
         // ── Saludo ──
         // Saludos naturales y combinados ("Hola buenas noches", "Hola" +
         // "Buenas" del debounce) -- ver separarSaludo en reglas-bot.js.
@@ -175,7 +219,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null, opci
             // se descarta aquí por no estar en la lista de gatillos.
             esMensajeDeNegocio(txt) ||
             // Seguimiento de una operación propia ("cómo va mi envío").
-            esConsultaEstadoOperacion(txt);
+            esConsultaEstadoOperacion(txt) || esSeguimientoEntrega(txt);
         if (!debeResponder) { reportar("porton"); return ""; }
 
         // ── Abandono explícito de la operación en curso ──
@@ -271,8 +315,6 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null, opci
         }
 
         // ── Imágenes ──
-        if (imageUrl) return await manejarImagen(phone, pushName, cliente, imageUrl, lang, esEs);
-
         // ── Recargas: selección natural, número, resumen y cambios ──
         // FIX 2: Recarga sube antes de tarjetas — tiene su propio estado y no debe
         // pasar por checks de tarjeta/monto innecesariamente.
@@ -311,7 +353,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null, opci
             if (accion === "cambiar_internacional")
                 return await cambiarModalidadRecarga(phone, "internacional", esEs);
 
-            if (cliente.estado === "seleccionando_recarga")
+            if (cliente.estado === "seleccionando_recarga" && contextoUtilizable(cliente) && cliente.ultima_pregunta === "seleccion_recarga")
                 return await seleccionarRecarga(phone, txt.trim(), esEs);
 
             if (cliente.estado === "aguardando_numero_recarga")
@@ -332,7 +374,7 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null, opci
         // Acepta el número (1, 2...) o una respuesta corta por contexto
         // ("la primera"/"la otra"/"esa") -- ver interpretarSeleccionOpcion en
         // reglas-bot.js. Si es ambiguo, se pregunta -- nunca se adivina.
-        if (cliente?.estado === "seleccionando_tarjeta") {
+        if (cliente?.estado === "seleccionando_tarjeta" && contextoUtilizable(cliente) && cliente.ultima_pregunta === "seleccion_tarjeta") {
             const tarjetas = Array.isArray(cliente?.tarjetas) ? cliente.tarjetas.filter(t => /^\d{15,16}$/.test(t)) : [];
             let tarjetaElegida = null;
             if (/^[1-9]$/.test(txt.trim())) {
@@ -379,10 +421,19 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null, opci
         }
 
         // ── Selección Clásica/Prepago USD ──
-        if (cliente?.tipo_favorito === "usd_pendiente_tipo" && /^[12]$/.test(txt.trim())) {
-            const tipoUSD = txt.trim() === "1" ? "usd_clasica" : "usd_prepago";
+        if (cliente?.tipo_favorito === "usd_pendiente_modalidad") {
+            const modalidad = seleccionarModalidadUSD(txt);
+            const montoUSD = Number(cliente?.ultimo_monto);
+            if (montoUSD > 0 && modalidad === "efectivo") return await cotizarUSD(phone, pushName, montoUSD, "usd_efectivo", lang, esEs) || "";
+            if (montoUSD > 0 && modalidad === "tarjeta") return await preguntarTipoUSD(phone, pushName, montoUSD, lang, esEs) || "";
+            if (/^[1-9]$/.test(txt.trim())) return await preguntarModalidadUSD(phone, pushName, montoUSD, lang, esEs) || "";
+        }
+
+        if (cliente?.tipo_favorito === "usd_pendiente_tipo") {
+            const tipoUSD = seleccionarTipoTarjetaUSD(txt);
             const montoG  = Number(cliente?.ultimo_monto);
-            if (montoG > 0) return await cotizarUSD(phone, pushName, montoG, tipoUSD, lang, esEs) || "";
+            if (montoG > 0 && tipoUSD) return await cotizarUSD(phone, pushName, montoG, tipoUSD, lang, esEs) || "";
+            if (/^[1-9]$/.test(txt.trim())) return await preguntarTipoUSD(phone, pushName, montoG, lang, esEs) || "";
         }
 
         // ── FIX LOOP (parte 2): comprobante + tarjeta ya recibidos, solo faltaba el monto ──
@@ -601,22 +652,27 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null, opci
         }
 
         // ── Estado de operación ──
-        if (esConsultaEstadoOperacion(txt) || /estado|mi operacion|mi envio|cuando llega|cuando llego|cuanto falta|ya llego|esta listo/.test(txt)) {
+        if (esConsultaEstadoOperacion(txt) || esSeguimientoEntrega(txt) || /estado|mi operacion|mi envio|cuando llega|cuando llego|cuanto falta|ya llego|esta listo/.test(txt)) {
             const ultima = await obtenerUltimaOperacion(phone);
             if (!ultima) {
+                if (esSeguimientoEntrega(txt)) {
+                    const m = pickL(
+                        ["No encuentro una transferencia registrada con este número. Si ya pagaste, no hagas otro PIX por ahora; dime cuándo lo hiciste o contacta a Yordanys para revisarlo.",
+                            "No veo una operación registrada aquí todavía. Si el pago ya salió, espera antes de repetirlo y comparte con Yordanys cuándo lo hiciste para que lo compruebe."],
+                        ["Não encontrei uma transferência registrada com este número. Se você já pagou, não faça outro PIX por enquanto; me diga quando pagou ou fale com Yordanys para conferirmos.",
+                            "Ainda não vejo uma operação registrada aqui. Se o pagamento já saiu, espere antes de repetir e informe ao Yordanys quando fez para ele conferir."],
+                        lang
+                    );
+                    await enviarSeguro(phone, m);
+                    return m;
+                }
                 // Sin operación real: una cotización en curso NO es una
                 // operación -- se retoma como cotización, sin inventar estado.
                 if (tieneOperacionEnCurso(cliente)) return await continuarOperacionEnCurso(phone, cliente, esEs);
                 await enviarSeguro(phone, "No encuentro operaciones registradas 🤔\n\n¿Quieres hacer un envío?"); return "";
             }
             // Solo el estado REAL de la fila; uno desconocido se muestra tal cual.
-            const estadoTxt = ultima.status === "completada" ? "🎉 Completada"
-                : ultima.status === "confirmada" ? "✅ Confirmada, en proceso"
-                : ultima.status === "pendiente" ? "⏳ Pendiente de verificar"
-                : ultima.status === "expirada" ? "⌛ Expirada (el pago no se llegó a confirmar)"
-                : `Estado: ${ultima.status}`;
-            await enviarSeguro(phone, `Tu última operación: R$${ultima.monto} — ${estadoTxt}`);
-            return "";
+            return await responderEstadoOperacion(phone, ultima, lang);
         }
 
         // ── USD ──
@@ -639,8 +695,11 @@ async function procesarMensaje(phone, text, pushName = "", imageUrl = null, opci
             const esEfectivo = /efectivo|cash|vender|cambiar|comprar/.test(txt);
             const esPrepago  = /prepago|nauta|internacional/.test(txt);
             const esClasica  = /clasica|clásica|bpa|bandec|metropolitano/.test(txt);
-            if (!esEfectivo && !esPrepago && !esClasica) return await cotizarUSD(phone, pushName, valorFinal, "usd_clasica", lang, esEs) || "";
-            return await cotizarUSD(phone, pushName, valorFinal, esEfectivo ? "usd_efectivo" : esPrepago ? "usd_prepago" : "usd_clasica", lang, esEs) || "";
+            if (esEfectivo) return await cotizarUSD(phone, pushName, valorFinal, "usd_efectivo", lang, esEs) || "";
+            if (esPrepago) return await cotizarUSD(phone, pushName, valorFinal, "usd_prepago", lang, esEs) || "";
+            if (esClasica) return await cotizarUSD(phone, pushName, valorFinal, "usd_clasica", lang, esEs) || "";
+            if (/tarjeta|cartao/.test(txt)) return await preguntarTipoUSD(phone, pushName, valorFinal, lang, esEs) || "";
+            return await preguntarModalidadUSD(phone, pushName, valorFinal, lang, esEs) || "";
         }
 
         // FIX 6: BRL→CUP — NO disparar si el cliente está esperando comprobante
@@ -978,16 +1037,71 @@ async function manejarSaludo(phone, pushName, cliente, yaSaludado, lang, esEs, t
     await enviarSeguro(phone, m); return m;
 }
 
+async function obtenerOperacionActiva(phone) {
+    const ultima = await obtenerUltimaOperacion(phone);
+    return ultima && ["pendiente", "confirmada"].includes(String(ultima.status).toLowerCase()) ? ultima : null;
+}
+
+async function responderEstadoOperacion(phone, operacion, lang) {
+    const monto = Number(operacion?.monto);
+    const montoTxt = Number.isFinite(monto) && monto > 0 ? ` de R$${fmt(monto)}` : "";
+    const status = String(operacion?.status || "").toLowerCase();
+    let mensaje;
+    if (status === "pendiente") {
+        mensaje = pickL(
+            [`Tu operación${montoTxt} está registrada y pendiente de verificación ⏳ El equipo le está dando seguimiento. No inicies otro pago por ahora; si hace falta, Yordanys confirma el estado contigo.`,
+                `Veo tu operación${montoTxt} pendiente de verificación ⏳ Sigue en revisión del equipo. Espera la confirmación antes de realizar otro pago.`,
+                `La operación${montoTxt} continúa pendiente de verificación. El equipo la está revisando; no hace falta que vuelvas a pagar mientras confirmamos el estado.`],
+            [`Sua operação${montoTxt} está registrada e pendente de verificação ⏳ A equipe está acompanhando. Não inicie outro pagamento por enquanto; se precisar, o Yordanys confirma o estado para você.`,
+                `Vejo sua operação${montoTxt} pendente de verificação ⏳ A equipe continua revisando. Aguarde a confirmação antes de fazer outro pagamento.`,
+                `A operação${montoTxt} segue pendente de verificação. O time está conferindo; não precisa pagar novamente enquanto confirmamos o estado.`],
+            lang
+        );
+    } else if (status === "confirmada") {
+        mensaje = pickL(
+            [`El pago de tu operación${montoTxt} está confirmado ✅ La transferencia sigue en procesamiento. Te avisaremos cuando haya una actualización.`,
+                `Tu pago${montoTxt} ya fue confirmado ✅ El equipo continúa con la transferencia y te informará cuando cambie el estado.`],
+            [`O pagamento da sua operação${montoTxt} foi confirmado ✅ A transferência está em processamento. Avisaremos quando houver atualização.`,
+                `Seu pagamento${montoTxt} já foi confirmado ✅ A equipe continua com a transferência e avisa quando o estado mudar.`],
+            lang
+        );
+    } else if (status === "completada") {
+        mensaje = lang === "pt"
+            ? `Sua operação${montoTxt} foi concluída ✅`
+            : `Tu operación${montoTxt} se completó ✅`;
+    } else if (["expirada", "cancelada", "cancelada_por_operador", "rechazada"].includes(status)) {
+        const estadoVisible = ({ expirada: "Expirada", cancelada: "Cancelada", cancelada_por_operador: "Cancelada", rechazada: "Rechazada" })[status];
+        mensaje = lang === "pt"
+            ? `A última operação${montoTxt} consta como ${estadoVisible}. Se você já realizou um pagamento, fale com Yordanys para revisar antes de fazer outro.`
+            : `La última operación${montoTxt} figura como ${estadoVisible}. Si ya realizaste un pago, consulta con Yordanys antes de hacer otro.`;
+    } else {
+        mensaje = lang === "pt"
+            ? `A última operação${montoTxt} consta como ${status || "em acompanhamento"}. Yordanys pode confirmar os detalhes com você.`
+            : `La última operación${montoTxt} figura como ${status || "en seguimiento"}. Yordanys puede confirmarte los detalles.`;
+    }
+    await enviarSeguro(phone, mensaje);
+    return mensaje;
+}
+
+function seleccionarModalidadUSD(txt) {
+    const t = norm(txt).trim();
+    if (/^(1|efectivo|cash|dinheiro|em dinheiro)$/.test(t)) return "efectivo";
+    if (/^(2|tarjeta|cartao|para tarjeta|para cartao)$/.test(t)) return "tarjeta";
+    return null;
+}
+
+function seleccionarTipoTarjetaUSD(txt) {
+    const t = norm(txt).trim();
+    if (/^(1|clasica|classica|bpa|bandec|metropolitano)$/.test(t)) return "usd_clasica";
+    if (/^(2|prepago|pre pago|nauta|internacional)$/.test(t)) return "usd_prepago";
+    return null;
+}
+
 async function manejarImagen(phone, pushName, cliente, imageUrl, lang, esEs) {
     if (esPDF(imageUrl)) {
-        if (cliente?.estado === "aguardando_comprovante") {
-            const ref = cliente.fecha_pix || cliente.fecha_estado;
-            if (ref && Date.now() - new Date(ref).getTime() > DOS_HORAS) {
-                await limpiarSesion(phone);
-                await enviarSeguro(phone, "La sesión expiró ⚠️\n\nTu comprobante será revisado manualmente.");
-                return "";
-            }
-        }
+        // La cotización puede vencer, pero un comprobante recibido tarde es
+        // evidencia nueva y debe procesarse/revisarse. No borrar staging ni
+        // descartar el archivo por la edad del contexto conversacional.
         const datos = await detectarComprobantePDF(imageUrl);
         if (datos.valido || datos.tipo === "comprovante_pdf") await procesarComprobante(phone, pushName, cliente, datos, esEs);
         else {

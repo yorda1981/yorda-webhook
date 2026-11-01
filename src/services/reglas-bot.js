@@ -355,6 +355,13 @@ function esConsultaEstadoOperacion(txt) {
     return OBJETO_OPERACION_PROPIA.test(c) && SENAL_SEGUIMIENTO.test(c);
 }
 
+// Seguimiento natural sin posesivo explícito (“sigo esperando”, “continúo
+// en la espera”). El caller consulta primero el estado real de la operación.
+function esSeguimientoEntrega(txt) {
+    const c = canonizarIntencion(String(txt || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase());
+    return /\b(sigo esperando|continuo esperando|continuo en la espera|estoy esperando|sigo en espera|aun estoy esperando|todavia estoy esperando|ya esta lista|ya esta listo|sigue pendiente|continua pendiente)\b/.test(c);
+}
+
 // ── CONTEXTO DE PAGO ──
 
 // Pedido del PIX / de la clave para pagar, por CONCEPTO (verbo de pedido +
@@ -391,6 +398,18 @@ function tieneOperacionEnCurso(cliente, ahora = Date.now()) {
     const ts = ref ? new Date(ref).getTime() : NaN;
     if (!Number.isFinite(ts) || ahora - ts > VIGENCIA_COTIZACION_MS) return false;
     return fechaSaoPaulo(new Date(ts)) === fechaSaoPaulo(new Date(ahora));
+}
+
+// Expiración conversacional según el TTL financiero ya vigente (2 h). Solo
+// informa que el contexto es obsoleto; quien lo limpie debe comprobar antes
+// que no haya una operación real pendiente o confirmada.
+function contextoPagoConversacionalVencido(cliente, ahora = Date.now()) {
+    if (!ESTADOS_CON_OPERACION_EN_CURSO.includes(cliente?.estado)) return false;
+    const ref = cliente?.estado === "aguardando_comprovante"
+        ? (cliente?.fecha_pix || cliente?.fecha_estado || cliente?.fecha_cotizacion)
+        : (cliente?.fecha_cotizacion || cliente?.fecha_estado);
+    const ts = ref ? new Date(ref).getTime() : NaN;
+    return Number.isFinite(ts) && ahora - ts > VIGENCIA_COTIZACION_MS;
 }
 
 // Detecta respuestas (de la IA) que vuelven a preguntar el monto.
@@ -691,8 +710,10 @@ module.exports = {
     esMensajeDeNegocio,
     separarSaludo,
     esConsultaEstadoOperacion,
+    esSeguimientoEntrega,
     esPedidoDePix,
     tieneOperacionEnCurso,
+    contextoPagoConversacionalVencido,
     preguntaElMonto,
     yaAvisoEntregaReciente,
     CONTEXTO_CORTO_TTL_MS,

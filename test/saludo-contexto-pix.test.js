@@ -28,12 +28,14 @@ require.cache[zapiPath] = {
 
 let llamadasGPT = 0;
 let respuestaGPT = "IGNORAR";
+let imagenesDetectadas = 0;
+let pdfsDetectados = 0;
 const imagenFlowPath = require.resolve("../src/flows/imagen-flow");
 require.cache[imagenFlowPath] = {
     id: imagenFlowPath, filename: imagenFlowPath, loaded: true,
     exports: {
-        detectarImagenUnificada: async () => ({}),
-        detectarComprobantePDF: async () => ({}),
+        detectarImagenUnificada: async () => { imagenesDetectadas++; return {}; },
+        detectarComprobantePDF: async () => { pdfsDetectados++; return {}; },
         llamarAsistente: async () => { llamadasGPT++; return { texto: respuestaGPT, responseId: "r1" }; }
     }
 };
@@ -43,7 +45,7 @@ const assert = require("node:assert/strict");
 
 const pool = require("../db");
 const { procesarMensaje } = require("../src/services/openai");
-const { separarSaludo, esPedidoDePix, tieneOperacionEnCurso, preguntaElMonto } = require("../src/services/reglas-bot");
+const { separarSaludo, esPedidoDePix, tieneOperacionEnCurso, contextoPagoConversacionalVencido, esSeguimientoEntrega, preguntaElMonto } = require("../src/services/reglas-bot");
 
 const AHORA = new Date("2026-01-15T17:00:00.000Z").getTime(); // 14:00 en Brasil
 const TASAS = { brl_0: 90, brl_100: 170, brl_500: 175, brl_1000: 180, usd1: 5.6, mlc: 5.2 };
@@ -61,6 +63,13 @@ function mundo(t, { operaciones = [] } = {}) {
         if (/^SELECT \* FROM customers WHERE phone = \$1/.test(sql)) { const r = customers.get(params[0]); return { rows: r ? [{ ...r }] : [] }; }
         if (/INSERT INTO customers/.test(sql)) { customers.set(params[0], aplicar({ phone: params[0] }, params)); return { rows: [] }; }
         if (/UPDATE customers SET[\s\S]*nombre\s*=\s*COALESCE/.test(sql)) { customers.set(params[0], aplicar(customers.get(params[0]) || { phone: params[0] }, params)); return { rows: [] }; }
+        if (/UPDATE customers SET[\s\S]*current_quote_id\s*=\s*NULL/.test(sql)) {
+            const r = customers.get(params[0]);
+            if (r && !r.comprobante_pendiente && !r.comprobante_e2e && !r.comprobante_transaccion_id) Object.assign(r, { estado: null, current_quote_id: null, fecha_estado: null, fecha_pix: null,
+                ultimo_monto: null, tipo_favorito: null, ultima_pregunta: null, ultimas_opciones: null,
+                contexto_actualizado_at: null });
+            return { rows: [] };
+        }
         if (/UPDATE customers SET[\s\S]*ultima_pregunta\s*=\s*NULL/.test(sql)) {
             const r = customers.get(params[0]);
             if (r) Object.assign(r, { ultima_pregunta: null, ultimas_opciones: null, contexto_actualizado_at: null });
@@ -86,7 +95,7 @@ async function decir(phone, texto) {
 
 const PIDE_MONTO = /cu[aá]nto (quieres|deseas|vas a)|qu[eé] monto|quanto (voc[eê] )?(quer|vai|deseja)|dime el monto|me diz o valor/i;
 
-test.beforeEach(() => { enviados = []; llamadasGPT = 0; respuestaGPT = "IGNORAR"; });
+test.beforeEach(() => { enviados = []; llamadasGPT = 0; respuestaGPT = "IGNORAR"; imagenesDetectadas = 0; pdfsDetectados = 0; });
 
 // ── 1. SALUDO ──
 
@@ -304,10 +313,139 @@ test("VIGENCIA 4: una OPERACIÓN real pendiente (de ayer) no se pierde ni se tra
     w.customers.set(ph, { phone: ph, saludo_enviado: true, estado: null });
 
     const nueva = await decir(ph, "Quiero hacer un envío");
-    assert.deepEqual(nueva.msgs, ["Perfecto 😊\n\n¿Cuánto deseas enviar?"], "conversación nueva normal");
+    assert.match(nueva.msgs[0], /pendiente de verificación/i, "la operación real conserva prioridad y no reinicia el pago");
 
     const estado = await decir(ph, "cual es el estado de mi envio a Cuba");
     assert.match(estado.msgs[0], /R\$420/);
-    assert.match(estado.msgs[0], /Pendiente de verificar/, "la operación sigue pendiente con su estado normal");
+    assert.match(estado.msgs[0], /pendiente de verificación/i, "la operación sigue pendiente con su estado real");
+    assert.doesNotMatch(estado.msgs[0], /envíame el comprobante|te envío el PIX/i);
     assert.deepEqual(w.escriturasOperaciones, [], "nada modificó la tabla operations");
+});
+
+test("operación manual pendiente tiene prioridad sobre saludo y nueva cotización", async (t) => {
+    const ph = "5511900093015";
+    const w = mundo(t, { operaciones: [{ id: 78, phone: ph, monto: 250, status: "pendiente" }] });
+    w.customers.set(ph, { phone: ph, saludo_enviado: true, estado: null });
+    const { msgs } = await decir(ph, "Necesito enviar R$500");
+    assert.match(msgs[0], /pendiente de verificación/i);
+    assert.doesNotMatch(msgs[0], /¿cuánto deseas enviar|¿te envío el PIX/i);
+    assert.deepEqual(w.escriturasOperaciones, []);
+});
+
+test("una operación completada posterior no permite reabrir la cotización conversacional anterior", async (t) => {
+    const ph = "5511900093018";
+    const w = mundo(t, { operaciones: [{ id: 80, phone: ph, monto: 420, status: "completada",
+        created_at: new Date(AHORA - 2 * 60000).toISOString(), updated_at: new Date(AHORA - 60000).toISOString() }] });
+    w.customers.set(ph, { phone: ph, saludo_enviado: true, estado: "cotizacion_realizada", ultimo_monto: 420,
+        tipo_favorito: "brl_cup", fecha_cotizacion: new Date(AHORA - 3 * 60000).toISOString() });
+    const { msgs } = await decir(ph, "Hola");
+    assert.equal(w.customers.get(ph).estado, null);
+    assert.doesNotMatch(msgs[0], /R\$420|seguimos con el envío/i);
+});
+
+test("seguimiento de entrega consulta operación real; sin registro no vuelve a vender PIX", async (t) => {
+    const ph = "5511900093016";
+    mundo(t, { operaciones: [{ id: 79, phone: ph, monto: 250, status: "confirmada" }] });
+    const { msgs } = await decir(ph, "Continúo en la espera");
+    assert.match(msgs[0], /confirmado/i);
+    assert.match(msgs[0], /transferencia/i);
+    assert.doesNotMatch(msgs[0], /envía el PIX|¿te envío el PIX/i);
+
+    const sinOperacion = "5511900093017";
+    const r = await decir(sinOperacion, "¿Ya está lista?");
+    assert.match(r.msgs[0], /No encuentro una transferencia registrada|No veo una operación registrada/i);
+    assert.doesNotMatch(r.msgs[0], /¿Quieres hacer un envío/);
+});
+
+test("tras enviar comprobante, preguntar cuándo llegará consulta la operación y no vuelve a pedir PIX", async (t) => {
+    const ph = "5511900093020";
+    const w = mundo(t, { operaciones: [{ id: 90, phone: ph, monto: 420, cup: 71400, status: "confirmada" }] });
+    w.customers.set(ph, { phone: ph, saludo_enviado: true, estado: "aguardando_comprovante",
+        comprobante_pendiente: true, comprobante_e2e: "E123", ultimo_monto: 420 });
+    const { msgs } = await decir(ph, "Ya envié el comprobante, ¿cuándo llegará la transferencia?");
+    assert.match(msgs[0], /confirmad/i);
+    assert.doesNotMatch(msgs.join(" "), /te envío el PIX|envíame el comprobante|¿cuánto deseas enviar/i);
+    assert.equal(w.customers.get(ph).comprobante_pendiente, true);
+    assert.deepEqual(w.escriturasOperaciones, []);
+});
+
+test("'Ya envié el PIX' con operación real informa estado sin crear otro PIX", async (t) => {
+    const ph = "5511900093021";
+    const w = mundo(t, { operaciones: [{ id: 91, phone: ph, monto: 300, status: "pendiente" }] });
+    w.customers.set(ph, { phone: ph, saludo_enviado: true, estado: "aguardando_comprovante", ultimo_monto: 300 });
+    const { msgs } = await decir(ph, "Ya envié el PIX");
+    assert.match(msgs[0], /pendiente de verificación/i);
+    assert.doesNotMatch(msgs.join(" "), /te envío el PIX|envía el PIX|haz el PIX/i);
+    assert.deepEqual(w.escriturasOperaciones, []);
+});
+
+test("consulta de tasa actual después de una operación completada usa tasas actuales, no cotización vieja", async (t) => {
+    const ph = "5511900093022";
+    const w = mundo(t, { operaciones: [{ id: 92, phone: ph, monto: 300, status: "completada" }] });
+    w.customers.set(ph, { phone: ph, saludo_enviado: true, estado: null, ultimo_monto: 300,
+        fecha_cotizacion: new Date(AHORA - 3 * 24 * 3600 * 1000).toISOString() });
+    const { msgs } = await decir(ph, "¿Cuál es la tasa actual?");
+    assert.ok(msgs.length);
+    assert.doesNotMatch(msgs.join(" "), /R\$300|transferencia pendiente/i);
+    assert.deepEqual(w.escriturasOperaciones, []);
+});
+
+test("estado conversacional vencido se reconoce con el TTL existente de dos horas", () => {
+    const ahora = AHORA;
+    assert.equal(contextoPagoConversacionalVencido({ estado: "cotizacion_realizada", fecha_cotizacion: new Date(ahora - 2 * 3600 * 1000 - 1).toISOString() }, ahora), true);
+    assert.equal(contextoPagoConversacionalVencido({ estado: "aguardando_comprovante", fecha_pix: new Date(ahora - 30 * 60 * 1000).toISOString() }, ahora), false);
+    assert.equal(contextoPagoConversacionalVencido({ estado: "aguardando_comprovante" }, ahora), false);
+});
+
+test("seguimiento coloquial de entrega consulta el estado sin exigir posesivo", () => {
+    for (const text of ["Continúo en la espera", "¿Sigo esperando?", "¿Ya está lista?", "Sigue pendiente"]) assert.equal(esSeguimientoEntrega(text), true, text);
+});
+
+test("adjunto de comprobante con caption de saludo se procesa antes del saludo", async (t) => {
+    mundo(t);
+    await procesarMensaje("5511900093012", "Hola", "Cliente", "https://media.test/proof.jpg");
+    assert.equal(imagenesDetectadas, 1);
+    assert.equal(enviados.some(m => /bienvenido|buenos d[ií]as|buenas tardes/i.test(m.msg)), false);
+});
+
+test("adjunto sin caption no se descarta por falta de texto", async (t) => {
+    mundo(t);
+    await procesarMensaje("5511900093013", "", "Cliente", "https://media.test/proof.jpg");
+    assert.equal(imagenesDetectadas, 1);
+});
+
+test("PDF recibido después del TTL llega a revisión sin borrar estado ni comprobante", async (t) => {
+    const ph = "5511900093014";
+    const w = mundo(t);
+    w.customers.set(ph, { phone: ph, estado: "aguardando_comprovante", ultimo_monto: 420,
+        fecha_pix: new Date(AHORA - 3 * 3600 * 1000).toISOString(), comprobante_pendiente: false });
+    await procesarMensaje(ph, "", "Cliente", "https://media.test/proof.pdf");
+    assert.equal(pdfsDetectados, 1);
+    assert.equal(w.customers.get(ph).estado, "aguardando_comprovante");
+    assert.equal(w.customers.get(ph).ultimo_monto, 420);
+});
+
+test("operación antigua solo limpia el contexto de customers; no toca la operación financiera", async (t) => {
+    const ph = "5511900093010";
+    const w = mundo(t);
+    w.customers.set(ph, { phone: ph, estado: "aguardando_comprovante", ultimo_monto: 420,
+        tipo_favorito: "brl_cup", tarjeta_frecuente: "1111222233334444", fecha_pix: new Date(AHORA - 3 * 3600 * 1000).toISOString(),
+        comprobante_pendiente: false });
+    const { msgs } = await decir(ph, "Quiero enviar R$500");
+    assert.equal(w.customers.get(ph).estado, "cotizacion_realizada");
+    assert.equal(w.customers.get(ph).ultimo_monto, 500);
+    assert.equal(w.customers.get(ph).tarjeta_frecuente, "1111222233334444", "la tarjeta guardada no se borra al vencer el contexto");
+    assert.deepEqual(w.escriturasOperaciones, []);
+    assert.ok(msgs.length);
+});
+
+test("comprobante en staging impide limpiar automáticamente la sesión vencida", async (t) => {
+    const ph = "5511900093011";
+    const w = mundo(t);
+    w.customers.set(ph, { phone: ph, estado: "aguardando_comprovante", ultimo_monto: 420,
+        fecha_pix: new Date(AHORA - 3 * 3600 * 1000).toISOString(), comprobante_pendiente: true,
+        comprobante_e2e: "E12345678202601011000ABCDEFGHIJK" });
+    await decir(ph, "Continúo en la espera");
+    assert.equal(w.customers.get(ph).comprobante_pendiente, true);
+    assert.equal(w.customers.get(ph).comprobante_e2e, "E12345678202601011000ABCDEFGHIJK");
 });

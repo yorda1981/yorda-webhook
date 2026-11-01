@@ -259,7 +259,7 @@ test("CONTEXTO: la misma respuesta 'la primera' con el contexto VENCIDO (31 min)
     });
     await procesarMensaje("5511900000011", "la primera", "Cliente");
     const row = mundo.customers.get("5511900000011");
-    assert.equal(row.tarjeta_frecuente, undefined, "un contexto vencido nunca debe resolver la selección");
+    assert.equal(row.tarjeta_frecuente, null, "un contexto vencido nunca debe resolver la selección");
 });
 
 test("CONTEXTO: expirado -> nunca borra hechos financieros (ultimo_monto/estado siguen intactos)", async (t) => {
@@ -297,7 +297,19 @@ test("NUEVA INTENCIÓN: pedir USD explícito no arrastra tarjeta/comprobante_pen
     await procesarMensaje("5511900000021", "quiero enviar 100 dolares", "Cliente");
     const row = mundo.customers.get("5511900000021");
     assert.equal(row.tarjeta_frecuente, null, "la tarjeta vieja no debe seguir pegada a la operación USD nueva");
-    assert.equal(row.tipo_favorito, "usd_clasica");
+    assert.equal(row.tipo_favorito, "usd_pendiente_modalidad", "no asumir tarjeta clásica si el cliente no indicó modalidad");
+});
+
+test("USD conserva el importe y pregunta efectivo/tarjeta; respuesta tarjeta pregunta tipo sin repetir monto", async (t) => {
+    const mundo = mockMundoConversacional(t);
+    const phone = "5511900000024";
+    const primera = await procesarMensaje(phone, "Necesito 100 dólares", "Cliente");
+    assert.match(primera, /efectivo o para una tarjeta/i);
+    assert.equal(mundo.customers.get(phone).ultimo_monto, 100);
+    const segunda = await procesarMensaje(phone, "Tarjeta", "Cliente");
+    assert.match(segunda, /Clásica o Prepago/i);
+    assert.equal(mundo.customers.get(phone).ultimo_monto, 100);
+    assert.equal(mundo.customers.get(phone).tipo_favorito, "usd_pendiente_tipo");
 });
 
 test("NUEVA INTENCIÓN: 'olvida eso' resetea el contexto conversacional sin tocar operations", async (t) => {
@@ -574,7 +586,7 @@ test("RECUPERACIÓN TRAS PAUSA HUMANA: una pregunta corta de ANTES de la pausa n
     });
     await procesarMensaje("5511900010016", "la primera", "Cliente");
     const row = mundo.customers.get("5511900010016");
-    assert.equal(row.tarjeta_frecuente, undefined, "el contexto es de antes de la intervención humana -- no se reutiliza a ciegas");
+    assert.equal(row.tarjeta_frecuente, null, "el contexto es de antes de la intervención humana -- no se reutiliza a ciegas");
 });
 
 test("RECUPERACIÓN TRAS PAUSA HUMANA: una pregunta hecha DESPUÉS de que terminó la pausa sí se puede usar", async (t) => {

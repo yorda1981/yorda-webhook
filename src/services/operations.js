@@ -299,27 +299,11 @@ async function cancelarOperacion(id, motivo) {
     return { operacion, notificado };
 }
 
-// =====================
-// CADUCIDAD — operaciones "pendiente" sin verificar en 24h
-// =====================
-
+// Compatibilidad con callers antiguos. Una operación creada a partir de un
+// comprobante es un hecho financiero y no debe cambiar de estado por TTL.
+// La expiración de 2 h solo se aplica al contexto conversacional en customers.
 async function expirarOperacionesPendientes() {
-    try {
-        const result = await pool.query(`
-            UPDATE operations
-            SET status = 'expirada', updated_at = NOW()
-            WHERE status = 'pendiente'
-              AND created_at < NOW() - INTERVAL '24 hours'
-            RETURNING id, phone, monto
-        `);
-        if (result.rows.length > 0) {
-            console.log(`⏰ ${result.rows.length} operación(es) expiradas por pasar 24h sin verificar`);
-        }
-        return result.rows;
-    } catch (err) {
-        console.error("❌ Error expirando operaciones:", err.message);
-        return [];
-    }
+    return [];
 }
 
 module.exports = {

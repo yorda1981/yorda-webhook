@@ -189,6 +189,65 @@ async function limpiarContextoCorto(phone) {
     }
 }
 
+// Limpia únicamente una cotización/espera de PIX conversacional vencida.
+// La operación financiera vive en `operations` y nunca se modifica aquí.
+// Tampoco se borran tarjeta guardada ni comprobantes (incluido staging): si
+// llegó evidencia de pago, debe sobrevivir para revisión/reintento manual.
+async function limpiarContextoPagoExpirado(phone) {
+    if (!phone) return false;
+    try {
+        await pool.query(`
+            UPDATE customers SET
+                estado = NULL,
+                current_quote_id = NULL,
+                fecha_estado = NULL,
+                fecha_pix = NULL,
+                ultimo_monto = NULL,
+                tipo_favorito = NULL,
+                ultima_pregunta = NULL,
+                ultimas_opciones = NULL,
+                contexto_actualizado_at = NULL,
+                updated_at = NOW()
+            WHERE phone = $1
+              AND estado = ANY($2::text[])
+              AND COALESCE(comprobante_pendiente, false) = false
+              AND comprobante_e2e IS NULL
+              AND comprobante_transaccion_id IS NULL
+        `, [phone, ["cotizacion_realizada", "aguardando_comprovante"]]);
+        return true;
+    } catch (err) {
+        console.error("❌ limpiarContextoPagoExpirado:", err.message);
+        return false;
+    }
+}
+
+// Retira solo el estado de un menú conversacional vencido. No toca tarjeta,
+// comprobantes, operaciones ni datos persistentes del cliente.
+async function limpiarMenuConversacionalObsoleto(phone) {
+    if (!phone) return false;
+    try {
+        await pool.query(`
+            UPDATE customers SET
+                estado = NULL,
+                fecha_estado = NULL,
+                ultimo_monto = NULL,
+                tipo_favorito = NULL,
+                ultima_pregunta = NULL,
+                ultimas_opciones = NULL,
+                contexto_actualizado_at = NULL,
+                updated_at = NOW()
+            WHERE phone = $1 AND (
+                (estado = 'seleccionando_tarjeta' AND ultima_pregunta = 'seleccion_tarjeta') OR
+                (estado = 'seleccionando_recarga' AND ultima_pregunta = 'seleccion_recarga')
+            )
+        `, [phone]);
+        return true;
+    } catch (err) {
+        console.error("❌ limpiarMenuConversacionalObsoleto:", err.message);
+        return false;
+    }
+}
+
 // Limpia SOLO la tarjeta guardada (frecuente + titular) más el contexto
 // corto -- se usa cuando el cliente RECHAZA explícitamente la tarjeta
 // sugerida ("esa tarjeta no"/"otra tarjeta", ver esRechazoTarjeta en
@@ -293,6 +352,8 @@ module.exports = {
     guardarCliente,
     limpiarSesionDB,
     limpiarContextoCorto,
+    limpiarContextoPagoExpirado,
+    limpiarMenuConversacionalObsoleto,
     limpiarTarjetaFrecuente,
     limpiarComprobantePendiente,
     obtenerCliente,

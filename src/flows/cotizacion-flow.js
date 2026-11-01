@@ -114,6 +114,21 @@ async function preguntarTipoUSD(phone, pushName, valorFinal, lang, esEs) {
     return msgTipo;
 }
 
+// Primer paso de modalidad USD: efectivo o tarjeta. Se conserva el importe
+// para que el cliente no tenga que repetirlo en el mensaje siguiente.
+async function preguntarModalidadUSD(phone, pushName, valorFinal, lang, esEs) {
+    const msg = esEs
+        ? `Claro 😊 ¿Los ${valorFinal} USD los necesitas en efectivo o para una tarjeta?\n\n1️⃣ Efectivo\n2️⃣ Tarjeta`
+        : `Claro 😊 Você precisa dos ${valorFinal} USD em dinheiro ou para um cartão?\n\n1️⃣ Dinheiro\n2️⃣ Cartão`;
+    await guardarCliente({
+        phone, nombre: pushName, monto: valorFinal, tipo: "usd_pendiente_modalidad",
+        estado: "cotizacion_realizada", fechaEstado: new Date().toISOString(),
+        fechaCotizacion: new Date().toISOString()
+    });
+    await enviarSeguro(phone, msg);
+    return msg;
+}
+
 // ─────────────────────────────────────────
 // COTIZACIÓN MLC → CUP
 // ─────────────────────────────────────────
@@ -278,6 +293,7 @@ module.exports = {
     cotizarBRL,
     cotizarUSD,
     preguntarTipoUSD,
+    preguntarModalidadUSD,
     cotizarMLC,
     tasaMLC,
     detectarCUPInverso,
