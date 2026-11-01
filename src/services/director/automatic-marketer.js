@@ -268,8 +268,16 @@ async function runDaily({ db = pool, now = new Date(), marketerConfig = null, ma
     const validationErrors = [];
     const rawHook = String(data?.gancho || "").trim();
     let hook = rawHook;
+    let openingFallback = false;
     try { hook = assertSafeHook(rawHook); }
-    catch (error) { validationErrors.push(error.message); hook = "¿Quieres conocer mejor este proceso?"; }
+    catch (_) {
+        // A faulty opening is replaceable because the body is assembled from
+        // verified facts and the IA cannot author commercial claims. Validate
+        // the fallback itself, then run the normal validations on the complete
+        // resulting content below.
+        hook = assertSafeHook("¿Quieres conocer mejor este proceso?");
+        openingFallback = true;
+    }
     const requestedIds = Array.isArray(data?.hechosUsados) ? data.hechosUsados : [];
     const validIds = [...new Set(requestedIds)].filter(id => facts.some(fact => fact.id === id)).slice(0, 3);
     if (!validIds.length) validationErrors.push("La IA no seleccionó hechos comerciales verificables.");
@@ -332,7 +340,7 @@ async function runDaily({ db = pool, now = new Date(), marketerConfig = null, ma
 
     await recordEvent(db, asset.id, "CONTENT_MARKETER_VALIDATED", {
         policyVersion: POLICY_VERSION, category: objective.category, objective: objective.reason,
-        factsUsed: proposal.factIds, revisionId: asset.revisionId,
+        factsUsed: proposal.factIds, revisionId: asset.revisionId, openingFallback,
         bodyHash: createHash("sha256").update(asset.cuerpo).digest("hex"),
         destinationId: destination.destinationId, timeZone: TIME_ZONE
     });

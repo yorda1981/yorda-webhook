@@ -81,6 +81,46 @@ test("una categoría permitida genera, valida y programa una sola publicación f
     assert.equal(queries.some(x => x.params.includes("CONTENT_MARKETER_VALIDATED")), true);
 });
 
+test("una apertura inválida usa fallback seguro y el contenido resultante aún pasa validación determinista", async () => {
+    const now = new Date("2026-10-23T10:00:00Z");
+    const events = [];
+    let draft;
+    const run = async (sql, params = []) => {
+        const q = String(sql).replace(/\s+/g, " ").trim();
+        if (q.startsWith("SELECT EXISTS")) return { rows: [{ exists: false }] };
+        if (/SELECT id,estado FROM content_items/.test(q)) return { rows: [] };
+        if (/SELECT categoria, MAX\(creado_at\)/.test(q)) return { rows: [] };
+        if (/SELECT cr\.cuerpo FROM content_items/.test(q)) return { rows: [] };
+        if (q.startsWith("INSERT INTO content_events")) { events.push(JSON.parse(params[3] || "{}")); return { rows: [] }; }
+        if (/SELECT marketer_enabled,marketer_categories/.test(q)) return { rows: [{ marketer_enabled: true, marketer_categories: ["captacion"] }] };
+        return { rows: [] };
+    };
+    const clientQuery = async (sql) => {
+        const q = String(sql).replace(/\s+/g, " ").trim();
+        if (/SELECT marketer_enabled,marketer_categories/.test(q)) return { rows: [{ marketer_enabled: true, marketer_categories: ["captacion"] }] };
+        return { rows: [] };
+    };
+    const db = { query: run, connect: async () => ({ query: clientQuery, release() {} }) };
+    const library = {
+        createDirectorDraft: async input => { draft = input; return { id: 9 }; },
+        getContentAsset: async () => ({ id: 9, estado: "BORRADOR", cuerpo: draft.cuerpo, grupo: draft.grupo,
+            categoria: draft.categoria, origenSistema: draft.origenSistema, revisionId: 2, fuentes: draft.fuentes }),
+        resolveDraft: async () => ({ changed: true })
+    };
+    const result = await marketer.runDaily({ db, now,
+        marketerConfig: { enabled: true, categories: ["captacion"], time: "18:00" } }, {
+        destinations: { getDefaultDestination: async () => ({ destinationId: 2, type: "WHATSAPP_GROUP", active: true, validatedAt: now }) },
+        funnel: { obtenerResumen: async () => ({ sin_avance_observable_24h: 0 }) },
+        llm: { completeJson: async () => ({ data: { gancho: "¿Sabías que garantizamos la mejor tasa hoy?", hechosUsados: ["quote_choices"], aporte: "Permite conocer el resultado antes de decidir." } }) },
+        library,
+        scheduler: { schedulePublication: async () => ({ schedule: { scheduleId: 8 } }) }
+    });
+    assert.equal(result.status, "PROGRAMADO");
+    assert.match(draft.cuerpo, /¿Quieres conocer mejor este proceso\?/);
+    assert.doesNotMatch(draft.cuerpo, /garantizamos|mejor tasa hoy/i);
+    assert.equal(events.some(event => event.openingFallback === true), true);
+});
+
 test("duplicados diarios y contenido similar se excluyen sin publicar", async () => {
     const now = new Date("2026-10-23T10:00:00Z");
     let aiCalls = 0;
@@ -101,6 +141,9 @@ test("migración deja el control apagado y el panel ofrece controles integrados"
     const panel = fs.readFileSync(path.join(__dirname, "..", "public/content-operations.html"), "utf8");
     assert.match(panel, /automatic-marketer\/settings/);
     assert.match(panel, /value="opciones-recepcion"/);
+    assert.match(panel, /id="marketerAlert" role="alert"/);
+    assert.match(panel, /function hasCreditExhaustion/);
+    assert.match(panel, /no hay créditos disponibles/);
 });
 
 test("el contador de publicaciones aceptadas conserva la clave camelCase que consume el panel", () => {
